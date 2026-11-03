@@ -39,9 +39,8 @@ jobs:
         run: |
           rustup show active-toolchain
           rustup target add '${{ matrix.target }}'
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/rust-cache
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
           key: sqlite3mc-${{ matrix.target }}
       - name: Provide circuit artifacts
         uses: ./.github/actions/circuits
@@ -78,9 +77,8 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - name: Install repository Rust toolchain
         run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/rust-cache
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
           key: sqlite3mc-wasm
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:

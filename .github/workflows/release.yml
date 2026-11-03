@@ -176,9 +176,7 @@ jobs:
         if: steps.registry.outputs.publish == 'true'
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/rust-cache
         if: steps.registry.outputs.publish == 'true'
       - name: Dry-run crates.io publication
         if: steps.registry.outputs.publish == 'true'
@@ -307,9 +305,7 @@ jobs:
         with:
           toolchain: stable
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/rust-cache
 
       - name: Verify tag matches crate version
         run: |
@@ -402,9 +398,8 @@ jobs:
         if: ${{ !matrix.cross }}
         run: rustup target add ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: ./.github/actions/rust-cache
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
           key: ${{ matrix.target }}
 
       - name: Prepare circuits inputs (avoid in-build git fetch / keygen)
@@ -511,9 +506,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: ./.github/actions/rust-cache
       - uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
         id: auth
       - run: cargo publish -p stellar-private-payments --locked
