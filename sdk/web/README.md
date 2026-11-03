@@ -79,8 +79,7 @@ the generated types: [`js/types/api-types.d.ts`](./js/types/api-types.d.ts)
 
 When the SDK refuses a deposit or a spend before proving, the call rejects with
 an `Error` that carries a `code` and the amounts the refusal names (`PoolRefusal`
-in `api-types.d.ts`). Amounts are decimal strings of base units, which `BigInt`
-reads without loss.
+in `api-types.d.ts`). Amounts are `bigint` base units.
 
 | `code` | Amount properties |
 | --- | --- |

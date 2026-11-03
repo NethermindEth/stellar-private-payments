@@ -8,7 +8,7 @@ mod pool;
 
 use std::{rc::Rc, str::FromStr};
 
-use js_sys::Reflect;
+use js_sys::{BigInt, Reflect};
 use stellar_private_payments::{
     Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error,
     chain::{RpcClient, StateFetcher},
@@ -50,7 +50,7 @@ pub(crate) fn pool_err(error: Error) -> JsError {
                 let value = JsValue::from(js_error.clone());
                 let _ = Reflect::set(&value, &"code".into(), &code.into());
                 for (key, amount) in &amounts {
-                    let _ = Reflect::set(&value, &(*key).into(), &amount.as_str().into());
+                    let _ = Reflect::set(&value, &(*key).into(), amount);
                 }
             }
             js_error
@@ -59,13 +59,13 @@ pub(crate) fn pool_err(error: Error) -> JsError {
 }
 
 /// Returns the code a client reads from an SDK refusal, with the amounts it
-/// names as decimal strings of base units.
-fn refusal(cause: &Error) -> Option<(&'static str, Vec<(&'static str, String)>)> {
+/// names in base units.
+fn refusal(cause: &Error) -> Option<(&'static str, Vec<(&'static str, BigInt)>)> {
     let refusal = match cause {
         Error::DepositsPaused { .. } => ("DEPOSITS_PAUSED", Vec::new()),
         Error::DepositBelowMinimum { minimum } => (
             "DEPOSIT_BELOW_MINIMUM",
-            vec![("minimum", minimum.to_string())],
+            vec![("minimum", u128::from(*minimum).into())],
         ),
         Error::DepositAboveMaximum {
             maximum,
@@ -73,15 +73,16 @@ fn refusal(cause: &Error) -> Option<(&'static str, Vec<(&'static str, String)>)>
         } => (
             "DEPOSIT_ABOVE_MAXIMUM",
             vec![
-                ("maximum", maximum.to_string()),
-                ("largestDeposit", largest_deposit.to_string()),
+                ("maximum", i128::from(*maximum).into()),
+                ("largestDeposit", u128::from(*largest_deposit).into()),
             ],
         ),
         _ => match cause.plan_error()? {
             PlanError::NoSpendableNotes => ("NO_SPENDABLE_NOTES", Vec::new()),
-            PlanError::NoCombination { max_spend } => {
-                ("NO_COMBINATION", vec![("maxSpend", max_spend.to_string())])
-            }
+            PlanError::NoCombination { max_spend } => (
+                "NO_COMBINATION",
+                vec![("maxSpend", u128::from(*max_spend).into())],
+            ),
             _ => return None,
         },
     };
@@ -373,6 +374,11 @@ mod tests {
             .and_then(|value| value.as_string())
     }
 
+    fn amount(error: &JsError, key: &str) -> Option<i128> {
+        let value = Reflect::get(&JsValue::from(error.clone()), &JsValue::from_str(key)).ok()?;
+        i128::try_from(value).ok()
+    }
+
     fn completed() -> Vec<TransactionResult> {
         vec![TransactionResult {
             tx_hash: "abc".into(),
@@ -396,7 +402,7 @@ mod tests {
             property(&error, "code").as_deref(),
             Some("DEPOSIT_BELOW_MINIMUM")
         );
-        assert_eq!(property(&error, "minimum").as_deref(), Some("10000"));
+        assert_eq!(amount(&error, "minimum"), Some(10_000));
     }
 
     #[wasm_bindgen_test]
@@ -409,11 +415,8 @@ mod tests {
             property(&error, "code").as_deref(),
             Some("DEPOSIT_ABOVE_MAXIMUM")
         );
-        assert_eq!(property(&error, "maximum").as_deref(), Some("1000000000"));
-        assert_eq!(
-            property(&error, "largestDeposit").as_deref(),
-            Some("999000000")
-        );
+        assert_eq!(amount(&error, "maximum"), Some(1_000_000_000));
+        assert_eq!(amount(&error, "largestDeposit"), Some(999_000_000));
         assert_eq!(
             property(&error, "message").as_deref(),
             Some(
@@ -439,7 +442,7 @@ mod tests {
         ] {
             let error = pool_err(error);
             assert_eq!(property(&error, "code").as_deref(), Some("NO_COMBINATION"));
-            assert_eq!(property(&error, "maxSpend").as_deref(), Some("99000"));
+            assert_eq!(amount(&error, "maxSpend"), Some(99_000));
         }
     }
 
@@ -454,7 +457,10 @@ mod tests {
                 property(&error, "code").as_deref(),
                 Some("NO_SPENDABLE_NOTES")
             );
-            assert_eq!(property(&error, "maxSpend"), None);
+            assert_eq!(
+                Reflect::has(&error.into(), &"maxSpend".into()).ok(),
+                Some(false)
+            );
         }
     }
 

@@ -300,8 +300,8 @@ impl PoolInfo {
     }
 
     #[wasm_bindgen(getter, js_name = maximumDepositAmount)]
-    pub fn maximum_deposit_amount(&self) -> String {
-        self.inner.maximum_deposit_amount.to_string()
+    pub fn maximum_deposit_amount(&self) -> i128 {
+        i128::from(self.inner.maximum_deposit_amount)
     }
 
     #[wasm_bindgen(getter, js_name = depositsPaused)]
@@ -310,13 +310,13 @@ impl PoolInfo {
     }
 
     #[wasm_bindgen(getter)]
-    pub fn fee(&self) -> String {
-        self.inner.fee.to_string()
+    pub fn fee(&self) -> u128 {
+        u128::from(self.inner.fee)
     }
 
     #[wasm_bindgen(getter, js_name = minimumDepositAmount)]
-    pub fn minimum_deposit_amount(&self) -> String {
-        self.inner.minimum_deposit_amount.to_string()
+    pub fn minimum_deposit_amount(&self) -> u128 {
+        u128::from(self.inner.minimum_deposit_amount)
     }
 
     #[wasm_bindgen(getter, js_name = merkleRoot)]
