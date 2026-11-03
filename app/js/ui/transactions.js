@@ -296,8 +296,7 @@ async function updatePoolFeeLines() {
     }
     if (!info || selectedPool() !== pool) return;
     const format = (amount) => Utils.formatPoolAmount(amount, pool.poolContractId);
-    const fee = BigInt(info.fee);
-    const minimum = BigInt(info.minimumDepositAmount);
+    const { fee, minimumDepositAmount: minimum } = info;
     // A pool fee or smallest deposit of zero goes unsaid.
     if (el) el.textContent = [
         fee ? `A ${format(fee)} pool fee is added on top.` : '',
@@ -706,7 +705,7 @@ export const Transactions = {
                     Toast.show('A selected note is not one of your notes for this token. Pick each one from your notes.', 'error', 7000, { origin: 'advanced' });
                     return;
                 }
-                const inputs = inputNotes.reduce((sum, note) => sum + BigInt(note.amount), 0n);
+                const inputs = inputNotes.reduce((sum, note) => sum + note.amount, 0n);
                 const outputs = amounts.reduce((sum, amount) => sum + amount, 0n);
                 terms = await refusalTerms(pool, decimals);
                 const unbalanced = advancedGapMessage(

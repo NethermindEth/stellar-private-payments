@@ -22,7 +22,7 @@ export function poolErrorMessage(error, { fee, format, feeIncluded = false }) {
     case 'NO_SPENDABLE_NOTES':
       return NOTHING_YET;
     case 'NO_COMBINATION':
-      if (BigInt(error.maxSpend) === 0n) {
+      if (error.maxSpend === 0n) {
         return fee
           ? `You have nothing to send once the ${format(fee)} pool fee is paid. If you just deposited, try again in a few seconds; otherwise, deposit more first.`
           : NOTHING_YET;
