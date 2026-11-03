@@ -2,9 +2,12 @@
 //! balance after each step, plus the ways a withdrawal can be rejected.
 
 use anyhow::Result;
-use stellar_private_payments::{Error, types::NoteAmount};
+use stellar_private_payments::{
+    Error,
+    types::{AssetDescriptor, NoteAmount},
+};
 
-use super::support::{FEE_STROOPS, assert_contract_error, deploy_default, session};
+use super::support::{FEE_STROOPS, assert_contract_error, deploy_default, note_states, session};
 
 const DEPOSIT_STROOPS: u128 = 10_000_000; // 1 XLM
 
@@ -52,6 +55,84 @@ async fn withdraw_multi_tx() -> Result<()> {
 
     let balance = pool.balance().await?;
     assert_eq!(balance, NoteAmount::ZERO);
+
+    Ok(())
+}
+
+/// Declining the wallet prompt leaves the note unspent, so the same
+/// withdrawal retried right after lands (#428).
+#[tokio::test]
+async fn withdraw_retry_after_wallet_rejection() -> Result<()> {
+    let session = session(deploy_default().await?).await?;
+    let pool = session.pool()?;
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    let withdraw_amount = NoteAmount::from(DEPOSIT_STROOPS - FEE_STROOPS);
+
+    pool.deposit(deposit_amount).await?;
+    let notes = note_states(&pool).await?;
+    let funded_balance = session.account.balance(&AssetDescriptor::Native).await?;
+
+    session.reject_next_transaction();
+    let rejected = pool
+        .withdraw(withdraw_amount, session.wallet.address())
+        .await;
+    assert!(
+        matches!(rejected, Err(Error::UserRejected(_))),
+        "the withdrawal must fail with the wallet's rejection: {rejected:?}"
+    );
+    assert_eq!(note_states(&pool).await?, notes);
+    assert_eq!(pool.balance().await?, deposit_amount);
+    assert_eq!(
+        session.account.balance(&AssetDescriptor::Native).await?,
+        funded_balance
+    );
+
+    pool.withdraw(withdraw_amount, session.wallet.address())
+        .await?;
+
+    assert_eq!(pool.balance().await?, NoteAmount::ZERO);
+    assert!(session.account.balance(&AssetDescriptor::Native).await? > funded_balance);
+
+    Ok(())
+}
+
+/// Declining the second transaction of a two-step withdrawal keeps the
+/// confirmed first step, and a fresh withdrawal planned from the notes that
+/// step left lands (#428).
+#[tokio::test]
+async fn withdraw_multi_tx_retry_after_second_step_rejection() -> Result<()> {
+    let session = session(deploy_default().await?).await?;
+    let pool = session.pool()?;
+
+    let deposit_amount = NoteAmount::from(DEPOSIT_STROOPS);
+    pool.deposit(deposit_amount).await?;
+    pool.deposit(deposit_amount).await?;
+    pool.deposit(deposit_amount).await?;
+    // Three notes take two steps, and each step pays the fee.
+    let total = NoteAmount::from(3 * DEPOSIT_STROOPS - 2 * FEE_STROOPS);
+
+    session.reject_transaction(2);
+    let rejected = pool.withdraw(total, session.wallet.address()).await;
+    let Err(Error::PlanExecution(stopped)) = &rejected else {
+        panic!("the withdrawal must stop after its first step: {rejected:?}");
+    };
+    assert_eq!(stopped.completed.len(), 1);
+    assert!(
+        matches!(stopped.cause(), Error::UserRejected(_)),
+        "the second step must fail with the wallet's rejection: {rejected:?}"
+    );
+    // The first step merged two notes, so the balance is still in the pool,
+    // less that step's fee.
+    assert_eq!(
+        pool.balance().await?,
+        NoteAmount::from(3 * DEPOSIT_STROOPS - FEE_STROOPS)
+    );
+    assert_eq!(pool.spendable_notes().await?.len(), 2);
+
+    let results = pool.withdraw(total, session.wallet.address()).await?;
+    assert_eq!(results.len(), 1);
+
+    assert_eq!(pool.balance().await?, NoteAmount::ZERO);
 
     Ok(())
 }
