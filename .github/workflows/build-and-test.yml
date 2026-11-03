@@ -50,7 +50,7 @@ jobs:
             make circuits
           fi
       - name: Build examples
-        run: cargo build --examples -p stellar-private-payments
+        run: cargo build --workspace --examples
       - name: Build
         run: cargo test --workspace --no-run
       - name: Run tests
