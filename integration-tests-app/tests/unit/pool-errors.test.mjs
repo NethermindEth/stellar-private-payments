@@ -35,10 +35,10 @@ test('a deposit that already holds the fee is bounded by the maximum and the min
   );
 });
 
-test('a balance that cannot cover the fee says nothing can be sent', () => {
+test('notes the fee would use up leave nothing to send', () => {
   assert.equal(
     poolErrorMessage(refusal('NO_COMBINATION', { maxSpend: 0n }), terms),
-    'You have nothing to send once the 0.0001 XLM pool fee is paid. If you just deposited, try again in a few seconds; otherwise, deposit more first.',
+    'You have nothing to send. Each transaction spends at most two of your notes, and its 0.0001 XLM pool fee would use them up. If you just deposited, try again in a few seconds; otherwise, deposit more first.',
   );
 });
 
