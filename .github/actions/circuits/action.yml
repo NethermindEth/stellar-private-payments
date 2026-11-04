@@ -1,7 +1,7 @@
 name: Circuit artifacts
 description: >
   Use the released circuits when the sources match the release, with the
-  committed keys in place of a local trusted setup. Otherwise build them.
+  committed keys instead of generating new ones on the runner. Otherwise, build them.
 
 runs:
   using: composite
@@ -13,8 +13,17 @@ runs:
       run: |
         set -eu
         tag="circuits-v$(jq -r .version deployments/testnet/circuits.json)"
+        # Only these feed the production R1CS; Rust code and test circuits don't.
+        inputs=(
+          circuits/circom.lock
+          circuits/circomlib.lock
+          ':(glob)circuits/src/**/*.circom'
+          ':(exclude,glob)circuits/**/test/**'
+          tools/circuit-compiler
+          deployments/testnet/circuits.json
+        )
         if git fetch --depth=1 origin "refs/tags/$tag:refs/tags/$tag" &&
-          git diff --quiet "$tag" HEAD -- circuits tools/circuit-compiler deployments/testnet/circuits.json; then
+          git diff --quiet "$tag" HEAD -- "${inputs[@]}"; then
           echo "Using $tag"
           gh release download "$tag" -p 'circuits.tar.gz*' -D "$RUNNER_TEMP"
           (cd "$RUNNER_TEMP" && sha256sum -c circuits.tar.gz.sha256)
