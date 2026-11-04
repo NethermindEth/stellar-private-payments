@@ -1,6 +1,9 @@
 import init, {
   Client as WasmClient,
   AllowlistOperator,
+  BlocklistOperator,
+  Envelopes,
+  PoolAdmin,
   DisclosureRequest,
   readTokenDecimals,
   parseTokenAmount as wasmParseTokenAmount,
@@ -236,7 +239,7 @@ export const Storage = { open: openStorage, openPlaintext: openPlaintextStorage 
 export const Client = {
   new: newClient,
 };
-export { AllowlistOperator, DisclosureRequest, readTokenDecimals, parseTokenAmount, ProverBridge, bootnodeRequired, verifySelectiveDisclosure };
+export { AllowlistOperator, BlocklistOperator, Envelopes, PoolAdmin, DisclosureRequest, readTokenDecimals, parseTokenAmount, ProverBridge, bootnodeRequired, verifySelectiveDisclosure };
 export {
   configureTelemetry,
   set_log_level,

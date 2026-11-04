@@ -18,8 +18,9 @@ pub mod workers;
 
 pub use bootnode::bootnode_required_js as bootnode_required;
 pub use client::{
-    Account, AdminState, AllowlistOperator, BlocklistOperator, Client, GvkAudit, GvkAuthority,
-    PoolAdmin, PrivatePool, verify_selective_disclosure_standalone,
+    Account, AdminState, AllowlistOperator, BlocklistOperator, CallStatus, Client, Envelopes,
+    GvkAudit, GvkAuthority, OperatorCall, PoolAdmin, PrivatePool, SignerWeight, SigningStatus,
+    UnsignedOperatorCall, verify_selective_disclosure_standalone,
 };
 pub use models::PoolExecuteResult;
 pub use signer::{SignerHandle, WalletSigner};

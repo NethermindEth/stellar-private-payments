@@ -5,7 +5,7 @@ export type {
   AspNonMembership,
   AssetDescriptor,
   BabyJubJubPoint,
-  BlocklistOperator,
+  CallStatus,
   ContractConfig,
   ContractsStateData,
   DisclosureCircuitMetadata,
@@ -17,7 +17,7 @@ export type {
   GvkAudit,
   GvkAuthority,
   OperationalFeedItem,
-  PoolAdmin,
+  OperatorCall,
   PoolConfigEntry,
   PoolEstimate,
   PoolExecuteResult,
@@ -26,12 +26,24 @@ export type {
   PrivatePool,
   PublicKeyEntry,
   RecipientLookup,
+  SignerWeight,
+  SigningStatus,
+  UnsignedOperatorCall,
   UserNoteSummary,
   UserPublicKeys,
   VerifierEntry,
 } from './crates/stellar_private_payments_web.js';
 
-export { AllowlistOperator, DisclosureRequest, parseTokenAmount, ProverBridge, default } from './crates/stellar_private_payments_web.js';
+export {
+  AllowlistOperator,
+  BlocklistOperator,
+  DisclosureRequest,
+  Envelopes,
+  parseTokenAmount,
+  PoolAdmin,
+  ProverBridge,
+  default,
+} from './crates/stellar_private_payments_web.js';
 
 // JS facade (`js/index.js`) — options and wrapped session entry points.
 export * from './api-types.js';

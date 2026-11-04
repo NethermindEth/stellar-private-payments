@@ -2,6 +2,7 @@
 //! [`Client`](NativeClient).
 
 mod account;
+mod envelope;
 mod execute;
 mod gvk;
 mod operator;
@@ -29,6 +30,9 @@ use crate::{
 };
 
 pub use account::Account;
+pub use envelope::{
+    CallStatus, Envelopes, OperatorCall, SignerWeight, SigningStatus, UnsignedOperatorCall,
+};
 pub use gvk::GvkAudit;
 pub use operator::{AdminState, AllowlistOperator, BlocklistOperator, GvkAuthority, PoolAdmin};
 pub use pool::PrivatePool;
