@@ -89,8 +89,7 @@ jobs:
         run: |
           cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
           npm ci --prefix sdk/web
-      - name: Provide circuit artifacts
-        uses: ./.github/actions/circuits
+          make circuits
       - name: Cache verified binaryen
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
