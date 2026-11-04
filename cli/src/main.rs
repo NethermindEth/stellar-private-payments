@@ -195,6 +195,26 @@ enum Commands {
         #[command(subcommand)]
         command: DisclosureCommands,
     },
+    /// Read the membership trees, as their admin (ASP)
+    Allowlist {
+        #[command(subcommand)]
+        command: cmd::operator::allowlist::AllowlistCommands,
+    },
+    /// Read the non-membership trees, as their admin (ASP)
+    Blocklist {
+        #[command(subcommand)]
+        command: cmd::operator::blocklist::BlocklistCommands,
+    },
+    /// Read the pools, as their admin
+    PoolAdmin {
+        #[command(subcommand)]
+        command: cmd::operator::pool_admin::PoolAdminCommands,
+    },
+    /// Audit pool-gvk pools with a Global View Key
+    Gvk {
+        #[command(subcommand)]
+        command: cmd::operator::gvk::GvkCommands,
+    },
     /// Show the operating disclaimer and acceptance status
     Disclaimer,
     /// Show the license / distribution notice
@@ -404,6 +424,10 @@ fn main() -> Result<()> {
                 json,
             ),
         },
+        Commands::Allowlist { command } => cmd::operator::allowlist::run(&config, command, json),
+        Commands::Blocklist { command } => cmd::operator::blocklist::run(&config, command, json),
+        Commands::PoolAdmin { command } => cmd::operator::pool_admin::run(&config, command, json),
+        Commands::Gvk { command } => cmd::operator::gvk::run(&config, command, json),
         Commands::Disclaimer => cmd::disclaimer::run(&config, json),
         Commands::License => cmd::license::run(&config, json),
     }
@@ -412,6 +436,43 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operator_groups_parse_their_reads() {
+        for args in [
+            vec!["spp", "allowlist", "show"],
+            vec!["spp", "allowlist", "show", "--tree", "C1"],
+            vec![
+                "spp",
+                "allowlist",
+                "leaf",
+                "--note-key",
+                "0x01",
+                "--asp-secret",
+                "0x02",
+            ],
+            vec!["spp", "blocklist", "show", "--tree", "C2"],
+            vec!["spp", "pool-admin", "show", "--pool", "C3"],
+            vec![
+                "spp",
+                "gvk",
+                "audit",
+                "--pool",
+                "C3",
+                "--key-file",
+                "key.json",
+            ],
+        ] {
+            Cli::try_parse_from(&args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+    }
+
+    #[test]
+    fn gvk_audit_requires_a_key_file() {
+        let err = Cli::try_parse_from(["spp", "gvk", "audit", "--pool", "C3"])
+            .expect_err("an audit without a key must be rejected");
+        assert!(err.to_string().contains("--key-file"), "{err}");
+    }
 
     #[test]
     fn disclosure_verify_requires_pool() {

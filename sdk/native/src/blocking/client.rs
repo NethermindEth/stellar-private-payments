@@ -1,13 +1,13 @@
 //! Sync wrapper around [`crate::Client`] via a shared Tokio runtime.
 
-use crate::types::{ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
+use crate::types::{ContractConfig, Field, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
 
 use crate::{
     BackgroundSync, Error, ProverHandle, SignerHandle, StorageHandle, chain::StateFetcher,
     client::Client as AsyncClient, storage::LocalStorage,
 };
 
-use super::{account::Account, runtime::block_on};
+use super::{account::Account, operator::GvkAuthority, runtime::block_on};
 
 /// Blocking wrapper around [`crate::Client`].
 pub struct Client {
@@ -86,5 +86,12 @@ impl Client {
 
     pub fn state_fetcher(&self) -> Result<StateFetcher, Error> {
         self.inner.state_fetcher()
+    }
+
+    /// Open a [`GvkAuthority`] session for a Global View Key private key.
+    pub fn gvk_authority(&self, global_view_private_key: Field) -> Result<GvkAuthority, Error> {
+        Ok(GvkAuthority::from_inner(
+            self.inner.gvk_authority(global_view_private_key)?,
+        ))
     }
 }

@@ -188,12 +188,7 @@ impl Client {
     /// # Errors
     /// Returns [`Error::InvalidConfig`] for any other contract.
     pub fn allowlist_operator(&self, contract_id: &str) -> Result<AllowlistOperator, Error> {
-        operator::ensure_listed(&self.allowlist_ids(), contract_id, "membership tree")?;
-        Ok(AllowlistOperator::new(
-            self.rpc.clone(),
-            self.contract_config.clone(),
-            contract_id.to_string(),
-        ))
+        AllowlistOperator::new(self.rpc.clone(), self.contract_config.clone(), contract_id)
     }
 
     /// Open a [`BlocklistOperator`] session for one of
@@ -202,12 +197,7 @@ impl Client {
     /// # Errors
     /// Returns [`Error::InvalidConfig`] for any other contract.
     pub fn blocklist_operator(&self, contract_id: &str) -> Result<BlocklistOperator, Error> {
-        operator::ensure_listed(&self.blocklist_ids(), contract_id, "non-membership tree")?;
-        Ok(BlocklistOperator::new(
-            self.rpc.clone(),
-            self.contract_config.clone(),
-            contract_id.to_string(),
-        ))
+        BlocklistOperator::new(self.rpc.clone(), self.contract_config.clone(), contract_id)
     }
 
     /// Open a [`PoolAdmin`] session for one of [`Self::pool_ids`].
@@ -215,12 +205,7 @@ impl Client {
     /// # Errors
     /// Returns [`Error::InvalidConfig`] for any other contract.
     pub fn pool_admin(&self, contract_id: &str) -> Result<PoolAdmin, Error> {
-        operator::ensure_listed(&self.pool_ids(), contract_id, "pool")?;
-        Ok(PoolAdmin::new(
-            self.rpc.clone(),
-            self.contract_config.clone(),
-            contract_id.to_string(),
-        ))
+        PoolAdmin::new(self.rpc.clone(), self.contract_config.clone(), contract_id)
     }
 
     /// Open a [`GvkAuthority`] session for a Global View Key private key.

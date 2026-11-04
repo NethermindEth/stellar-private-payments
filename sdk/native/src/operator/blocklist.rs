@@ -4,7 +4,7 @@ use crate::{
     types::{AspNonMembership, ContractConfig},
 };
 
-use super::{AdminState, read_admin};
+use super::{AdminState, blocklist_ids, ensure_listed, read_admin};
 
 /// Session for the admin of one non-membership tree.
 ///
@@ -16,16 +16,34 @@ pub struct BlocklistOperator {
 }
 
 impl BlocklistOperator {
+    /// Opens a session over `rpc_url` for one of the deployment's
+    /// `blocklist_ids`.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidConfig`] for any other contract.
+    pub fn open(
+        rpc_url: &str,
+        contract_config: ContractConfig,
+        contract_id: &str,
+    ) -> Result<Self, Error> {
+        Self::new(RpcClient::new(rpc_url)?, contract_config, contract_id)
+    }
+
     pub(crate) fn new(
         rpc: RpcClient,
         contract_config: ContractConfig,
-        contract_id: String,
-    ) -> Self {
-        Self {
+        contract_id: &str,
+    ) -> Result<Self, Error> {
+        ensure_listed(
+            &blocklist_ids(&contract_config),
+            contract_id,
+            "non-membership tree",
+        )?;
+        Ok(Self {
             rpc,
             contract_config,
-            contract_id,
-        }
+            contract_id: contract_id.to_string(),
+        })
     }
 
     pub fn contract_id(&self) -> &str {

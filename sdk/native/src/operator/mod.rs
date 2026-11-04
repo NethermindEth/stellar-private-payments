@@ -6,7 +6,9 @@
 //! - [`GvkAuthority`]: the holder of a Global View Key private key.
 //!
 //! Every contract may have a different admin. None of the handles needs a
-//! user account, signer or prover. Open them from [`crate::Client`].
+//! user account, signer or prover. The contract handles need no storage
+//! either: open them with `open(rpc_url, config, contract_id)` or from
+//! [`crate::Client`].
 
 mod allowlist;
 mod blocklist;
@@ -38,7 +40,7 @@ pub struct AdminState {
 
 /// Membership trees of the deployment, `asp_membership` first, then the added
 /// ones in config order.
-pub(crate) fn allowlist_ids(config: &ContractConfig) -> Vec<String> {
+pub fn allowlist_ids(config: &ContractConfig) -> Vec<String> {
     std::iter::once(config.asp_membership.clone())
         .chain(
             config
@@ -49,11 +51,13 @@ pub(crate) fn allowlist_ids(config: &ContractConfig) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn blocklist_ids(config: &ContractConfig) -> Vec<String> {
+/// Non-membership trees of the deployment.
+pub fn blocklist_ids(config: &ContractConfig) -> Vec<String> {
     vec![config.asp_non_membership.clone()]
 }
 
-pub(crate) fn pool_ids(config: &ContractConfig) -> Vec<String> {
+/// Pools of the deployment, enabled or not, in config order.
+pub fn pool_ids(config: &ContractConfig) -> Vec<String> {
     config
         .pools
         .iter()
