@@ -66,6 +66,15 @@ impl PrivatePool {
         block_on(self.inner.check_deposit(amount))
     }
 
+    /// Refuses a transaction that the pool would refuse, without building it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`crate::PrivatePool::check_transact`].
+    pub fn check_transact(&self, step: &crate::planner::Transact) -> Result<(), Error> {
+        block_on(self.inner.check_transact(step))
+    }
+
     #[tracing::instrument(name = "blocking_estimate", level = "info", skip_all, fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount)))]
     pub fn estimate(&self, amount: NoteAmount, fee: NoteAmount) -> Result<Estimate, Error> {
         block_on(self.inner.estimate(amount, fee))
