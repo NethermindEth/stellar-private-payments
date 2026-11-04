@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::{gvk::GvkEvent, types::Field, zk::gvk::GvkAuditedNote};
 
@@ -51,11 +52,14 @@ struct TxGroup {
     nullifiers: Vec<(Field, Option<crate::types::GlobalViewKeyCiphertext>)>,
 }
 
-/// Cursor over private transacts for one pool
+/// Cursor over private transacts for one pool.
+///
+/// Holds the authority key until [`Self::next_tx`] returns `None` or the cursor
+/// drops, and both wipe it.
 pub struct GvkAudit {
     storage: crate::StorageHandle,
     pool_contract_id: String,
-    d_priv: Field,
+    d_priv: Zeroizing<Field>,
     after: Option<(u32, String)>,
     pending: Option<TxGroup>,
     complete: VecDeque<TxGroup>,
@@ -71,7 +75,7 @@ impl GvkAudit {
         Self {
             storage,
             pool_contract_id: pool_contract_id.into(),
-            d_priv,
+            d_priv: Zeroizing::new(d_priv),
             after: None,
             pending: None,
             complete: VecDeque::new(),
@@ -83,7 +87,13 @@ impl GvkAudit {
         &self.pool_contract_id
     }
 
-    /// Fetch and audit the next transaction, or `None` when exhausted.
+    /// Fetches and audits the next transaction, or wipes the key and returns
+    /// `None` when exhausted.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when reading the pool's GVK events or commitments from
+    /// storage fails, or when a stored event id is malformed.
     pub async fn next_tx(&mut self) -> Result<Option<GvkTxAudit>> {
         loop {
             if let Some(group) = self.complete.pop_front() {
@@ -93,7 +103,10 @@ impl GvkAudit {
             if self.exhausted {
                 return match self.pending.take() {
                     Some(group) => Ok(Some(self.audit_group(group).await?)),
-                    None => Ok(None),
+                    None => {
+                        self.d_priv.zeroize();
+                        Ok(None)
+                    }
                 };
             }
 
@@ -137,18 +150,18 @@ impl GvkAudit {
     }
 
     async fn audit_group(&mut self, group: TxGroup) -> Result<GvkTxAudit> {
-        let d_priv = self.d_priv;
+        let d_priv: &Field = &self.d_priv;
 
         let mut outputs = Vec::with_capacity(group.outputs.len());
         for (commitment, ciphertext) in group.outputs {
-            let note = ciphertext.decrypt_audited_for_commitment(&d_priv, &commitment);
+            let note = ciphertext.decrypt_audited_for_commitment(d_priv, &commitment);
             outputs.push(GvkOutputSlot { commitment, note });
         }
 
         let mut input_slots = Vec::with_capacity(group.nullifiers.len());
         let mut candidate_commitments = Vec::new();
         for (nullifier, ciphertext) in group.nullifiers {
-            let recovered = ciphertext.as_ref().and_then(|ct| ct.decrypt(&d_priv).ok());
+            let recovered = ciphertext.as_ref().and_then(|ct| ct.decrypt(d_priv).ok());
             let computed = recovered.as_ref().and_then(|n| n.commitment_field());
             if let Some(computed) = computed {
                 candidate_commitments.push(computed);
@@ -409,6 +422,11 @@ mod tests {
         assert_eq!(tx.outputs[0].commitment, commitment);
         assert!(tx.inputs.is_empty());
         assert!(audit.next_tx().await?.is_none());
+        assert_eq!(
+            *audit.d_priv,
+            Field::ZERO,
+            "an exhausted cursor wipes the key"
+        );
 
         let _ = std::fs::remove_file(path);
         Ok(())
