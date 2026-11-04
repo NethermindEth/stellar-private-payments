@@ -21,6 +21,25 @@ A deployment has six roles. One organization can hold all of them.
 | App host | A static web server | Serves the web app and its admin page |
 | Users | A Stellar wallet | Deposit, transfer, and withdraw |
 
+Each pool and each tree has its own admin. `deploy.sh` makes one account the admin of every
+contract, so to give a role to another account, transfer the admin of each contract that role
+covers, as [Transfer the admin](../governance.md#transfer-the-admin) describes.
+
+The admin page covers every role. The `spp` CLI and the SDKs have one command group or handle per
+role:
+
+| Role | CLI | Rust and browser SDK |
+| --- | --- | --- |
+| ASP of an allowlist | `spp allowlist` | `AllowlistOperator` |
+| ASP of a blocklist | `spp blocklist` | `BlocklistOperator` |
+| Admin of a pool | `spp pool-admin` | `PoolAdmin` |
+| Admin account signers | `spp envelope` | `Envelopes` |
+| GVK holder | `spp gvk audit` | `GvkAuthority` |
+
+A write command signs with `--account` and sends the call at once, which suits a single-key admin.
+With `--out FILE`, it writes the unsigned call for the signers of a multisig admin instead, as
+[Sign with the CLI](../governance.md#sign-with-the-cli) describes.
+
 ## Components
 
 ```mermaid
