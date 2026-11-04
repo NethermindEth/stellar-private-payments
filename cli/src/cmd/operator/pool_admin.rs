@@ -6,7 +6,7 @@ use serde::Serialize;
 use stellar_private_payments::{blocking::PoolAdmin, operator::pool_ids};
 
 use super::{
-    AdminRow, print_admin, rpc_url, selected_ids,
+    AdminRow, print_admin, rpc_url, selected_ids, warn_unlisted,
     write::{AdminCommands, WriteArgs, deliver},
 };
 use crate::{config::CliConfig, output};
@@ -79,7 +79,7 @@ pub fn run(config: &CliConfig, command: PoolAdminCommands, json: bool) -> Result
             write,
         } => {
             let network = config.resolve_network()?;
-            let admin = PoolAdmin::open(&network.rpc_url, config.deployment.clone(), &pool)?;
+            let admin = open(config, &network.rpc_url, &pool)?;
             let built = match (allowlist, blocklist) {
                 (Some(tree), _) => admin.repoint_allowlist(&tree)?,
                 (None, Some(tree)) => admin.repoint_blocklist(&tree)?,
@@ -89,17 +89,17 @@ pub fn run(config: &CliConfig, command: PoolAdminCommands, json: bool) -> Result
         }
         PoolAdminCommands::Pause { pool, write } => {
             let network = config.resolve_network()?;
-            let admin = PoolAdmin::open(&network.rpc_url, config.deployment.clone(), &pool)?;
+            let admin = open(config, &network.rpc_url, &pool)?;
             deliver(config, &network, admin.pause_deposits()?, &write, json)
         }
         PoolAdminCommands::Unpause { pool, write } => {
             let network = config.resolve_network()?;
-            let admin = PoolAdmin::open(&network.rpc_url, config.deployment.clone(), &pool)?;
+            let admin = open(config, &network.rpc_url, &pool)?;
             deliver(config, &network, admin.unpause_deposits()?, &write, json)
         }
         PoolAdminCommands::Admin { pool, command } => {
             let network = config.resolve_network()?;
-            let admin = PoolAdmin::open(&network.rpc_url, config.deployment.clone(), &pool)?;
+            let admin = open(config, &network.rpc_url, &pool)?;
             let built = match &command {
                 AdminCommands::Propose { new_admin, .. } => admin.propose_admin(new_admin)?,
                 AdminCommands::Cancel { .. } => admin.cancel_admin_transfer()?,
@@ -108,6 +108,12 @@ pub fn run(config: &CliConfig, command: PoolAdminCommands, json: bool) -> Result
             deliver(config, &network, built, command.write(), json)
         }
     }
+}
+
+fn open(config: &CliConfig, rpc_url: &str, pool: &str) -> Result<PoolAdmin> {
+    let admin = PoolAdmin::open(rpc_url, config.deployment.clone(), pool)?;
+    warn_unlisted(admin.is_listed(), "pool", pool);
+    Ok(admin)
 }
 
 fn show(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {

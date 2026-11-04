@@ -8,7 +8,7 @@ use stellar_private_payments::{
 };
 
 use super::{
-    AdminRow, print_admin, rpc_url, selected_ids,
+    AdminRow, print_admin, rpc_url, selected_ids, warn_unlisted,
     write::{AdminCommands, WriteArgs, deliver},
 };
 use crate::{config::CliConfig, output};
@@ -111,11 +111,9 @@ pub fn run(config: &CliConfig, command: BlocklistCommands, json: bool) -> Result
 
 fn open(config: &CliConfig, rpc_url: &str, tree: Option<&str>) -> Result<BlocklistOperator> {
     let tree = tree.unwrap_or(&config.deployment.asp_non_membership);
-    Ok(BlocklistOperator::open(
-        rpc_url,
-        config.deployment.clone(),
-        tree,
-    )?)
+    let operator = BlocklistOperator::open(rpc_url, config.deployment.clone(), tree)?;
+    warn_unlisted(operator.is_listed(), "non-membership tree", tree);
+    Ok(operator)
 }
 
 fn show(config: &CliConfig, tree: Option<&str>, json: bool) -> Result<()> {

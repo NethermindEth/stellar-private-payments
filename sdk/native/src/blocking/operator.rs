@@ -34,6 +34,10 @@ impl AllowlistOperator {
         self.inner.contract_id()
     }
 
+    pub fn is_listed(&self) -> bool {
+        self.inner.is_listed()
+    }
+
     pub fn state(&self) -> Result<AspMembership, Error> {
         block_on(self.inner.state())
     }
@@ -77,6 +81,10 @@ impl BlocklistOperator {
 
     pub fn contract_id(&self) -> &str {
         self.inner.contract_id()
+    }
+
+    pub fn is_listed(&self) -> bool {
+        self.inner.is_listed()
     }
 
     pub fn state(&self) -> Result<AspNonMembership, Error> {
@@ -126,6 +134,10 @@ impl PoolAdmin {
 
     pub fn contract_id(&self) -> &str {
         self.inner.contract_id()
+    }
+
+    pub fn is_listed(&self) -> bool {
+        self.inner.is_listed()
     }
 
     pub fn admin(&self) -> Result<AdminState, Error> {

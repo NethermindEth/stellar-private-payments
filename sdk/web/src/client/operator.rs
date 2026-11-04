@@ -69,8 +69,8 @@ pub struct AllowlistOperator {
 
 #[wasm_bindgen]
 impl AllowlistOperator {
-    /// Open a session over `rpcUrl` for one of the deployment's membership
-    /// trees, without a `Client` or local storage.
+    /// Open a session over `rpcUrl` for `contractId`, listed in the
+    /// deployment config or not, without a `Client` or local storage.
     #[wasm_bindgen(js_name = open)]
     pub fn open(
         rpc_url: String,
@@ -89,6 +89,12 @@ impl AllowlistOperator {
     #[wasm_bindgen(getter, js_name = contractId)]
     pub fn contract_id(&self) -> String {
         self.inner.contract_id().to_string()
+    }
+
+    /// Whether the deployment config lists the contract.
+    #[wasm_bindgen(getter)]
+    pub fn listed(&self) -> bool {
+        self.inner.is_listed()
     }
 
     /// On-chain state of the tree.
@@ -180,8 +186,8 @@ pub struct BlocklistOperator {
 
 #[wasm_bindgen]
 impl BlocklistOperator {
-    /// Open a session over `rpcUrl` for one of the deployment's non-membership
-    /// trees, without a `Client` or local storage.
+    /// Open a session over `rpcUrl` for `contractId`, listed in the
+    /// deployment config or not, without a `Client` or local storage.
     #[wasm_bindgen(js_name = open)]
     pub fn open(
         rpc_url: String,
@@ -200,6 +206,12 @@ impl BlocklistOperator {
     #[wasm_bindgen(getter, js_name = contractId)]
     pub fn contract_id(&self) -> String {
         self.inner.contract_id().to_string()
+    }
+
+    /// Whether the deployment config lists the contract.
+    #[wasm_bindgen(getter)]
+    pub fn listed(&self) -> bool {
+        self.inner.is_listed()
     }
 
     /// On-chain state of the tree.
@@ -295,8 +307,8 @@ pub struct PoolAdmin {
 
 #[wasm_bindgen]
 impl PoolAdmin {
-    /// Open a session over `rpcUrl` for one of the deployment's pools,
-    /// without a `Client` or local storage.
+    /// Open a session over `rpcUrl` for `contractId`, listed in the
+    /// deployment config or not, without a `Client` or local storage.
     #[wasm_bindgen(js_name = open)]
     pub fn open(
         rpc_url: String,
@@ -313,6 +325,12 @@ impl PoolAdmin {
     #[wasm_bindgen(getter, js_name = contractId)]
     pub fn contract_id(&self) -> String {
         self.inner.contract_id().to_string()
+    }
+
+    /// Whether the deployment config lists the contract.
+    #[wasm_bindgen(getter)]
+    pub fn listed(&self) -> bool {
+        self.inner.is_listed()
     }
 
     /// Admin and pending admin of the pool.

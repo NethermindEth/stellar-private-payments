@@ -8,7 +8,7 @@
 //! Every contract may have a different admin. None of the handles needs a
 //! user account, signer or prover. The contract handles need no storage
 //! either: open them with `open(rpc_url, config, contract_id)` or from
-//! [`crate::Client`].
+//! [`crate::Client`], on any contract, listed in the config or not.
 
 mod allowlist;
 mod blocklist;
@@ -67,18 +67,6 @@ pub fn pool_ids(config: &ContractConfig) -> Vec<String> {
         .iter()
         .map(|pool| pool.pool_contract_id.clone())
         .collect()
-}
-
-/// Refuses a `contract_id` that is not one of `ids`, the deployment's
-/// contracts of kind `kind`.
-pub(crate) fn ensure_listed(ids: &[String], contract_id: &str, kind: &str) -> Result<(), Error> {
-    if ids.iter().any(|id| id == contract_id) {
-        Ok(())
-    } else {
-        Err(Error::InvalidConfig(format!(
-            "{contract_id} is not a {kind} of this deployment"
-        )))
-    }
 }
 
 /// Reads `get_admin` and `get_pending_admin` from `contract_id` by simulation.
@@ -252,20 +240,18 @@ mod tests {
     fn each_handle_opens_on_its_own_contract() {
         let client = client();
         for id in [MEMBERSHIP, ADDED_MEMBERSHIP] {
-            let operator = client.allowlist_operator(id).expect("a membership tree");
+            let operator = client.allowlist_operator(id);
             assert_eq!(operator.contract_id(), id);
         }
-        let blocklist = client
-            .blocklist_operator(NON_MEMBERSHIP)
-            .expect("the non-membership tree");
+        let blocklist = client.blocklist_operator(NON_MEMBERSHIP);
         assert_eq!(blocklist.contract_id(), NON_MEMBERSHIP);
-        let pool = client.pool_admin(POOL).expect("a pool");
+        let pool = client.pool_admin(POOL);
         assert_eq!(pool.contract_id(), POOL);
     }
 
     #[tokio::test]
     async fn builders_refuse_an_address_argument_before_reading_the_chain() {
-        let pool = client().pool_admin(POOL).expect("a pool");
+        let pool = client().pool_admin(POOL);
         assert!(
             refusal(pool.repoint_allowlist("not-an-address").await)
                 .contains("not a Stellar address")
@@ -274,15 +260,17 @@ mod tests {
     }
 
     #[test]
-    fn each_handle_refuses_another_kind_of_contract() {
+    fn handles_open_on_contracts_outside_the_config() {
         let client = client();
-        assert!(
-            refusal(client.allowlist_operator(NON_MEMBERSHIP)).contains("not a membership tree")
-        );
-        assert!(
-            refusal(client.blocklist_operator(MEMBERSHIP)).contains("not a non-membership tree")
-        );
-        assert!(refusal(client.pool_admin(MEMBERSHIP)).contains("not a pool"));
-        assert!(refusal(client.allowlist_operator("unknown")).contains("not a membership tree"));
+        let tree = client.allowlist_operator("new-tree");
+        assert_eq!(tree.contract_id(), "new-tree");
+        assert!(!tree.is_listed());
+        assert!(!client.blocklist_operator("new-tree").is_listed());
+        assert!(!client.pool_admin("new-pool").is_listed());
+
+        assert!(client.allowlist_operator(ADDED_MEMBERSHIP).is_listed());
+        assert!(client.blocklist_operator(NON_MEMBERSHIP).is_listed());
+        assert!(client.pool_admin(POOL).is_listed());
+        assert!(!client.pool_admin(NON_MEMBERSHIP).is_listed());
     }
 }

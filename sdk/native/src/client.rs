@@ -182,29 +182,21 @@ impl Client {
         operator::pool_ids(&self.contract_config)
     }
 
-    /// Open an [`AllowlistOperator`] session for one of
-    /// [`Self::allowlist_ids`].
-    ///
-    /// # Errors
-    /// Returns [`Error::InvalidConfig`] for any other contract.
-    pub fn allowlist_operator(&self, contract_id: &str) -> Result<AllowlistOperator, Error> {
+    /// Open an [`AllowlistOperator`] session for `contract_id`, listed in
+    /// [`Self::allowlist_ids`] or not.
+    pub fn allowlist_operator(&self, contract_id: &str) -> AllowlistOperator {
         AllowlistOperator::new(self.rpc.clone(), self.contract_config.clone(), contract_id)
     }
 
-    /// Open a [`BlocklistOperator`] session for one of
-    /// [`Self::blocklist_ids`].
-    ///
-    /// # Errors
-    /// Returns [`Error::InvalidConfig`] for any other contract.
-    pub fn blocklist_operator(&self, contract_id: &str) -> Result<BlocklistOperator, Error> {
+    /// Open a [`BlocklistOperator`] session for `contract_id`, listed in
+    /// [`Self::blocklist_ids`] or not.
+    pub fn blocklist_operator(&self, contract_id: &str) -> BlocklistOperator {
         BlocklistOperator::new(self.rpc.clone(), self.contract_config.clone(), contract_id)
     }
 
-    /// Open a [`PoolAdmin`] session for one of [`Self::pool_ids`].
-    ///
-    /// # Errors
-    /// Returns [`Error::InvalidConfig`] for any other contract.
-    pub fn pool_admin(&self, contract_id: &str) -> Result<PoolAdmin, Error> {
+    /// Open a [`PoolAdmin`] session for `contract_id`, listed in
+    /// [`Self::pool_ids`] or not.
+    pub fn pool_admin(&self, contract_id: &str) -> PoolAdmin {
         PoolAdmin::new(self.rpc.clone(), self.contract_config.clone(), contract_id)
     }
 

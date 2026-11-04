@@ -4,9 +4,7 @@ use crate::{
     types::{AspNonMembership, ContractConfig, Field, NotePublicKey},
 };
 
-use super::{
-    AdminState, UnsignedOperatorCall, address_arg, blocklist_ids, ensure_listed, read_admin,
-};
+use super::{AdminState, UnsignedOperatorCall, address_arg, read_admin};
 
 /// Session for the admin of one non-membership tree.
 ///
@@ -18,38 +16,37 @@ pub struct BlocklistOperator {
 }
 
 impl BlocklistOperator {
-    /// Opens a session over `rpc_url` for one of the deployment's
-    /// `blocklist_ids`.
-    ///
-    /// # Errors
-    /// Returns [`Error::InvalidConfig`] for any other contract.
+    /// Opens a session over `rpc_url` for `contract_id`, which need not be in
+    /// the deployment config yet: an operator fills a new non-membership tree
+    /// before it is listed. The contract refuses calls it does not implement.
     pub fn open(
         rpc_url: &str,
         contract_config: ContractConfig,
         contract_id: &str,
     ) -> Result<Self, Error> {
-        Self::new(RpcClient::new(rpc_url)?, contract_config, contract_id)
+        Ok(Self::new(
+            RpcClient::new(rpc_url)?,
+            contract_config,
+            contract_id,
+        ))
     }
 
-    pub(crate) fn new(
-        rpc: RpcClient,
-        contract_config: ContractConfig,
-        contract_id: &str,
-    ) -> Result<Self, Error> {
-        ensure_listed(
-            &blocklist_ids(&contract_config),
-            contract_id,
-            "non-membership tree",
-        )?;
-        Ok(Self {
+    pub(crate) fn new(rpc: RpcClient, contract_config: ContractConfig, contract_id: &str) -> Self {
+        Self {
             rpc,
             contract_config,
             contract_id: contract_id.to_string(),
-        })
+        }
     }
 
     pub fn contract_id(&self) -> &str {
         &self.contract_id
+    }
+
+    /// Whether the deployment config lists the contract among its
+    /// non-membership trees.
+    pub fn is_listed(&self) -> bool {
+        super::blocklist_ids(&self.contract_config).contains(&self.contract_id)
     }
 
     /// On-chain state of the tree.

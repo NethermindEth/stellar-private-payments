@@ -40,6 +40,12 @@ fn selected_ids(all: Vec<String>, selected: Option<&str>) -> Vec<String> {
     }
 }
 
+fn warn_unlisted(listed: bool, kind: &str, contract_id: &str) {
+    if !listed {
+        eprintln!("warning: {contract_id} is not a {kind} of the deployment config");
+    }
+}
+
 fn rpc_url(config: &CliConfig) -> Result<String> {
     Ok(config.resolve_network()?.rpc_url)
 }

@@ -4,9 +4,7 @@ use crate::{
     types::{AspMembership, ContractConfig, Field},
 };
 
-use super::{
-    AdminState, UnsignedOperatorCall, address_arg, allowlist_ids, ensure_listed, read_admin,
-};
+use super::{AdminState, UnsignedOperatorCall, address_arg, read_admin};
 
 /// Session for the admin of one membership tree.
 ///
@@ -18,38 +16,37 @@ pub struct AllowlistOperator {
 }
 
 impl AllowlistOperator {
-    /// Opens a session over `rpc_url` for one of the deployment's
-    /// `allowlist_ids`.
-    ///
-    /// # Errors
-    /// Returns [`Error::InvalidConfig`] for any other contract.
+    /// Opens a session over `rpc_url` for `contract_id`, which need not be in
+    /// the deployment config yet: an operator fills a new membership tree
+    /// before it is listed. The contract refuses calls it does not implement.
     pub fn open(
         rpc_url: &str,
         contract_config: ContractConfig,
         contract_id: &str,
     ) -> Result<Self, Error> {
-        Self::new(RpcClient::new(rpc_url)?, contract_config, contract_id)
+        Ok(Self::new(
+            RpcClient::new(rpc_url)?,
+            contract_config,
+            contract_id,
+        ))
     }
 
-    pub(crate) fn new(
-        rpc: RpcClient,
-        contract_config: ContractConfig,
-        contract_id: &str,
-    ) -> Result<Self, Error> {
-        ensure_listed(
-            &allowlist_ids(&contract_config),
-            contract_id,
-            "membership tree",
-        )?;
-        Ok(Self {
+    pub(crate) fn new(rpc: RpcClient, contract_config: ContractConfig, contract_id: &str) -> Self {
+        Self {
             rpc,
             contract_config,
             contract_id: contract_id.to_string(),
-        })
+        }
     }
 
     pub fn contract_id(&self) -> &str {
         &self.contract_id
+    }
+
+    /// Whether the deployment config lists the contract among its membership
+    /// trees.
+    pub fn is_listed(&self) -> bool {
+        super::allowlist_ids(&self.contract_config).contains(&self.contract_id)
     }
 
     /// On-chain state of the tree.

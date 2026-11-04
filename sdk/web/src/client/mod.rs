@@ -214,34 +214,25 @@ impl Client {
         self.inner.pool_ids()
     }
 
-    /// Open a session for the admin of one of `allowlistIds()`.
+    /// Open a session for the admin of `contractId`, listed in `allowlistIds()`
+    /// or not.
     #[wasm_bindgen(js_name = allowlistOperator)]
-    pub fn allowlist_operator(&self, contract_id: String) -> Result<AllowlistOperator, JsError> {
-        Ok(self
-            .inner
-            .allowlist_operator(&contract_id)
-            .map_err(pool_err)?
-            .into())
+    pub fn allowlist_operator(&self, contract_id: String) -> AllowlistOperator {
+        self.inner.allowlist_operator(&contract_id).into()
     }
 
-    /// Open a session for the admin of one of `blocklistIds()`.
+    /// Open a session for the admin of `contractId`, listed in `blocklistIds()`
+    /// or not.
     #[wasm_bindgen(js_name = blocklistOperator)]
-    pub fn blocklist_operator(&self, contract_id: String) -> Result<BlocklistOperator, JsError> {
-        Ok(self
-            .inner
-            .blocklist_operator(&contract_id)
-            .map_err(pool_err)?
-            .into())
+    pub fn blocklist_operator(&self, contract_id: String) -> BlocklistOperator {
+        self.inner.blocklist_operator(&contract_id).into()
     }
 
-    /// Open a session for the admin of one of `poolIds()`.
+    /// Open a session for the admin of `contractId`, listed in `poolIds()` or
+    /// not.
     #[wasm_bindgen(js_name = poolAdmin)]
-    pub fn pool_admin(&self, contract_id: String) -> Result<PoolAdmin, JsError> {
-        Ok(self
-            .inner
-            .pool_admin(&contract_id)
-            .map_err(pool_err)?
-            .into())
+    pub fn pool_admin(&self, contract_id: String) -> PoolAdmin {
+        self.inner.pool_admin(&contract_id).into()
     }
 
     /// Open a session for a Global View Key private key, a `0x`-prefixed
