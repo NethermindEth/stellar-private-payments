@@ -1,11 +1,16 @@
 //! `blocklist` — reads for the admin of the non-membership trees.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Subcommand;
 use serde::Serialize;
-use stellar_private_payments::{blocking::BlocklistOperator, operator::blocklist_ids};
+use stellar_private_payments::{
+    blocking::BlocklistOperator, operator::blocklist_ids, types::NotePublicKey,
+};
 
-use super::{AdminRow, print_admin, rpc_url, selected_ids};
+use super::{
+    AdminRow, print_admin, rpc_url, selected_ids,
+    write::{AdminCommands, WriteArgs, deliver},
+};
 use crate::{config::CliConfig, output};
 
 #[derive(Debug, Subcommand)]
@@ -15,6 +20,38 @@ pub enum BlocklistCommands {
         /// Non-membership tree contract id (C…); omit for every tree
         #[arg(long)]
         tree: Option<String>,
+    },
+    /// Block note public keys, as the tree's admin
+    Add {
+        /// Note public keys (hex), as users share them from `spp keys`
+        #[arg(required = true)]
+        note_keys: Vec<String>,
+        /// Non-membership tree contract id (C…); default: the deployment's
+        /// blocklist
+        #[arg(long)]
+        tree: Option<String>,
+        #[command(flatten)]
+        write: WriteArgs,
+    },
+    /// Unblock a note public key, as the tree's admin
+    Remove {
+        /// Note public key (hex)
+        note_key: String,
+        /// Non-membership tree contract id (C…); default: the deployment's
+        /// blocklist
+        #[arg(long)]
+        tree: Option<String>,
+        #[command(flatten)]
+        write: WriteArgs,
+    },
+    /// Hand a non-membership tree to a new admin
+    Admin {
+        /// Non-membership tree contract id (C…); default: the deployment's
+        /// blocklist
+        #[arg(long)]
+        tree: Option<String>,
+        #[command(subcommand)]
+        command: AdminCommands,
     },
 }
 
@@ -34,7 +71,51 @@ struct TreeRow {
 pub fn run(config: &CliConfig, command: BlocklistCommands, json: bool) -> Result<()> {
     match command {
         BlocklistCommands::Show { tree } => show(config, tree.as_deref(), json),
+        BlocklistCommands::Add {
+            note_keys,
+            tree,
+            write,
+        } => {
+            let keys = note_keys
+                .iter()
+                .map(|key| {
+                    NotePublicKey::parse(key).with_context(|| format!("parse note key {key}"))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let network = config.resolve_network()?;
+            let built = open(config, &network.rpc_url, tree.as_deref())?.insert_keys(&keys)?;
+            deliver(config, &network, built, &write, json)
+        }
+        BlocklistCommands::Remove {
+            note_key,
+            tree,
+            write,
+        } => {
+            let key = NotePublicKey::parse(&note_key).context("parse note key")?;
+            let network = config.resolve_network()?;
+            let built = open(config, &network.rpc_url, tree.as_deref())?.delete_key(&key)?;
+            deliver(config, &network, built, &write, json)
+        }
+        BlocklistCommands::Admin { tree, command } => {
+            let network = config.resolve_network()?;
+            let operator = open(config, &network.rpc_url, tree.as_deref())?;
+            let built = match &command {
+                AdminCommands::Propose { new_admin, .. } => operator.propose_admin(new_admin)?,
+                AdminCommands::Cancel { .. } => operator.cancel_admin_transfer()?,
+                AdminCommands::Accept { .. } => operator.accept_admin()?,
+            };
+            deliver(config, &network, built, command.write(), json)
+        }
     }
+}
+
+fn open(config: &CliConfig, rpc_url: &str, tree: Option<&str>) -> Result<BlocklistOperator> {
+    let tree = tree.unwrap_or(&config.deployment.asp_non_membership);
+    Ok(BlocklistOperator::open(
+        rpc_url,
+        config.deployment.clone(),
+        tree,
+    )?)
 }
 
 fn show(config: &CliConfig, tree: Option<&str>, json: bool) -> Result<()> {

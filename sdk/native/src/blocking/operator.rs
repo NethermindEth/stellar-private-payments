@@ -5,10 +5,11 @@ use crate::{
     gvk::{GvkAudit as AsyncGvkAudit, GvkTxAudit},
     operator::{
         AdminState, AllowlistOperator as AsyncAllowlistOperator,
-        BlocklistOperator as AsyncBlocklistOperator, GvkAuthority as AsyncGvkAuthority,
-        PoolAdmin as AsyncPoolAdmin,
+        BlocklistOperator as AsyncBlocklistOperator, CallStatus, Envelopes as AsyncEnvelopes,
+        GvkAuthority as AsyncGvkAuthority, OperatorCall, PoolAdmin as AsyncPoolAdmin,
+        SigningStatus, UnsignedOperatorCall,
     },
-    types::{AspMembership, AspNonMembership, ContractConfig},
+    types::{AspMembership, AspNonMembership, ContractConfig, Field, NotePublicKey},
 };
 
 use super::runtime::block_on;
@@ -40,6 +41,22 @@ impl AllowlistOperator {
     pub fn admin(&self) -> Result<AdminState, Error> {
         block_on(self.inner.admin())
     }
+
+    pub fn insert_leaf(&self, leaf: Field) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.insert_leaf(leaf))
+    }
+
+    pub fn propose_admin(&self, new_admin: &str) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.propose_admin(new_admin))
+    }
+
+    pub fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.cancel_admin_transfer())
+    }
+
+    pub fn accept_admin(&self) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.accept_admin())
+    }
 }
 
 /// Blocking wrapper around [`crate::operator::BlocklistOperator`].
@@ -69,6 +86,26 @@ impl BlocklistOperator {
     pub fn admin(&self) -> Result<AdminState, Error> {
         block_on(self.inner.admin())
     }
+
+    pub fn insert_keys(&self, note_keys: &[NotePublicKey]) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.insert_keys(note_keys))
+    }
+
+    pub fn delete_key(&self, note_key: &NotePublicKey) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.delete_key(note_key))
+    }
+
+    pub fn propose_admin(&self, new_admin: &str) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.propose_admin(new_admin))
+    }
+
+    pub fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.cancel_admin_transfer())
+    }
+
+    pub fn accept_admin(&self) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.accept_admin())
+    }
 }
 
 /// Blocking wrapper around [`crate::operator::PoolAdmin`].
@@ -93,6 +130,63 @@ impl PoolAdmin {
 
     pub fn admin(&self) -> Result<AdminState, Error> {
         block_on(self.inner.admin())
+    }
+
+    pub fn propose_admin(&self, new_admin: &str) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.propose_admin(new_admin))
+    }
+
+    pub fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.cancel_admin_transfer())
+    }
+
+    pub fn accept_admin(&self) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.accept_admin())
+    }
+
+    pub fn repoint_allowlist(&self, tree: &str) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.repoint_allowlist(tree))
+    }
+
+    pub fn repoint_blocklist(&self, tree: &str) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.repoint_blocklist(tree))
+    }
+
+    pub fn pause_deposits(&self) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.pause_deposits())
+    }
+
+    pub fn unpause_deposits(&self) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.unpause_deposits())
+    }
+}
+
+/// Blocking wrapper around [`crate::operator::Envelopes`].
+pub struct Envelopes {
+    inner: AsyncEnvelopes,
+}
+
+impl Envelopes {
+    pub fn open(rpc_url: &str, network_passphrase: &str) -> Result<Self, Error> {
+        Ok(Self {
+            inner: AsyncEnvelopes::open(rpc_url, network_passphrase)?,
+        })
+    }
+
+    pub fn describe(&self, envelope_xdr: &str) -> Result<OperatorCall, Error> {
+        self.inner.describe(envelope_xdr)
+    }
+
+    pub fn signing_status(&self, envelope_xdr: &str) -> Result<SigningStatus, Error> {
+        block_on(self.inner.signing_status(envelope_xdr))
+    }
+
+    pub fn submit(&self, signed_envelope_xdr: &str) -> Result<String, Error> {
+        block_on(self.inner.submit(signed_envelope_xdr))
+    }
+
+    pub fn confirm(&self, hash: &str) -> Result<CallStatus, Error> {
+        block_on(self.inner.confirm(hash))
     }
 }
 

@@ -50,6 +50,31 @@ pub struct OperatorCall {
     pub args: Vec<xdr::ScVal>,
 }
 
+impl OperatorCall {
+    /// The arguments as their signers read them: addresses as strkeys, 256-bit
+    /// integers as `0x` hex, lists in brackets.
+    pub fn args_text(&self) -> Vec<String> {
+        self.args.iter().map(arg_text).collect()
+    }
+}
+
+fn arg_text(arg: &xdr::ScVal) -> String {
+    match arg {
+        xdr::ScVal::Address(_) => {
+            scval_to_address_string(arg).unwrap_or_else(|_| format!("{arg:?}"))
+        }
+        xdr::ScVal::U256(parts) => format!(
+            "0x{:016x}{:016x}{:016x}{:016x}",
+            parts.hi_hi, parts.hi_lo, parts.lo_hi, parts.lo_lo
+        ),
+        xdr::ScVal::Vec(Some(items)) => {
+            let items: Vec<String> = items.iter().map(arg_text).collect();
+            format!("[{}]", items.join(", "))
+        }
+        other => format!("{other:?}"),
+    }
+}
+
 /// Builds, simulates and checks the call of `method` on `contract_id`, sourced
 /// by `source`.
 ///
@@ -469,6 +494,34 @@ mod tests {
                 method: "pause_deposits".to_string(),
                 args: Vec::new(),
             }
+        );
+    }
+
+    #[test]
+    fn args_text_reads_addresses_integers_and_lists() {
+        let mut call = describe(&envelope()).expect("call");
+        let key = xdr::ScVal::U256(xdr::UInt256Parts {
+            hi_hi: 0,
+            hi_lo: 0,
+            lo_hi: 0,
+            lo_lo: 0x2a,
+        });
+        call.args = vec![
+            xdr::ScVal::Address(xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(
+                CONTRACT,
+            )))),
+            xdr::ScVal::Vec(Some(vec![key.clone(), key].try_into().expect("pair"))),
+        ];
+        let forty_two = format!("0x{:064x}", 0x2a);
+        assert_eq!(
+            call.args_text(),
+            vec![
+                stellar_strkey::Contract(CONTRACT)
+                    .to_string()
+                    .as_str()
+                    .to_string(),
+                format!("[{forty_two}, {forty_two}]"),
+            ]
         );
     }
 

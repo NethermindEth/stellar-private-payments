@@ -1,7 +1,7 @@
 use crate::{
     Error,
-    chain::{RpcClient, StateFetcher},
-    types::{AspMembership, ContractConfig},
+    chain::{RpcClient, StateFetcher, field_to_scval_u256},
+    types::{AspMembership, ContractConfig, Field},
 };
 
 use super::{
@@ -78,6 +78,13 @@ impl AllowlistOperator {
     /// Completes the pending admin transfer, sourced by the pending admin.
     pub async fn accept_admin(&self) -> Result<UnsignedOperatorCall, Error> {
         super::accept_admin(&self.rpc, &self.contract_config, &self.contract_id).await
+    }
+
+    /// Appends `leaf` to the tree, sourced by its admin. Derive a user's leaf
+    /// with [`super::derive_asp_user_leaf`].
+    pub async fn insert_leaf(&self, leaf: Field) -> Result<UnsignedOperatorCall, Error> {
+        self.admin_call("insert_leaf", vec![field_to_scval_u256(leaf)])
+            .await
     }
 
     async fn admin_call(

@@ -16,5 +16,7 @@ pub(crate) mod runtime;
 pub use account::Account;
 pub use client::Client;
 pub use disclosure::verify_disclosure_receipt;
-pub use operator::{AllowlistOperator, BlocklistOperator, GvkAudit, GvkAuthority, PoolAdmin};
+pub use operator::{
+    AllowlistOperator, BlocklistOperator, Envelopes, GvkAudit, GvkAuthority, PoolAdmin,
+};
 pub use pool::PrivatePool;

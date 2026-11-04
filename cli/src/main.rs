@@ -195,12 +195,12 @@ enum Commands {
         #[command(subcommand)]
         command: DisclosureCommands,
     },
-    /// Read the membership trees, as their admin (ASP)
+    /// Read and update the membership trees, as their admin (ASP)
     Allowlist {
         #[command(subcommand)]
         command: cmd::operator::allowlist::AllowlistCommands,
     },
-    /// Read the non-membership trees, as their admin (ASP)
+    /// Read and update the non-membership trees, as their admin (ASP)
     Blocklist {
         #[command(subcommand)]
         command: cmd::operator::blocklist::BlocklistCommands,
@@ -209,6 +209,11 @@ enum Commands {
     PoolAdmin {
         #[command(subcommand)]
         command: cmd::operator::pool_admin::PoolAdminCommands,
+    },
+    /// Sign, inspect and send admin call envelopes written with --out
+    Envelope {
+        #[command(subcommand)]
+        command: cmd::operator::envelope::EnvelopeCommands,
     },
     /// Audit pool-gvk pools with a Global View Key
     Gvk {
@@ -427,6 +432,7 @@ fn main() -> Result<()> {
         Commands::Allowlist { command } => cmd::operator::allowlist::run(&config, command, json),
         Commands::Blocklist { command } => cmd::operator::blocklist::run(&config, command, json),
         Commands::PoolAdmin { command } => cmd::operator::pool_admin::run(&config, command, json),
+        Commands::Envelope { command } => cmd::operator::envelope::run(&config, command, json),
         Commands::Gvk { command } => cmd::operator::gvk::run(&config, command, json),
         Commands::Disclaimer => cmd::disclaimer::run(&config, json),
         Commands::License => cmd::license::run(&config, json),
@@ -465,6 +471,23 @@ mod tests {
         ] {
             Cli::try_parse_from(&args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
         }
+    }
+
+    #[test]
+    fn operator_groups_parse_their_writes() {
+        for args in [
+            "spp allowlist add --leaf 0x01 --out call.xdr",
+            "spp allowlist admin --tree C1 propose --new-admin G1",
+            "spp blocklist add 0x01 0x02 --tree C2",
+            "spp blocklist remove 0x01",
+            "spp blocklist admin accept --out call.xdr",
+            "spp envelope describe call.xdr",
+            "spp envelope sign call.xdr --as signer",
+            "spp envelope submit call.xdr",
+        ] {
+            Cli::try_parse_from(args.split(' ')).unwrap_or_else(|e| panic!("{args}: {e}"));
+        }
+        assert!(Cli::try_parse_from(["spp", "blocklist", "add"]).is_err());
     }
 
     #[test]

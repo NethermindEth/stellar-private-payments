@@ -1,12 +1,15 @@
 //! Operator commands, one group per administered contract kind.
 //!
-//! The allowlist, blocklist and pool admin reads need only the network and the
-//! deployment, so they unlock no local storage.
+//! The allowlist, blocklist and pool admin commands need only the network and
+//! the deployment, so they unlock no local storage. Writes are signed with a
+//! `stellar keys` alias, or written to a file for multisig signers.
 
 pub mod allowlist;
 pub mod blocklist;
+pub mod envelope;
 pub mod gvk;
 pub mod pool_admin;
+mod write;
 
 use anyhow::Result;
 use serde::Serialize;
