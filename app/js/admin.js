@@ -1622,10 +1622,6 @@ async function init() {
     await initGvkAuditPanel({
       ensureCryptoReady,
       showToast,
-      getWalletAccount: () =>
-        state.address
-          ? { userAddress: state.address, networkPassphrase: state.networkPassphrase }
-          : null,
     });
     setStatus('Local data is locked. Use Unlock to continue.', 'info');
     return;
@@ -1635,10 +1631,6 @@ async function init() {
   await initGvkAuditPanel({
     ensureCryptoReady,
     showToast,
-    getWalletAccount: () =>
-      state.address
-        ? { userAddress: state.address, networkPassphrase: state.networkPassphrase }
-        : null,
   });
   setStatus('Ready', 'ok');
 }
