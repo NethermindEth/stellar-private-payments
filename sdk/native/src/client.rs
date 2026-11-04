@@ -1,11 +1,12 @@
 use anyhow::Context;
 
-use crate::types::{ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
+use crate::types::{ContractConfig, Field, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
 
 use crate::{
     Account, Error, ProverHandle, SignerHandle, StorageHandle, SyncMode,
     chain::{RpcClient, StateFetcher},
     correlation::correlation_id_or_new,
+    operator::{self, AllowlistOperator, BlocklistOperator, GvkAuthority, PoolAdmin},
     prover::NoopProver,
     sync::{BackgroundSync, SyncHandle, catch_up},
 };
@@ -163,6 +164,77 @@ impl Client {
             signer,
             self.sync.clone(),
             self.contract_config.clone(),
+        ))
+    }
+
+    /// Membership trees of the deployment, `asp_membership` first.
+    pub fn allowlist_ids(&self) -> Vec<String> {
+        operator::allowlist_ids(&self.contract_config)
+    }
+
+    /// Non-membership trees of the deployment.
+    pub fn blocklist_ids(&self) -> Vec<String> {
+        operator::blocklist_ids(&self.contract_config)
+    }
+
+    /// Pools of the deployment, enabled or not, in config order.
+    pub fn pool_ids(&self) -> Vec<String> {
+        operator::pool_ids(&self.contract_config)
+    }
+
+    /// Open an [`AllowlistOperator`] session for one of
+    /// [`Self::allowlist_ids`].
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidConfig`] for any other contract.
+    pub fn allowlist_operator(&self, contract_id: &str) -> Result<AllowlistOperator, Error> {
+        operator::ensure_listed(&self.allowlist_ids(), contract_id, "membership tree")?;
+        Ok(AllowlistOperator::new(
+            self.rpc.clone(),
+            self.contract_config.clone(),
+            contract_id.to_string(),
+        ))
+    }
+
+    /// Open a [`BlocklistOperator`] session for one of
+    /// [`Self::blocklist_ids`].
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidConfig`] for any other contract.
+    pub fn blocklist_operator(&self, contract_id: &str) -> Result<BlocklistOperator, Error> {
+        operator::ensure_listed(&self.blocklist_ids(), contract_id, "non-membership tree")?;
+        Ok(BlocklistOperator::new(
+            self.rpc.clone(),
+            self.contract_config.clone(),
+            contract_id.to_string(),
+        ))
+    }
+
+    /// Open a [`PoolAdmin`] session for one of [`Self::pool_ids`].
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidConfig`] for any other contract.
+    pub fn pool_admin(&self, contract_id: &str) -> Result<PoolAdmin, Error> {
+        operator::ensure_listed(&self.pool_ids(), contract_id, "pool")?;
+        Ok(PoolAdmin::new(
+            self.rpc.clone(),
+            self.contract_config.clone(),
+            contract_id.to_string(),
+        ))
+    }
+
+    /// Open a [`GvkAuthority`] session for a Global View Key private key.
+    ///
+    /// # Errors
+    /// Returns a storage error if the session's storage handle cannot be
+    /// forked.
+    pub fn gvk_authority(&self, global_view_private_key: Field) -> Result<GvkAuthority, Error> {
+        Ok(GvkAuthority::new(
+            self.rpc.clone(),
+            self.storage.fork()?,
+            self.sync.clone(),
+            self.contract_config.clone(),
+            global_view_private_key,
         ))
     }
 

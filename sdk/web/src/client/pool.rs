@@ -219,6 +219,7 @@ impl PrivatePool {
     pub async fn audit(&self, global_view_private_key_hex: &str) -> Result<GvkAudit, JsError> {
         let d_priv = Field::from_str(global_view_private_key_hex.trim())
             .map_err(|e| JsError::new(&e.to_string()))?;
+        #[allow(deprecated)]
         let inner = self.inner().audit(d_priv).await.map_err(pool_err)?;
         Ok(GvkAudit::new(inner))
     }
