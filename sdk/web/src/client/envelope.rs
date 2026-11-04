@@ -183,11 +183,12 @@ impl CallStatus {
         .to_string()
     }
 
-    /// The failed transaction's result, when it failed.
-    #[wasm_bindgen(getter)]
-    pub fn detail(&self) -> Option<String> {
+    /// Base64 `TransactionResult` of a failed call, when the RPC returned
+    /// one.
+    #[wasm_bindgen(getter, js_name = resultXdr)]
+    pub fn result_xdr(&self) -> Option<String> {
         match &self.inner {
-            NativeCallStatus::Failed { detail } => Some(detail.clone()),
+            NativeCallStatus::Failed { result_xdr } => result_xdr.clone(),
             _ => None,
         }
     }

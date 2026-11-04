@@ -23,7 +23,7 @@ pub(crate) async fn submit_tx(rpc: &Client, signed_tx: &TransactionEnvelope) -> 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TxConfirmStatus {
     Success,
-    Failed { detail: String },
+    Failed { result_xdr: Option<String> },
     Pending,
 }
 
@@ -40,12 +40,10 @@ pub(crate) async fn confirm_tx(rpc: &Client, hash: &str) -> Result<TxConfirmStat
             Ok(TxConfirmStatus::Success)
         }
         "FAILED" => {
-            let detail = status
-                .result_xdr
-                .map(|xdr| format!(" (resultXdr: {xdr})"))
-                .unwrap_or_default();
-            tracing::warn!(hash = %hash, status = "FAILED", detail_len = detail.len(), "transaction_failed");
-            Ok(TxConfirmStatus::Failed { detail })
+            tracing::warn!(hash = %hash, status = "FAILED", "transaction_failed");
+            Ok(TxConfirmStatus::Failed {
+                result_xdr: status.result_xdr,
+            })
         }
         _ => {
             tracing::debug!(hash = %hash, "transaction_pending");

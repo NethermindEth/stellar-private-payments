@@ -156,7 +156,11 @@ pub fn submit(envelopes: &Envelopes, signed: &str, call: &OperatorCall, json: bo
                 output::print_kv("hash", hash);
                 return Ok(());
             }
-            CallStatus::Failed { detail } => bail!("{} {hash} failed{detail}", call.method),
+            CallStatus::Failed { result_xdr } => bail!(
+                "{} {hash} failed (resultXdr: {})",
+                call.method,
+                result_xdr.as_deref().unwrap_or("none")
+            ),
             CallStatus::Pending => std::thread::sleep(Duration::from_secs(1)),
         }
     }

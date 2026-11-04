@@ -41,7 +41,11 @@ impl SigningStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallStatus {
     Success,
-    Failed { detail: String },
+    /// The call landed and failed; `result_xdr` is the base64
+    /// `TransactionResult`, when the RPC returned one.
+    Failed {
+        result_xdr: Option<String>,
+    },
     Pending,
 }
 
@@ -83,7 +87,7 @@ impl Envelopes {
     pub async fn confirm(&self, hash: &str) -> Result<CallStatus, Error> {
         Ok(match confirm_tx(&self.rpc, hash).await? {
             TxConfirmStatus::Success => CallStatus::Success,
-            TxConfirmStatus::Failed { detail } => CallStatus::Failed { detail },
+            TxConfirmStatus::Failed { result_xdr } => CallStatus::Failed { result_xdr },
             TxConfirmStatus::Pending => CallStatus::Pending,
         })
     }

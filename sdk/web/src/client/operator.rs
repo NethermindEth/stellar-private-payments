@@ -58,6 +58,95 @@ impl From<NativeAdminState> for AdminState {
     }
 }
 
+/// Exposes the methods every contract handle shares, and the conversion from
+/// its native handle.
+macro_rules! contract_handle {
+    ($handle:ident, $native:ident) => {
+        impl From<$native> for $handle {
+            fn from(inner: $native) -> Self {
+                Self { inner }
+            }
+        }
+
+        #[wasm_bindgen]
+        impl $handle {
+            /// Open a session over `rpcUrl` for `contractId`, listed in the
+            /// deployment config or not, without a `Client` or local storage.
+            #[wasm_bindgen(js_name = open)]
+            pub fn open(
+                rpc_url: String,
+                contract_config: JsValue,
+                contract_id: String,
+            ) -> Result<$handle, JsError> {
+                crate::wasm_start();
+                let config = parse_contract_config(contract_config)?;
+                Ok($native::open(&rpc_url, config, &contract_id)
+                    .map_err(pool_err)?
+                    .into())
+            }
+
+            #[wasm_bindgen(getter, js_name = contractId)]
+            pub fn contract_id(&self) -> String {
+                self.inner.contract_id().to_string()
+            }
+
+            /// Whether the deployment config lists the contract.
+            #[wasm_bindgen(getter)]
+            pub fn listed(&self) -> bool {
+                self.inner.is_listed()
+            }
+
+            /// Admin and pending admin of the contract.
+            pub async fn admin(&self) -> Result<AdminState, JsError> {
+                Ok(self.inner.admin().await.map_err(pool_err)?.into())
+            }
+
+            /// Propose `newAdmin` (G… or C…), sourced by the current admin.
+            /// The new admin takes over once it signs `acceptAdmin`.
+            #[wasm_bindgen(js_name = proposeAdmin)]
+            pub async fn propose_admin(
+                &self,
+                new_admin: String,
+            ) -> Result<UnsignedOperatorCall, JsValue> {
+                Ok(self
+                    .inner
+                    .propose_admin(&new_admin)
+                    .await
+                    .map_err(operator_err)?
+                    .into())
+            }
+
+            /// Withdraw the pending admin transfer, sourced by the current
+            /// admin.
+            #[wasm_bindgen(js_name = cancelAdminTransfer)]
+            pub async fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, JsValue> {
+                Ok(self
+                    .inner
+                    .cancel_admin_transfer()
+                    .await
+                    .map_err(operator_err)?
+                    .into())
+            }
+
+            /// Complete the pending admin transfer, sourced by the pending
+            /// admin.
+            #[wasm_bindgen(js_name = acceptAdmin)]
+            pub async fn accept_admin(&self) -> Result<UnsignedOperatorCall, JsValue> {
+                Ok(self
+                    .inner
+                    .accept_admin()
+                    .await
+                    .map_err(operator_err)?
+                    .into())
+            }
+        }
+    };
+}
+
+contract_handle!(AllowlistOperator, NativeAllowlistOperator);
+contract_handle!(BlocklistOperator, NativeBlocklistOperator);
+contract_handle!(PoolAdmin, NativePoolAdmin);
+
 /// Session for the admin of one membership tree.
 ///
 /// Open with `client.allowlistOperator(contractId)`, or without a client with
@@ -69,42 +158,9 @@ pub struct AllowlistOperator {
 
 #[wasm_bindgen]
 impl AllowlistOperator {
-    /// Open a session over `rpcUrl` for `contractId`, listed in the
-    /// deployment config or not, without a `Client` or local storage.
-    #[wasm_bindgen(js_name = open)]
-    pub fn open(
-        rpc_url: String,
-        contract_config: JsValue,
-        contract_id: String,
-    ) -> Result<AllowlistOperator, JsError> {
-        crate::wasm_start();
-        let config = parse_contract_config(contract_config)?;
-        Ok(
-            NativeAllowlistOperator::open(&rpc_url, config, &contract_id)
-                .map_err(pool_err)?
-                .into(),
-        )
-    }
-
-    #[wasm_bindgen(getter, js_name = contractId)]
-    pub fn contract_id(&self) -> String {
-        self.inner.contract_id().to_string()
-    }
-
-    /// Whether the deployment config lists the contract.
-    #[wasm_bindgen(getter)]
-    pub fn listed(&self) -> bool {
-        self.inner.is_listed()
-    }
-
     /// On-chain state of the tree.
     pub async fn state(&self) -> Result<AspMembership, JsError> {
         Ok(self.inner.state().await.map_err(pool_err)?.into())
-    }
-
-    /// Admin and pending admin of the tree.
-    pub async fn admin(&self) -> Result<AdminState, JsError> {
-        Ok(self.inner.admin().await.map_err(pool_err)?.into())
     }
 
     /// Append `leaf` (`0x` hex), sourced by the tree's admin.
@@ -114,40 +170,6 @@ impl AllowlistOperator {
         Ok(self
             .inner
             .insert_leaf(leaf)
-            .await
-            .map_err(operator_err)?
-            .into())
-    }
-
-    /// Propose `newAdmin` (G… or C…), sourced by the current admin. The new
-    /// admin takes over once it signs `acceptAdmin`.
-    #[wasm_bindgen(js_name = proposeAdmin)]
-    pub async fn propose_admin(&self, new_admin: String) -> Result<UnsignedOperatorCall, JsValue> {
-        Ok(self
-            .inner
-            .propose_admin(&new_admin)
-            .await
-            .map_err(operator_err)?
-            .into())
-    }
-
-    /// Withdraw the pending admin transfer, sourced by the current admin.
-    #[wasm_bindgen(js_name = cancelAdminTransfer)]
-    pub async fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, JsValue> {
-        Ok(self
-            .inner
-            .cancel_admin_transfer()
-            .await
-            .map_err(operator_err)?
-            .into())
-    }
-
-    /// Complete the pending admin transfer, sourced by the pending admin.
-    #[wasm_bindgen(js_name = acceptAdmin)]
-    pub async fn accept_admin(&self) -> Result<UnsignedOperatorCall, JsValue> {
-        Ok(self
-            .inner
-            .accept_admin()
             .await
             .map_err(operator_err)?
             .into())
@@ -169,12 +191,6 @@ impl AllowlistOperator {
     }
 }
 
-impl From<NativeAllowlistOperator> for AllowlistOperator {
-    fn from(inner: NativeAllowlistOperator) -> Self {
-        Self { inner }
-    }
-}
-
 /// Session for the admin of one non-membership tree.
 ///
 /// Open with `client.blocklistOperator(contractId)`, or without a client with
@@ -186,42 +202,9 @@ pub struct BlocklistOperator {
 
 #[wasm_bindgen]
 impl BlocklistOperator {
-    /// Open a session over `rpcUrl` for `contractId`, listed in the
-    /// deployment config or not, without a `Client` or local storage.
-    #[wasm_bindgen(js_name = open)]
-    pub fn open(
-        rpc_url: String,
-        contract_config: JsValue,
-        contract_id: String,
-    ) -> Result<BlocklistOperator, JsError> {
-        crate::wasm_start();
-        let config = parse_contract_config(contract_config)?;
-        Ok(
-            NativeBlocklistOperator::open(&rpc_url, config, &contract_id)
-                .map_err(pool_err)?
-                .into(),
-        )
-    }
-
-    #[wasm_bindgen(getter, js_name = contractId)]
-    pub fn contract_id(&self) -> String {
-        self.inner.contract_id().to_string()
-    }
-
-    /// Whether the deployment config lists the contract.
-    #[wasm_bindgen(getter)]
-    pub fn listed(&self) -> bool {
-        self.inner.is_listed()
-    }
-
     /// On-chain state of the tree.
     pub async fn state(&self) -> Result<AspNonMembership, JsError> {
         Ok(self.inner.state().await.map_err(pool_err)?.into())
-    }
-
-    /// Admin and pending admin of the tree.
-    pub async fn admin(&self) -> Result<AdminState, JsError> {
-        Ok(self.inner.admin().await.map_err(pool_err)?.into())
     }
 
     /// Block note public keys (`0x` hex), sourced by the tree's admin.
@@ -254,46 +237,6 @@ impl BlocklistOperator {
             .map_err(operator_err)?
             .into())
     }
-
-    /// Propose `newAdmin` (G… or C…), sourced by the current admin. The new
-    /// admin takes over once it signs `acceptAdmin`.
-    #[wasm_bindgen(js_name = proposeAdmin)]
-    pub async fn propose_admin(&self, new_admin: String) -> Result<UnsignedOperatorCall, JsValue> {
-        Ok(self
-            .inner
-            .propose_admin(&new_admin)
-            .await
-            .map_err(operator_err)?
-            .into())
-    }
-
-    /// Withdraw the pending admin transfer, sourced by the current admin.
-    #[wasm_bindgen(js_name = cancelAdminTransfer)]
-    pub async fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, JsValue> {
-        Ok(self
-            .inner
-            .cancel_admin_transfer()
-            .await
-            .map_err(operator_err)?
-            .into())
-    }
-
-    /// Complete the pending admin transfer, sourced by the pending admin.
-    #[wasm_bindgen(js_name = acceptAdmin)]
-    pub async fn accept_admin(&self) -> Result<UnsignedOperatorCall, JsValue> {
-        Ok(self
-            .inner
-            .accept_admin()
-            .await
-            .map_err(operator_err)?
-            .into())
-    }
-}
-
-impl From<NativeBlocklistOperator> for BlocklistOperator {
-    fn from(inner: NativeBlocklistOperator) -> Self {
-        Self { inner }
-    }
 }
 
 /// Session for the admin of one pool.
@@ -307,71 +250,6 @@ pub struct PoolAdmin {
 
 #[wasm_bindgen]
 impl PoolAdmin {
-    /// Open a session over `rpcUrl` for `contractId`, listed in the
-    /// deployment config or not, without a `Client` or local storage.
-    #[wasm_bindgen(js_name = open)]
-    pub fn open(
-        rpc_url: String,
-        contract_config: JsValue,
-        contract_id: String,
-    ) -> Result<PoolAdmin, JsError> {
-        crate::wasm_start();
-        let config = parse_contract_config(contract_config)?;
-        Ok(NativePoolAdmin::open(&rpc_url, config, &contract_id)
-            .map_err(pool_err)?
-            .into())
-    }
-
-    #[wasm_bindgen(getter, js_name = contractId)]
-    pub fn contract_id(&self) -> String {
-        self.inner.contract_id().to_string()
-    }
-
-    /// Whether the deployment config lists the contract.
-    #[wasm_bindgen(getter)]
-    pub fn listed(&self) -> bool {
-        self.inner.is_listed()
-    }
-
-    /// Admin and pending admin of the pool.
-    pub async fn admin(&self) -> Result<AdminState, JsError> {
-        Ok(self.inner.admin().await.map_err(pool_err)?.into())
-    }
-
-    /// Propose `newAdmin` (G… or C…), sourced by the current admin. The new
-    /// admin takes over once it signs `acceptAdmin`.
-    #[wasm_bindgen(js_name = proposeAdmin)]
-    pub async fn propose_admin(&self, new_admin: String) -> Result<UnsignedOperatorCall, JsValue> {
-        Ok(self
-            .inner
-            .propose_admin(&new_admin)
-            .await
-            .map_err(operator_err)?
-            .into())
-    }
-
-    /// Withdraw the pending admin transfer, sourced by the current admin.
-    #[wasm_bindgen(js_name = cancelAdminTransfer)]
-    pub async fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, JsValue> {
-        Ok(self
-            .inner
-            .cancel_admin_transfer()
-            .await
-            .map_err(operator_err)?
-            .into())
-    }
-
-    /// Complete the pending admin transfer, sourced by the pending admin.
-    #[wasm_bindgen(js_name = acceptAdmin)]
-    pub async fn accept_admin(&self) -> Result<UnsignedOperatorCall, JsValue> {
-        Ok(self
-            .inner
-            .accept_admin()
-            .await
-            .map_err(operator_err)?
-            .into())
-    }
-
     /// Point the pool at membership tree `tree`, sourced by the pool admin.
     #[wasm_bindgen(js_name = repointAllowlist)]
     pub async fn repoint_allowlist(&self, tree: String) -> Result<UnsignedOperatorCall, JsValue> {
@@ -414,12 +292,6 @@ impl PoolAdmin {
             .await
             .map_err(operator_err)?
             .into())
-    }
-}
-
-impl From<NativePoolAdmin> for PoolAdmin {
-    fn from(inner: NativePoolAdmin) -> Self {
-        Self { inner }
     }
 }
 

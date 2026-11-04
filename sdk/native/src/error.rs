@@ -7,12 +7,17 @@ use crate::{
 use crate::types::TransactionResult;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("not implemented")]
     NotImplemented,
 
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
+
+    /// A request the SDK refuses before it reaches the network.
+    #[error("{0}")]
+    Refused(String),
 
     #[error(transparent)]
     Rpc(#[from] crate::chain::RpcError),

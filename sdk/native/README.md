@@ -32,7 +32,7 @@ Wallet storage is selected with Cargo features; at least one must be enabled.
 - `unencrypted-storage`: plaintext storage built on rusqlite's bundled SQLite, opened with `LocalStorage::open`. No SQLite3MC is compiled when it is the only storage feature.
 
 ```toml
-stellar-private-payments = { version = "0.2", default-features = false, features = ["unencrypted-storage"] }
+stellar-private-payments = { version = "0.3", default-features = false, features = ["unencrypted-storage"] }
 ```
 
 With both features enabled, SQLite3MC provides SQLite for both kinds of storage. On native targets, the plaintext constructors refuse to open an encrypted database in any configuration; on WASM, the OPFS owner must check before calling `connect_file`.
@@ -148,8 +148,10 @@ A builder refuses a call that reads an entry archiving within those 24 hours
 with `Error::EntriesArchiveSoon`, which lists the `stellar contract extend`
 commands that fix it. `blocking::` mirrors every handle and `Envelopes`.
 
-Migrating: `pool.audit(key)` is now
-`client.gvk_authority(key)?.audit(pool_contract_id)`.
+Migrating to 0.3:
+
+- `pool.audit(key)` is now `client.gvk_authority(key)?.audit(pool_contract_id)`.
+- `Error` is `#[non_exhaustive]`, so a `match` on it needs a wildcard arm.
 
 ## Custom implementations
 

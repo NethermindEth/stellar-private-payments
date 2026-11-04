@@ -10,6 +10,106 @@
 //! either: open them with `open(rpc_url, config, contract_id)` or from
 //! [`crate::Client`], on any contract, listed in the config or not.
 
+/// Defines a handle bound to one administered contract, with the methods every
+/// such handle shares: opening, the admin read and the admin transfer.
+/// `$ids` lists the deployment's contracts of the handle's kind.
+macro_rules! contract_handle {
+    ($(#[$doc:meta])* $handle:ident, $ids:ident) => {
+        $(#[$doc])*
+        pub struct $handle {
+            rpc: crate::chain::RpcClient,
+            contract_config: crate::types::ContractConfig,
+            contract_id: String,
+        }
+
+        impl $handle {
+            /// Opens a session over `rpc_url` for `contract_id`, listed in the
+            /// deployment config or not; see [`Self::is_listed`].
+            pub fn open(
+                rpc_url: &str,
+                contract_config: crate::types::ContractConfig,
+                contract_id: &str,
+            ) -> Result<Self, crate::Error> {
+                Ok(Self::new(
+                    crate::chain::RpcClient::new(rpc_url)?,
+                    contract_config,
+                    contract_id,
+                ))
+            }
+
+            pub(crate) fn new(
+                rpc: crate::chain::RpcClient,
+                contract_config: crate::types::ContractConfig,
+                contract_id: &str,
+            ) -> Self {
+                Self {
+                    rpc,
+                    contract_config,
+                    contract_id: contract_id.to_string(),
+                }
+            }
+
+            pub fn contract_id(&self) -> &str {
+                &self.contract_id
+            }
+
+            /// Whether the deployment config lists the contract.
+            pub fn is_listed(&self) -> bool {
+                crate::operator::$ids(&self.contract_config).contains(&self.contract_id)
+            }
+
+            /// Admin and pending admin of the contract.
+            pub async fn admin(&self) -> Result<crate::operator::AdminState, crate::Error> {
+                crate::operator::read_admin(&self.rpc, &self.contract_config, &self.contract_id)
+                    .await
+            }
+
+            /// Proposes `new_admin` (`G…` or `C…`) as the contract's admin,
+            /// sourced by its current admin. The new admin takes over once it
+            /// calls [`Self::accept_admin`].
+            pub async fn propose_admin(
+                &self,
+                new_admin: &str,
+            ) -> Result<crate::operator::UnsignedOperatorCall, crate::Error> {
+                let new_admin = crate::operator::address_arg(new_admin)?;
+                self.admin_call("update_admin", vec![new_admin]).await
+            }
+
+            /// Withdraws the pending admin transfer, sourced by the current
+            /// admin.
+            pub async fn cancel_admin_transfer(
+                &self,
+            ) -> Result<crate::operator::UnsignedOperatorCall, crate::Error> {
+                self.admin_call("cancel_admin_transfer", Vec::new()).await
+            }
+
+            /// Completes the pending admin transfer, sourced by the pending
+            /// admin.
+            pub async fn accept_admin(
+                &self,
+            ) -> Result<crate::operator::UnsignedOperatorCall, crate::Error> {
+                crate::operator::accept_admin(&self.rpc, &self.contract_config, &self.contract_id)
+                    .await
+            }
+
+            async fn admin_call(
+                &self,
+                method: &str,
+                args: Vec<stellar_xdr::ScVal>,
+            ) -> Result<crate::operator::UnsignedOperatorCall, crate::Error> {
+                crate::operator::admin_call(
+                    &self.rpc,
+                    &self.contract_config,
+                    &self.contract_id,
+                    method,
+                    args,
+                )
+                .await
+            }
+        }
+    };
+}
+
 mod allowlist;
 mod blocklist;
 mod call;
@@ -76,12 +176,10 @@ async fn read_admin(
     contract_id: &str,
 ) -> Result<AdminState, Error> {
     let source = &config.deployer;
-    let admin = rpc
-        .read_contract(contract_id, source, "get_admin", Vec::new())
-        .await?;
-    let pending = rpc
-        .read_contract(contract_id, source, "get_pending_admin", Vec::new())
-        .await?;
+    let (admin, pending) = futures::try_join!(
+        rpc.read_contract(contract_id, source, "get_admin", Vec::new()),
+        rpc.read_contract(contract_id, source, "get_pending_admin", Vec::new()),
+    )?;
     Ok(AdminState {
         admin: scval_to_address_string(&admin)?,
         pending_admin: match pending {
@@ -115,7 +213,7 @@ async fn admin_call(
 fn address_arg(address: &str) -> Result<xdr::ScVal, Error> {
     let address: xdr::ScAddress = address
         .parse()
-        .map_err(|_| Error::InvalidConfig(format!("{address} is not a Stellar address")))?;
+        .map_err(|_| Error::Refused(format!("{address} is not a Stellar address")))?;
     Ok(xdr::ScVal::Address(address))
 }
 
@@ -129,9 +227,7 @@ async fn accept_admin(
     let pending = read_admin(rpc, config, contract_id)
         .await?
         .pending_admin
-        .ok_or_else(|| {
-            Error::InvalidConfig(format!("{contract_id} has no pending admin transfer"))
-        })?;
+        .ok_or_else(|| Error::Refused(format!("{contract_id} has no pending admin transfer")))?;
     call::build_call(
         rpc,
         network_passphrase(config),
@@ -219,8 +315,8 @@ mod tests {
 
     fn refusal(result: Result<impl Sized, Error>) -> String {
         match result {
-            Err(Error::InvalidConfig(message)) => message,
-            Err(other) => panic!("expected InvalidConfig, got {other}"),
+            Err(Error::Refused(message)) => message,
+            Err(other) => panic!("expected a refusal, got {other}"),
             Ok(_) => panic!("expected a refusal"),
         }
     }

@@ -14,85 +14,74 @@ use crate::{
 
 use super::runtime::block_on;
 
-/// Blocking wrapper around [`crate::operator::AllowlistOperator`].
-pub struct AllowlistOperator {
-    inner: AsyncAllowlistOperator,
+/// Defines the blocking wrapper of a contract handle with the methods every
+/// contract handle shares.
+macro_rules! blocking_contract_handle {
+    ($handle:ident, $inner:ident) => {
+        #[doc = concat!("Blocking wrapper around [`crate::operator::", stringify!($handle), "`].")]
+        pub struct $handle {
+            inner: $inner,
+        }
+
+        impl $handle {
+            pub fn open(
+                rpc_url: &str,
+                contract_config: ContractConfig,
+                contract_id: &str,
+            ) -> Result<Self, Error> {
+                Ok(Self {
+                    inner: $inner::open(rpc_url, contract_config, contract_id)?,
+                })
+            }
+
+            pub(crate) fn from_inner(inner: $inner) -> Self {
+                Self { inner }
+            }
+
+            pub fn contract_id(&self) -> &str {
+                self.inner.contract_id()
+            }
+
+            pub fn is_listed(&self) -> bool {
+                self.inner.is_listed()
+            }
+
+            pub fn admin(&self) -> Result<AdminState, Error> {
+                block_on(self.inner.admin())
+            }
+
+            pub fn propose_admin(&self, new_admin: &str) -> Result<UnsignedOperatorCall, Error> {
+                block_on(self.inner.propose_admin(new_admin))
+            }
+
+            pub fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, Error> {
+                block_on(self.inner.cancel_admin_transfer())
+            }
+
+            pub fn accept_admin(&self) -> Result<UnsignedOperatorCall, Error> {
+                block_on(self.inner.accept_admin())
+            }
+        }
+    };
 }
 
+blocking_contract_handle!(AllowlistOperator, AsyncAllowlistOperator);
+blocking_contract_handle!(BlocklistOperator, AsyncBlocklistOperator);
+blocking_contract_handle!(PoolAdmin, AsyncPoolAdmin);
+
 impl AllowlistOperator {
-    pub fn open(
-        rpc_url: &str,
-        contract_config: ContractConfig,
-        contract_id: &str,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            inner: AsyncAllowlistOperator::open(rpc_url, contract_config, contract_id)?,
-        })
-    }
-
-    pub fn contract_id(&self) -> &str {
-        self.inner.contract_id()
-    }
-
-    pub fn is_listed(&self) -> bool {
-        self.inner.is_listed()
-    }
-
     pub fn state(&self) -> Result<AspMembership, Error> {
         block_on(self.inner.state())
-    }
-
-    pub fn admin(&self) -> Result<AdminState, Error> {
-        block_on(self.inner.admin())
     }
 
     pub fn insert_leaf(&self, leaf: Field) -> Result<UnsignedOperatorCall, Error> {
         block_on(self.inner.insert_leaf(leaf))
     }
-
-    pub fn propose_admin(&self, new_admin: &str) -> Result<UnsignedOperatorCall, Error> {
-        block_on(self.inner.propose_admin(new_admin))
-    }
-
-    pub fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, Error> {
-        block_on(self.inner.cancel_admin_transfer())
-    }
-
-    pub fn accept_admin(&self) -> Result<UnsignedOperatorCall, Error> {
-        block_on(self.inner.accept_admin())
-    }
-}
-
-/// Blocking wrapper around [`crate::operator::BlocklistOperator`].
-pub struct BlocklistOperator {
-    inner: AsyncBlocklistOperator,
 }
 
 impl BlocklistOperator {
-    pub fn open(
-        rpc_url: &str,
-        contract_config: ContractConfig,
-        contract_id: &str,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            inner: AsyncBlocklistOperator::open(rpc_url, contract_config, contract_id)?,
-        })
-    }
-
-    pub fn contract_id(&self) -> &str {
-        self.inner.contract_id()
-    }
-
-    pub fn is_listed(&self) -> bool {
-        self.inner.is_listed()
-    }
-
     pub fn state(&self) -> Result<AspNonMembership, Error> {
         block_on(self.inner.state())
-    }
-
-    pub fn admin(&self) -> Result<AdminState, Error> {
-        block_on(self.inner.admin())
     }
 
     pub fn insert_keys(&self, note_keys: &[NotePublicKey]) -> Result<UnsignedOperatorCall, Error> {
@@ -102,60 +91,9 @@ impl BlocklistOperator {
     pub fn delete_key(&self, note_key: &NotePublicKey) -> Result<UnsignedOperatorCall, Error> {
         block_on(self.inner.delete_key(note_key))
     }
-
-    pub fn propose_admin(&self, new_admin: &str) -> Result<UnsignedOperatorCall, Error> {
-        block_on(self.inner.propose_admin(new_admin))
-    }
-
-    pub fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, Error> {
-        block_on(self.inner.cancel_admin_transfer())
-    }
-
-    pub fn accept_admin(&self) -> Result<UnsignedOperatorCall, Error> {
-        block_on(self.inner.accept_admin())
-    }
-}
-
-/// Blocking wrapper around [`crate::operator::PoolAdmin`].
-pub struct PoolAdmin {
-    inner: AsyncPoolAdmin,
 }
 
 impl PoolAdmin {
-    pub fn open(
-        rpc_url: &str,
-        contract_config: ContractConfig,
-        contract_id: &str,
-    ) -> Result<Self, Error> {
-        Ok(Self {
-            inner: AsyncPoolAdmin::open(rpc_url, contract_config, contract_id)?,
-        })
-    }
-
-    pub fn contract_id(&self) -> &str {
-        self.inner.contract_id()
-    }
-
-    pub fn is_listed(&self) -> bool {
-        self.inner.is_listed()
-    }
-
-    pub fn admin(&self) -> Result<AdminState, Error> {
-        block_on(self.inner.admin())
-    }
-
-    pub fn propose_admin(&self, new_admin: &str) -> Result<UnsignedOperatorCall, Error> {
-        block_on(self.inner.propose_admin(new_admin))
-    }
-
-    pub fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, Error> {
-        block_on(self.inner.cancel_admin_transfer())
-    }
-
-    pub fn accept_admin(&self) -> Result<UnsignedOperatorCall, Error> {
-        block_on(self.inner.accept_admin())
-    }
-
     pub fn repoint_allowlist(&self, tree: &str) -> Result<UnsignedOperatorCall, Error> {
         block_on(self.inner.repoint_allowlist(tree))
     }

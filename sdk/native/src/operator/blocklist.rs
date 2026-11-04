@@ -1,80 +1,23 @@
 use crate::{
     Error,
-    chain::{RpcClient, StateFetcher, field_to_scval_u256},
-    types::{AspNonMembership, ContractConfig, Field, NotePublicKey},
+    chain::{StateFetcher, field_to_scval_u256},
+    types::{AspNonMembership, Field, NotePublicKey},
 };
 
-use super::{AdminState, UnsignedOperatorCall, address_arg, read_admin};
+use super::UnsignedOperatorCall;
 
-/// Session for the admin of one non-membership tree.
-///
-/// Open with [`crate::Client::blocklist_operator`].
-pub struct BlocklistOperator {
-    rpc: RpcClient,
-    contract_config: ContractConfig,
-    contract_id: String,
+contract_handle! {
+    /// Session for the admin of one non-membership tree.
+    ///
+    /// Open with [`crate::Client::blocklist_operator`] or [`Self::open`].
+    BlocklistOperator, blocklist_ids
 }
 
 impl BlocklistOperator {
-    /// Opens a session over `rpc_url` for `contract_id`, which need not be in
-    /// the deployment config yet: an operator fills a new non-membership tree
-    /// before it is listed. The contract refuses calls it does not implement.
-    pub fn open(
-        rpc_url: &str,
-        contract_config: ContractConfig,
-        contract_id: &str,
-    ) -> Result<Self, Error> {
-        Ok(Self::new(
-            RpcClient::new(rpc_url)?,
-            contract_config,
-            contract_id,
-        ))
-    }
-
-    pub(crate) fn new(rpc: RpcClient, contract_config: ContractConfig, contract_id: &str) -> Self {
-        Self {
-            rpc,
-            contract_config,
-            contract_id: contract_id.to_string(),
-        }
-    }
-
-    pub fn contract_id(&self) -> &str {
-        &self.contract_id
-    }
-
-    /// Whether the deployment config lists the contract among its
-    /// non-membership trees.
-    pub fn is_listed(&self) -> bool {
-        super::blocklist_ids(&self.contract_config).contains(&self.contract_id)
-    }
-
     /// On-chain state of the tree.
     pub async fn state(&self) -> Result<AspNonMembership, Error> {
         let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())?;
         Ok(fetcher.asp_non_membership_state(&self.contract_id).await?)
-    }
-
-    /// Admin and pending admin of the tree.
-    pub async fn admin(&self) -> Result<AdminState, Error> {
-        read_admin(&self.rpc, &self.contract_config, &self.contract_id).await
-    }
-
-    /// Proposes `new_admin` as the tree's admin, sourced by its current
-    /// admin. The new admin takes over once it calls [`Self::accept_admin`].
-    pub async fn propose_admin(&self, new_admin: &str) -> Result<UnsignedOperatorCall, Error> {
-        let new_admin = address_arg(new_admin)?;
-        self.admin_call("update_admin", vec![new_admin]).await
-    }
-
-    /// Withdraws the pending admin transfer, sourced by the current admin.
-    pub async fn cancel_admin_transfer(&self) -> Result<UnsignedOperatorCall, Error> {
-        self.admin_call("cancel_admin_transfer", Vec::new()).await
-    }
-
-    /// Completes the pending admin transfer, sourced by the pending admin.
-    pub async fn accept_admin(&self) -> Result<UnsignedOperatorCall, Error> {
-        super::accept_admin(&self.rpc, &self.contract_config, &self.contract_id).await
     }
 
     /// Blocks `note_keys`, sourced by the tree's admin: one key goes in with
@@ -100,21 +43,6 @@ impl BlocklistOperator {
         self.admin_call("delete_leaf", vec![field_to_scval_u256(key)])
             .await
     }
-
-    async fn admin_call(
-        &self,
-        method: &str,
-        args: Vec<stellar_xdr::ScVal>,
-    ) -> Result<UnsignedOperatorCall, Error> {
-        super::admin_call(
-            &self.rpc,
-            &self.contract_config,
-            &self.contract_id,
-            method,
-            args,
-        )
-        .await
-    }
 }
 
 /// The method and arguments that insert `note_keys`, each as both key and
@@ -131,7 +59,7 @@ fn insert_keys_call(
     }
     let pair = |key: Field| vec![field_to_scval_u256(key), field_to_scval_u256(key)];
     match keys.as_slice() {
-        [] => Err(Error::InvalidConfig("no note keys to block".to_string())),
+        [] => Err(Error::Refused("no note keys to block".to_string())),
         [key] => Ok(("insert_leaf", pair(*key))),
         keys => {
             let entries = keys
@@ -193,9 +121,6 @@ mod tests {
 
     #[test]
     fn an_empty_list_is_refused() {
-        assert!(matches!(
-            insert_keys_call(&[]),
-            Err(Error::InvalidConfig(_))
-        ));
+        assert!(matches!(insert_keys_call(&[]), Err(Error::Refused(_))));
     }
 }

@@ -154,17 +154,7 @@ pub fn describe(envelope: &xdr::TransactionEnvelope) -> Result<OperatorCall, Err
     if bounds.max_time.0 == 0 {
         return Err(refusal("the envelope never expires"));
     }
-    let [operation] = tx.operations.as_slice() else {
-        return Err(refusal(
-            "the envelope holds something other than one contract call",
-        ));
-    };
-    let xdr::OperationBody::InvokeHostFunction(invoke) = &operation.body else {
-        return Err(refusal(
-            "the envelope holds something other than one contract call",
-        ));
-    };
-    let xdr::HostFunction::InvokeContract(call) = &invoke.host_function else {
+    let ([operation], Some((invoke, call))) = (tx.operations.as_slice(), contract_call(tx)) else {
         return Err(refusal(
             "the envelope holds something other than one contract call",
         ));
@@ -201,8 +191,20 @@ pub fn describe(envelope: &xdr::TransactionEnvelope) -> Result<OperatorCall, Err
     })
 }
 
+fn contract_call(
+    tx: &xdr::Transaction,
+) -> Option<(&xdr::InvokeHostFunctionOp, &xdr::InvokeContractArgs)> {
+    let xdr::OperationBody::InvokeHostFunction(invoke) = &tx.operations.first()?.body else {
+        return None;
+    };
+    match &invoke.host_function {
+        xdr::HostFunction::InvokeContract(call) => Some((invoke, call)),
+        _ => None,
+    }
+}
+
 fn refusal(reason: &str) -> Error {
-    Error::InvalidConfig(format!("refusing the admin call envelope: {reason}"))
+    Error::Refused(format!("refusing the admin call envelope: {reason}"))
 }
 
 pub(crate) fn account_strkey(account: &xdr::MuxedAccount) -> String {
@@ -461,7 +463,7 @@ mod tests {
 
     fn refusal_of(envelope: &xdr::TransactionEnvelope) -> String {
         match describe(envelope) {
-            Err(Error::InvalidConfig(message)) => message,
+            Err(Error::Refused(message)) => message,
             other => panic!("expected a refusal, got {other:?}"),
         }
     }
