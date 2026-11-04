@@ -88,6 +88,14 @@ pub enum Error {
     /// `source`, which would print every cause twice.
     #[error("{0:#}")]
     Other(anyhow::Error),
+
+    /// An admin call reads entries that archive before its signers can be
+    /// expected to send it. Each command extends one of them, paid by
+    /// `ACCOUNT`.
+    #[error(
+        "entries this call reads archive before it expires, so it would fail once sent; extend them, then build the call again"
+    )]
+    EntriesArchiveSoon { extend_commands: Vec<String> },
 }
 
 #[derive(Debug, thiserror::Error)]

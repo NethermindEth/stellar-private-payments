@@ -225,6 +225,8 @@ pub struct LedgerEntryResult {
     pub xdr: String,
     #[serde(rename = "lastModifiedLedgerSeq")]
     pub last_modified_ledger: u32,
+    #[serde(rename = "liveUntilLedgerSeq", default)]
+    pub live_until_ledger: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -299,6 +301,11 @@ impl Client {
     const DEFAULT_TIMEOUT_SECS: u32 = 30;
     // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getLedgerEntries
     const MAX_LEDGER_KEYS_PER_REQUEST: usize = 200;
+
+    /// The RPC URL this client calls.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
 
     /// Creates a client with the default 30-second timeout.
     pub fn new(base_url: &str) -> Result<Self, Error> {

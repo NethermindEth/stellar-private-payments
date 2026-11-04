@@ -12,6 +12,8 @@
 
 mod allowlist;
 mod blocklist;
+mod call;
+mod envelope;
 mod gvk;
 mod pool_admin;
 
@@ -26,6 +28,8 @@ use crate::{
 pub use crate::crypto::derive_asp_user_leaf;
 pub use allowlist::AllowlistOperator;
 pub use blocklist::BlocklistOperator;
+pub use call::{OperatorCall, UnsignedOperatorCall, describe};
+pub use envelope::{CallStatus, Envelopes, SignerWeight, SigningStatus};
 pub use gvk::GvkAuthority;
 pub use pool_admin::PoolAdmin;
 
@@ -97,6 +101,62 @@ async fn read_admin(
             address => Some(scval_to_address_string(&address)?),
         },
     })
+}
+
+/// Builds the call of `method` on `contract_id`, sourced by its current admin.
+async fn admin_call(
+    rpc: &RpcClient,
+    config: &ContractConfig,
+    contract_id: &str,
+    method: &str,
+    args: Vec<xdr::ScVal>,
+) -> Result<UnsignedOperatorCall, Error> {
+    let admin = read_admin(rpc, config, contract_id).await?.admin;
+    call::build_call(
+        rpc,
+        network_passphrase(config),
+        &admin,
+        contract_id,
+        method,
+        args,
+    )
+    .await
+}
+
+/// Parses a `G…` or `C…` strkey into an address argument.
+fn address_arg(address: &str) -> Result<xdr::ScVal, Error> {
+    let address: xdr::ScAddress = address
+        .parse()
+        .map_err(|_| Error::InvalidConfig(format!("{address} is not a Stellar address")))?;
+    Ok(xdr::ScVal::Address(address))
+}
+
+/// Completes the admin transfer of `contract_id`, sourced by its pending
+/// admin.
+async fn accept_admin(
+    rpc: &RpcClient,
+    config: &ContractConfig,
+    contract_id: &str,
+) -> Result<UnsignedOperatorCall, Error> {
+    let pending = read_admin(rpc, config, contract_id)
+        .await?
+        .pending_admin
+        .ok_or_else(|| {
+            Error::InvalidConfig(format!("{contract_id} has no pending admin transfer"))
+        })?;
+    call::build_call(
+        rpc,
+        network_passphrase(config),
+        &pending,
+        contract_id,
+        "accept_admin",
+        Vec::new(),
+    )
+    .await
+}
+
+fn network_passphrase(config: &ContractConfig) -> &str {
+    config.network_passphrase.as_deref().unwrap_or_default()
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -201,6 +261,16 @@ mod tests {
         assert_eq!(blocklist.contract_id(), NON_MEMBERSHIP);
         let pool = client.pool_admin(POOL).expect("a pool");
         assert_eq!(pool.contract_id(), POOL);
+    }
+
+    #[tokio::test]
+    async fn builders_refuse_an_address_argument_before_reading_the_chain() {
+        let pool = client().pool_admin(POOL).expect("a pool");
+        assert!(
+            refusal(pool.repoint_allowlist("not-an-address").await)
+                .contains("not a Stellar address")
+        );
+        assert!(refusal(pool.propose_admin("").await).contains("not a Stellar address"));
     }
 
     #[test]

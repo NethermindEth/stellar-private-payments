@@ -1,0 +1,587 @@
+//! Building and reading the envelope of one admin contract call.
+//!
+//! An admin call is sourced by the contract's admin account, which may need
+//! several signers. Each signer signs the same envelope, so it stays valid for
+//! a day and carries the fee for the rent that accrues while they sign.
+
+use anyhow::{Context, anyhow};
+use stellar_xdr::{self as xdr, Limits, ReadXdr, WriteXdr};
+
+use crate::{
+    Error,
+    chain::{
+        BASE_FEE, PreparedSorobanTx, RpcClient, build_invoke_contract_tx_envelope,
+        scval_to_address_string,
+    },
+};
+
+/// Seconds an admin call stays valid.
+const VALIDITY_SECS: u64 = 86_400;
+
+/// Refundable fee added to every admin call, in stroops. `accept_admin` and
+/// `update_admin` extend an admin entry to 30 days from the ledger they land
+/// on, so each ledger spent signing adds rent the simulation left out: about
+/// 14,000 stroops for a day on testnet in October 2026.
+const ADMIN_RENT_MARGIN: u32 = 100_000;
+
+/// Ledgers an entry an admin call reads must outlive its build: a day of
+/// five-second ledgers, plus an hour.
+const MIN_REMAINING_LEDGERS: u32 = 18_000;
+
+/// An admin call, simulated and ready for its source's signers.
+#[derive(Debug, Clone)]
+pub struct UnsignedOperatorCall {
+    /// Base64 `TransactionEnvelope` without signatures.
+    pub envelope_xdr: String,
+    pub call: OperatorCall,
+}
+
+/// What an admin call envelope does, as its signers read it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperatorCall {
+    pub source: String,
+    pub sequence: i64,
+    /// Most the source pays, in stroops.
+    pub fee: u32,
+    /// Unix seconds after which the network refuses the envelope.
+    pub valid_until: u64,
+    pub contract_id: String,
+    pub method: String,
+    pub args: Vec<xdr::ScVal>,
+}
+
+/// Builds, simulates and checks the call of `method` on `contract_id`, sourced
+/// by `source`.
+///
+/// # Errors
+/// Returns [`Error::EntriesArchiveSoon`] when an entry the call reads archives
+/// within a day, and an RPC or simulation error otherwise.
+pub(crate) async fn build_call(
+    rpc: &RpcClient,
+    network_passphrase: &str,
+    source: &str,
+    contract_id: &str,
+    method: &str,
+    args: Vec<xdr::ScVal>,
+) -> Result<UnsignedOperatorCall, Error> {
+    let account = rpc.get_account(source).await?;
+    let sequence = xdr::SequenceNumber(
+        account
+            .seq_num
+            .0
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("account sequence number overflow"))?,
+    );
+    let mut raw = build_invoke_contract_tx_envelope(
+        source,
+        sequence,
+        BASE_FEE,
+        contract_id,
+        method,
+        args,
+        Vec::new(),
+    )?;
+    let xdr::TransactionEnvelope::Tx(envelope) = &mut raw else {
+        return Err(anyhow!("expected a v1 envelope").into());
+    };
+    envelope.tx.cond = xdr::Preconditions::Time(xdr::TimeBounds {
+        min_time: xdr::TimePoint(0),
+        max_time: xdr::TimePoint(unix_now()?.saturating_add(VALIDITY_SECS)),
+    });
+
+    let simulation = rpc.simulate_transaction(&raw).await?;
+    let prepared = PreparedSorobanTx::from_simulation(&raw, &simulation)?;
+    let mut envelope = xdr::TransactionEnvelope::from_xdr_base64(&prepared.tx_xdr, Limits::none())
+        .context("decode assembled envelope")?;
+    add_rent_margin(&mut envelope)?;
+    let call = describe(&envelope)?;
+    refuse_short_lived_entries(rpc, network_passphrase, &envelope).await?;
+
+    Ok(UnsignedOperatorCall {
+        envelope_xdr: envelope
+            .to_xdr_base64(Limits::none())
+            .context("encode admin call envelope")?,
+        call,
+    })
+}
+
+/// Reads an admin call envelope, refusing anything its signers could not read
+/// in full.
+///
+/// # Errors
+/// Refuses a fee bump, an envelope without an expiring time bound or with any
+/// other condition, more than one operation or one that is not a contract
+/// call, and authorization beyond that call by the envelope's source.
+pub fn describe(envelope: &xdr::TransactionEnvelope) -> Result<OperatorCall, Error> {
+    let xdr::TransactionEnvelope::Tx(envelope) = envelope else {
+        return Err(refusal(
+            "the envelope is a fee bump or a v0 envelope, not an admin call",
+        ));
+    };
+    let tx = &envelope.tx;
+    // A minimum-sequence condition would keep a signed envelope valid past
+    // later admin calls; a bound with no end never expires.
+    let xdr::Preconditions::Time(bounds) = &tx.cond else {
+        return Err(refusal(
+            "the envelope carries conditions other than a time bound",
+        ));
+    };
+    if bounds.max_time.0 == 0 {
+        return Err(refusal("the envelope never expires"));
+    }
+    let [operation] = tx.operations.as_slice() else {
+        return Err(refusal(
+            "the envelope holds something other than one contract call",
+        ));
+    };
+    let xdr::OperationBody::InvokeHostFunction(invoke) = &operation.body else {
+        return Err(refusal(
+            "the envelope holds something other than one contract call",
+        ));
+    };
+    let xdr::HostFunction::InvokeContract(call) = &invoke.host_function else {
+        return Err(refusal(
+            "the envelope holds something other than one contract call",
+        ));
+    };
+    if operation
+        .source_account
+        .as_ref()
+        .is_some_and(|source| *source != tx.source_account)
+    {
+        return Err(refusal("the call has a source other than the envelope's"));
+    }
+    // The signatures cover every source-account entry, so another call's
+    // entry would run undescribed.
+    let described = |entry: &xdr::SorobanAuthorizationEntry| {
+        entry.credentials == xdr::SorobanCredentials::SourceAccount
+            && entry.root_invocation.function
+                == xdr::SorobanAuthorizedFunction::ContractFn(call.clone())
+            && entry.root_invocation.sub_invocations.is_empty()
+    };
+    if !invoke.auth.iter().all(described) {
+        return Err(refusal(
+            "the envelope authorizes something other than this call by its source",
+        ));
+    }
+
+    Ok(OperatorCall {
+        source: account_strkey(&tx.source_account),
+        sequence: tx.seq_num.0,
+        fee: tx.fee,
+        valid_until: bounds.max_time.0,
+        contract_id: scval_to_address_string(&xdr::ScVal::Address(call.contract_address.clone()))?,
+        method: call.function_name.to_utf8_string_lossy(),
+        args: call.args.to_vec(),
+    })
+}
+
+fn refusal(reason: &str) -> Error {
+    Error::InvalidConfig(format!("refusing the admin call envelope: {reason}"))
+}
+
+pub(crate) fn account_strkey(account: &xdr::MuxedAccount) -> String {
+    let key = match account {
+        xdr::MuxedAccount::Ed25519(key) => key.0,
+        xdr::MuxedAccount::MuxedEd25519(muxed) => muxed.ed25519.0,
+    };
+    stellar_strkey::ed25519::PublicKey(key)
+        .to_string()
+        .as_str()
+        .to_string()
+}
+
+fn unix_now() -> Result<u64, Error> {
+    Ok(web_time::SystemTime::now()
+        .duration_since(web_time::UNIX_EPOCH)
+        .context("system clock is before the Unix epoch")?
+        .as_secs())
+}
+
+/// Adds [`ADMIN_RENT_MARGIN`] to the envelope's refundable fee and its fee.
+fn add_rent_margin(envelope: &mut xdr::TransactionEnvelope) -> Result<(), Error> {
+    let xdr::TransactionEnvelope::Tx(envelope) = envelope else {
+        return Err(anyhow!("expected a v1 envelope").into());
+    };
+    let xdr::TransactionExt::V1(data) = &mut envelope.tx.ext else {
+        return Err(anyhow!("the assembled envelope has no Soroban data").into());
+    };
+    data.resource_fee = data
+        .resource_fee
+        .checked_add(i64::from(ADMIN_RENT_MARGIN))
+        .ok_or_else(|| anyhow!("resource fee overflows"))?;
+    envelope.tx.fee = envelope
+        .tx
+        .fee
+        .checked_add(ADMIN_RENT_MARGIN)
+        .ok_or_else(|| anyhow!("fee overflows"))?;
+    Ok(())
+}
+
+/// Persistent entries the envelope reads and does not restore itself. An
+/// entry that archives between build and send fails the call.
+fn live_footprint_keys(envelope: &xdr::TransactionEnvelope) -> Vec<xdr::LedgerKey> {
+    let xdr::TransactionEnvelope::Tx(envelope) = envelope else {
+        return Vec::new();
+    };
+    let xdr::TransactionExt::V1(data) = &envelope.tx.ext else {
+        return Vec::new();
+    };
+    let footprint = &data.resources.footprint;
+    let restored: Vec<&xdr::LedgerKey> = match &data.ext {
+        xdr::SorobanTransactionDataExt::V1(ext) => ext
+            .archived_soroban_entries
+            .iter()
+            .filter_map(|&index| footprint.read_write.get(usize::try_from(index).ok()?))
+            .collect(),
+        xdr::SorobanTransactionDataExt::V0 => Vec::new(),
+    };
+    footprint
+        .read_only
+        .iter()
+        .chain(footprint.read_write.iter())
+        .filter(|key| !restored.contains(key))
+        .filter(|key| match key {
+            xdr::LedgerKey::ContractCode(_) => true,
+            xdr::LedgerKey::ContractData(data) => {
+                data.durability == xdr::ContractDataDurability::Persistent
+            }
+            _ => false,
+        })
+        .cloned()
+        .collect()
+}
+
+async fn refuse_short_lived_entries(
+    rpc: &RpcClient,
+    network_passphrase: &str,
+    envelope: &xdr::TransactionEnvelope,
+) -> Result<(), Error> {
+    let keys = live_footprint_keys(envelope);
+    if keys.is_empty() {
+        return Ok(());
+    }
+    let response = rpc.get_ledger_entries(&keys).await?;
+    let latest = u32::try_from(response.latest_ledger).unwrap_or(u32::MAX);
+    let short: Vec<String> = response
+        .entries
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|entry| {
+            entry
+                .live_until_ledger
+                .is_some_and(|live_until| live_until < latest.saturating_add(MIN_REMAINING_LEDGERS))
+        })
+        .map(|entry| entry.key)
+        .collect();
+    if short.is_empty() {
+        return Ok(());
+    }
+    let ledgers = max_entry_ttl(rpc).await?.saturating_sub(1);
+    let extend_commands = short
+        .iter()
+        .map(|key| {
+            let key = xdr::LedgerKey::from_xdr_base64(key, Limits::none())
+                .context("decode ledger key")?;
+            extend_command(&key, ledgers, rpc.base_url(), network_passphrase)
+        })
+        .collect::<Result<_, Error>>()?;
+    Err(Error::EntriesArchiveSoon { extend_commands })
+}
+
+/// The network's `max_entry_ttl`: an entry lives at most that many ledgers,
+/// counting the current one.
+async fn max_entry_ttl(rpc: &RpcClient) -> Result<u32, Error> {
+    let key = xdr::LedgerKey::ConfigSetting(xdr::LedgerKeyConfigSetting {
+        config_setting_id: xdr::ConfigSettingId::StateArchival,
+    });
+    let response = rpc.get_ledger_entries(&[key]).await?;
+    let entry = response
+        .entries
+        .unwrap_or_default()
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("the RPC returned no state archival settings"))?;
+    match xdr::LedgerEntryData::from_xdr_base64(&entry.xdr, Limits::none())
+        .context("decode state archival settings")?
+    {
+        xdr::LedgerEntryData::ConfigSetting(xdr::ConfigSettingEntry::StateArchival(settings)) => {
+            Ok(settings.max_entry_ttl)
+        }
+        _ => Err(anyhow!("expected state archival settings").into()),
+    }
+}
+
+/// The Stellar CLI command that extends the entry under `key` to live
+/// `ledgers` ledgers past the current one. `ACCOUNT` stands for the payer.
+fn extend_command(
+    key: &xdr::LedgerKey,
+    ledgers: u32,
+    rpc_url: &str,
+    network_passphrase: &str,
+) -> Result<String, Error> {
+    let target = match key {
+        xdr::LedgerKey::ContractCode(code) => format!("--wasm-hash {}", hex::encode(code.hash.0)),
+        xdr::LedgerKey::ContractData(data) => {
+            let id = scval_to_address_string(&xdr::ScVal::Address(data.contract.clone()))?;
+            match &data.key {
+                xdr::ScVal::LedgerKeyContractInstance => format!("--id {id}"),
+                other => format!(
+                    "--id {id} --key-xdr {}",
+                    other
+                        .to_xdr_base64(Limits::none())
+                        .context("encode ledger key")?
+                ),
+            }
+        }
+        _ => return Err(anyhow!("only contract code and data entries can be extended").into()),
+    };
+    Ok(format!(
+        "stellar contract extend {target} --ledgers-to-extend {ledgers} --source-account ACCOUNT \
+         --rpc-url {rpc_url} --network-passphrase '{network_passphrase}'"
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SOURCE: [u8; 32] = [7; 32];
+    const CONTRACT: [u8; 32] = [9; 32];
+
+    fn call_args() -> xdr::InvokeContractArgs {
+        xdr::InvokeContractArgs {
+            contract_address: xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(CONTRACT))),
+            function_name: xdr::ScSymbol::try_from("pause_deposits").expect("symbol"),
+            args: xdr::VecM::default(),
+        }
+    }
+
+    fn source_auth() -> xdr::SorobanAuthorizationEntry {
+        xdr::SorobanAuthorizationEntry {
+            credentials: xdr::SorobanCredentials::SourceAccount,
+            root_invocation: xdr::SorobanAuthorizedInvocation {
+                function: xdr::SorobanAuthorizedFunction::ContractFn(call_args()),
+                sub_invocations: xdr::VecM::default(),
+            },
+        }
+    }
+
+    fn operation(auth: Vec<xdr::SorobanAuthorizationEntry>) -> xdr::Operation {
+        xdr::Operation {
+            source_account: None,
+            body: xdr::OperationBody::InvokeHostFunction(xdr::InvokeHostFunctionOp {
+                host_function: xdr::HostFunction::InvokeContract(call_args()),
+                auth: auth.try_into().expect("auth"),
+            }),
+        }
+    }
+
+    fn soroban_data(
+        footprint: xdr::LedgerFootprint,
+        archived: Vec<u32>,
+    ) -> xdr::SorobanTransactionData {
+        xdr::SorobanTransactionData {
+            ext: if archived.is_empty() {
+                xdr::SorobanTransactionDataExt::V0
+            } else {
+                xdr::SorobanTransactionDataExt::V1(xdr::SorobanResourcesExtV0 {
+                    archived_soroban_entries: archived.try_into().expect("indices"),
+                })
+            },
+            resources: xdr::SorobanResources {
+                footprint,
+                instructions: 0,
+                disk_read_bytes: 0,
+                write_bytes: 0,
+            },
+            resource_fee: 500,
+        }
+    }
+
+    fn envelope() -> xdr::TransactionEnvelope {
+        xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
+            tx: xdr::Transaction {
+                source_account: xdr::MuxedAccount::Ed25519(xdr::Uint256(SOURCE)),
+                fee: 1_000,
+                seq_num: xdr::SequenceNumber(42),
+                cond: xdr::Preconditions::Time(xdr::TimeBounds {
+                    min_time: xdr::TimePoint(0),
+                    max_time: xdr::TimePoint(1_000_000),
+                }),
+                memo: xdr::Memo::None,
+                operations: vec![operation(vec![source_auth()])]
+                    .try_into()
+                    .expect("ops"),
+                ext: xdr::TransactionExt::V1(soroban_data(
+                    xdr::LedgerFootprint {
+                        read_only: xdr::VecM::default(),
+                        read_write: xdr::VecM::default(),
+                    },
+                    Vec::new(),
+                )),
+            },
+            signatures: xdr::VecM::default(),
+        })
+    }
+
+    fn with_tx(edit: impl FnOnce(&mut xdr::Transaction)) -> xdr::TransactionEnvelope {
+        let mut envelope = envelope();
+        let xdr::TransactionEnvelope::Tx(v1) = &mut envelope else {
+            unreachable!()
+        };
+        edit(&mut v1.tx);
+        envelope
+    }
+
+    fn refusal_of(envelope: &xdr::TransactionEnvelope) -> String {
+        match describe(envelope) {
+            Err(Error::InvalidConfig(message)) => message,
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    fn data_key(byte: u8, durability: xdr::ContractDataDurability) -> xdr::LedgerKey {
+        xdr::LedgerKey::ContractData(xdr::LedgerKeyContractData {
+            contract: xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash([byte; 32]))),
+            key: xdr::ScVal::LedgerKeyContractInstance,
+            durability,
+        })
+    }
+
+    #[test]
+    fn describe_reads_the_call_its_signers_sign() {
+        let call = describe(&envelope()).expect("a plain admin call");
+        assert_eq!(
+            call,
+            OperatorCall {
+                source: stellar_strkey::ed25519::PublicKey(SOURCE)
+                    .to_string()
+                    .as_str()
+                    .to_string(),
+                sequence: 42,
+                fee: 1_000,
+                valid_until: 1_000_000,
+                contract_id: stellar_strkey::Contract(CONTRACT)
+                    .to_string()
+                    .as_str()
+                    .to_string(),
+                method: "pause_deposits".to_string(),
+                args: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn describe_refuses_an_envelope_that_never_expires() {
+        let envelope = with_tx(|tx| tx.cond = xdr::Preconditions::None);
+        assert!(refusal_of(&envelope).contains("other than a time bound"));
+        let envelope = with_tx(|tx| {
+            tx.cond = xdr::Preconditions::Time(xdr::TimeBounds {
+                min_time: xdr::TimePoint(0),
+                max_time: xdr::TimePoint(0),
+            })
+        });
+        assert!(refusal_of(&envelope).contains("never expires"));
+    }
+
+    #[test]
+    fn describe_refuses_a_second_operation() {
+        let envelope = with_tx(|tx| {
+            tx.operations = vec![operation(vec![]), operation(vec![])]
+                .try_into()
+                .expect("ops")
+        });
+        assert!(refusal_of(&envelope).contains("one contract call"));
+    }
+
+    #[test]
+    fn describe_refuses_an_operation_sourced_by_another_account() {
+        let envelope = with_tx(|tx| {
+            let mut op = operation(vec![source_auth()]);
+            op.source_account = Some(xdr::MuxedAccount::Ed25519(xdr::Uint256([1; 32])));
+            tx.operations = vec![op].try_into().expect("ops");
+        });
+        assert!(refusal_of(&envelope).contains("source other than"));
+    }
+
+    #[test]
+    fn describe_refuses_authorization_beyond_the_call() {
+        let mut nested = source_auth();
+        nested.root_invocation.sub_invocations = vec![source_auth().root_invocation]
+            .try_into()
+            .expect("sub invocations");
+        let mut other_account = source_auth();
+        other_account.credentials =
+            xdr::SorobanCredentials::Address(xdr::SorobanAddressCredentials {
+                address: xdr::ScAddress::Account(xdr::AccountId(
+                    xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256([1; 32])),
+                )),
+                nonce: 0,
+                signature_expiration_ledger: 0,
+                signature: xdr::ScVal::Void,
+            });
+        for entry in [nested, other_account] {
+            let envelope =
+                with_tx(|tx| tx.operations = vec![operation(vec![entry])].try_into().expect("ops"));
+            assert!(refusal_of(&envelope).contains("authorizes something other"));
+        }
+    }
+
+    #[test]
+    fn rent_margin_raises_both_fees() {
+        let mut envelope = envelope();
+        add_rent_margin(&mut envelope).expect("add margin");
+        let xdr::TransactionEnvelope::Tx(v1) = &envelope else {
+            unreachable!()
+        };
+        assert_eq!(v1.tx.fee, 1_000 + ADMIN_RENT_MARGIN);
+        let xdr::TransactionExt::V1(data) = &v1.tx.ext else {
+            unreachable!()
+        };
+        assert_eq!(data.resource_fee, 500 + i64::from(ADMIN_RENT_MARGIN));
+    }
+
+    #[test]
+    fn live_footprint_keys_skip_restored_and_temporary_entries() {
+        let persistent = data_key(1, xdr::ContractDataDurability::Persistent);
+        let restored = data_key(2, xdr::ContractDataDurability::Persistent);
+        let temporary = data_key(3, xdr::ContractDataDurability::Temporary);
+        let code = xdr::LedgerKey::ContractCode(xdr::LedgerKeyContractCode {
+            hash: xdr::Hash([4; 32]),
+        });
+        let envelope = with_tx(|tx| {
+            tx.ext = xdr::TransactionExt::V1(soroban_data(
+                xdr::LedgerFootprint {
+                    read_only: vec![code.clone(), temporary.clone()]
+                        .try_into()
+                        .expect("ro"),
+                    read_write: vec![persistent.clone(), restored.clone()]
+                        .try_into()
+                        .expect("rw"),
+                },
+                vec![1],
+            ))
+        });
+        assert_eq!(live_footprint_keys(&envelope), vec![code, persistent]);
+    }
+
+    #[test]
+    fn extend_commands_name_the_entry() {
+        let instance = data_key(1, xdr::ContractDataDurability::Persistent);
+        let command = extend_command(&instance, 99, "https://rpc.test", "net").expect("command");
+        assert_eq!(
+            command,
+            format!(
+                "stellar contract extend --id {} --ledgers-to-extend 99 --source-account ACCOUNT \
+                 --rpc-url https://rpc.test --network-passphrase 'net'",
+                stellar_strkey::Contract([1; 32])
+            )
+        );
+        let code = xdr::LedgerKey::ContractCode(xdr::LedgerKeyContractCode {
+            hash: xdr::Hash([4; 32]),
+        });
+        let command = extend_command(&code, 99, "https://rpc.test", "net").expect("command");
+        assert!(command.contains(&format!("--wasm-hash {}", "04".repeat(32))));
+    }
+}

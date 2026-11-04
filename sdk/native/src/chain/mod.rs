@@ -24,5 +24,8 @@ pub(crate) use conversions::{
 pub(crate) use ext_data_hash::hash_ext_data_offchain;
 pub(crate) use indexer::{Indexer, IndexerError};
 pub(crate) use rpc::{Error as RpcError, INVALID_PARAMS_CODE};
+pub(crate) use signer::network_id;
+pub(crate) use soroban_encode::BASE_FEE;
 pub(crate) use submit::{TxConfirmStatus, confirm_tx, submit_tx};
+pub(crate) use tx_assemble::build_invoke_contract_tx_envelope;
 pub(crate) use tx_prepare::PoolTransactInput;
