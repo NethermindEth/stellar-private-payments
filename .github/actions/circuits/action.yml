@@ -2,6 +2,8 @@ name: Circuit artifacts
 description: >
   Use the released circuits when the sources match the release, with the
   committed keys instead of generating new ones on the runner. Otherwise, build them.
+  The released path stages circomlib without the compiler's hint patches, so
+  jobs that ship the circuits source bundle must run make circuits instead.
 
 runs:
   using: composite
@@ -31,6 +33,11 @@ runs:
           tar -xzf "$RUNNER_TEMP/circuits.tar.gz" -C target/circuits-artifacts --wildcards '*.r1cs'
           cp deployments/testnet/circuit_keys/*.bin deployments/testnet/circuit_keys/*.json testdata/
           sh deployments/scripts/circuit-artifacts.sh verify
+          # The circuits source bundle packs circomlib, which only the compiler stages.
+          git init -q circuits/src/circomlib
+          git -C circuits/src/circomlib fetch -q --depth=1 https://github.com/iden3/circomlib.git \
+            "$(tr -d '[:space:]' < circuits/circomlib.lock)"
+          git -C circuits/src/circomlib checkout -q --detach FETCH_HEAD
         else
           echo "Circuits differ from $tag; building them"
           make circuits

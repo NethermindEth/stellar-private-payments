@@ -234,9 +234,10 @@ jobs:
           mkdir -p testdata
           cp deployments/testnet/circuit_keys/*.bin testdata/
           cp deployments/testnet/circuit_keys/*.json testdata/
-      - name: Provide circuit artifacts
+      - name: Build circuit artifacts
         if: steps.registry.outputs.publish == 'true'
-        uses: ./.github/actions/circuits
+        working-directory: .
+        run: make circuits
       - if: steps.registry.outputs.publish == 'true'
         run: npm ci
       - if: steps.registry.outputs.publish == 'true'
@@ -325,8 +326,8 @@ jobs:
           cp deployments/testnet/circuit_keys/*.bin testdata/
           cp deployments/testnet/circuit_keys/*.json testdata/
 
-      - name: Provide circuit artifacts
-        uses: ./.github/actions/circuits
+      - name: Build circuits (release) — produces r1cs
+        run: make circuits
 
       - name: Assemble dist
         run: |
