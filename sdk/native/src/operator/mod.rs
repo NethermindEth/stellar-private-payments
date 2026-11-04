@@ -66,7 +66,8 @@ macro_rules! contract_handle {
 
             /// Proposes `new_admin` (`G…` or `C…`) as the contract's admin,
             /// sourced by its current admin. The new admin takes over once it
-            /// calls [`Self::accept_admin`].
+            /// calls [`Self::accept_admin`]. Builders refuse calls for a
+            /// contract admin, which has to authorize its own.
             pub async fn propose_admin(
                 &self,
                 new_admin: &str,

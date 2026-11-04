@@ -46,12 +46,14 @@ sequenceDiagram
    derives the leaf and builds the admin call. With the CLI, derive the leaf, then add it:
 
    ```bash
-   spp allowlist leaf --note-key NOTE_KEY --asp-secret ASP_SECRET
+   spp allowlist leaf --note-key NOTE_KEY --asp-secret-file -
    spp allowlist add --leaf LEAF --account ASP_ADMIN
    ```
 
-   Replace `NOTE_KEY` and `ASP_SECRET` with the user's values, `LEAF` with the printed leaf, and
-   `ASP_ADMIN` with the tree admin's `stellar keys` identity. For a multisig admin, pass
+   Replace `NOTE_KEY` with the user's note public key, `LEAF` with the printed leaf, and
+   `ASP_ADMIN` with the tree admin's `stellar keys` identity. `leaf` reads the ASP secret from
+   stdin, which keeps it out of the shell history: paste it and press Ctrl-D, or pass a file
+   instead of `-`. For a multisig admin, pass
    `--out tx.xdr` instead of `--account`.
 4. Once the call lands, the user can deposit. Before then, the app tells them to share their keys
    with the ASP.

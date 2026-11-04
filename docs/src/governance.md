@@ -356,6 +356,8 @@ The current admin keeps every power until the new admin's own signers sign the a
 and Accept show only while a transfer is pending. Propose refuses a malformed address, an account
 that does not exist, the current admin, and the pending admin, and asks for confirmation when the
 new admin lacks the shape in [Set up the admin account](#set-up-the-admin-account).
+The page and `spp` build calls only for an account admin. A contract proposed as the admin has to
+authorize its own `accept_admin`, and every later call, outside them.
 
 Replacing a signer needs no transfer. Transfer the admin only when the contracts move to another
 account, such as another organization's. A transfer moves no GVK: a `pool-gvk` pool's GVK is fixed

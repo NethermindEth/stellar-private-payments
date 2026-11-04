@@ -3,7 +3,11 @@
 use anyhow::{Context, Result};
 use clap::Subcommand;
 use serde::Serialize;
-use std::str::FromStr;
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 use stellar_private_payments::{
     blocking::AllowlistOperator,
     operator::{allowlist_ids, derive_asp_user_leaf},
@@ -50,9 +54,10 @@ pub enum AllowlistCommands {
         /// The user's note public key (hex), from `spp keys`
         #[arg(long)]
         note_key: String,
-        /// The user's ASP secret (hex), from `spp asp-secret`
-        #[arg(long)]
-        asp_secret: String,
+        /// File holding the user's ASP secret (hex), from `spp asp-secret`;
+        /// `-` reads it from stdin
+        #[arg(long, value_name = "FILE")]
+        asp_secret_file: PathBuf,
     },
 }
 
@@ -80,8 +85,8 @@ pub fn run(config: &CliConfig, command: AllowlistCommands, json: bool) -> Result
         AllowlistCommands::Show { tree } => show(config, tree.as_deref(), json),
         AllowlistCommands::Leaf {
             note_key,
-            asp_secret,
-        } => leaf(&note_key, &asp_secret, json),
+            asp_secret_file,
+        } => leaf(&note_key, &asp_secret_file, json),
         AllowlistCommands::Add { leaf, tree, write } => {
             let leaf = Field::from_str(&leaf).context("parse --leaf")?;
             let network = config.resolve_network()?;
@@ -160,9 +165,18 @@ fn show(config: &CliConfig, tree: Option<&str>, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn leaf(note_key: &str, asp_secret: &str, json: bool) -> Result<()> {
+fn leaf(note_key: &str, asp_secret_file: &Path, json: bool) -> Result<()> {
     let note = NotePublicKey::parse(note_key).context("parse --note-key")?;
-    let blinding = Field::from_str(asp_secret).context("parse --asp-secret")?;
+    let mut secret = String::new();
+    if asp_secret_file == Path::new("-") {
+        std::io::stdin()
+            .read_to_string(&mut secret)
+            .context("read the ASP secret from stdin")?;
+    } else {
+        secret = std::fs::read_to_string(asp_secret_file)
+            .with_context(|| format!("read {}", asp_secret_file.display()))?;
+    }
+    let blinding = Field::from_str(secret.trim()).context("parse the ASP secret")?;
     let leaf = derive_asp_user_leaf(&note, &blinding)?.to_string();
 
     #[derive(Serialize)]

@@ -79,8 +79,9 @@ fn arg_text(arg: &xdr::ScVal) -> String {
 /// by `source`.
 ///
 /// # Errors
-/// Returns [`Error::EntriesArchiveSoon`] when an entry the call reads archives
-/// within a day, and an RPC or simulation error otherwise.
+/// Returns [`Error::Refused`] when `source` is a contract, which cannot
+/// source a transaction, [`Error::EntriesArchiveSoon`] when an entry the call
+/// reads archives within a day, and an RPC or simulation error otherwise.
 pub(crate) async fn build_call(
     rpc: &RpcClient,
     network_passphrase: &str,
@@ -89,6 +90,12 @@ pub(crate) async fn build_call(
     method: &str,
     args: Vec<xdr::ScVal>,
 ) -> Result<UnsignedOperatorCall, Error> {
+    if stellar_strkey::Contract::from_string(source).is_ok() {
+        return Err(Error::Refused(format!(
+            "the admin {source} is a contract; the operator API builds calls only for account \
+             (G…) admins, so the contract has to authorize its own calls"
+        )));
+    }
     let account = rpc.get_account(source).await?;
     let sequence = xdr::SequenceNumber(
         account
@@ -638,5 +645,23 @@ mod tests {
         });
         let command = extend_command(&code, 99, "https://rpc.test", "net").expect("command");
         assert!(command.contains(&format!("--wasm-hash {}", "04".repeat(32))));
+    }
+
+    #[tokio::test]
+    async fn refuses_a_contract_source_before_reading_the_chain() {
+        let rpc = RpcClient::new("http://127.0.0.1:9").expect("rpc");
+        let contract = stellar_strkey::Contract(CONTRACT).to_string();
+        let result = build_call(
+            &rpc,
+            "passphrase",
+            &contract,
+            &contract,
+            "accept_admin",
+            Vec::new(),
+        )
+        .await;
+        assert!(
+            matches!(result, Err(Error::Refused(message)) if message.contains("is a contract"))
+        );
     }
 }

@@ -102,7 +102,9 @@ macro_rules! contract_handle {
             }
 
             /// Propose `newAdmin` (G… or C…), sourced by the current admin.
-            /// The new admin takes over once it signs `acceptAdmin`.
+            /// The new admin takes over once it signs `acceptAdmin`. Builders
+            /// refuse calls for a contract admin, which has to authorize its
+            /// own.
             #[wasm_bindgen(js_name = proposeAdmin)]
             pub async fn propose_admin(
                 &self,
