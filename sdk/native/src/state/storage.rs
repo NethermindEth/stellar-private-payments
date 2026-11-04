@@ -554,8 +554,8 @@ impl Storage {
             .context("lookup_public_key_by_address")
     }
 
-    /// Maps every address that has registered a key in `note_keys` to the first ledger where that
-    /// registration occurred
+    /// Maps every address that has registered a key in `note_keys` to the first
+    /// ledger where that registration occurred
     ///
     /// Owners can rotate keys and the registry does not enforce uniqueness, so
     /// a key can map to several addresses. Rows are ordered per key by
@@ -3966,17 +3966,19 @@ mod tests {
     }
 
     #[test]
-    fn opening_a_v6_database_applies_the_v7_note_key_index_migration() -> Result<()> {
-        let mut conn = Connection::open_in_memory()?;
-        MIGRATIONS.to_version(&mut conn, 6)?;
-        assert!(
-            !index_exists(&conn, "idx_public_keys_note_key")?,
-            "v6 must predate the index"
-        );
+    fn opening_an_older_database_applies_the_v8_note_key_index_migration() -> Result<()> {
+        for version in [6, 7] {
+            let mut conn = Connection::open_in_memory()?;
+            MIGRATIONS.to_version(&mut conn, version)?;
+            assert!(
+                !index_exists(&conn, "idx_public_keys_note_key")?,
+                "v{version} must predate the index"
+            );
 
-        let storage = Storage::connect_with_connection(conn)?;
+            let storage = Storage::connect_with_connection(conn)?;
 
-        assert!(index_exists(&storage.conn, "idx_public_keys_note_key")?);
+            assert!(index_exists(&storage.conn, "idx_public_keys_note_key")?);
+        }
         Ok(())
     }
 
