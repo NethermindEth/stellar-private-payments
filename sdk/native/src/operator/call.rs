@@ -647,6 +647,7 @@ mod tests {
         assert!(command.contains(&format!("--wasm-hash {}", "04".repeat(32))));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
     async fn refuses_a_contract_source_before_reading_the_chain() {
         let rpc = RpcClient::new("http://127.0.0.1:9").expect("rpc");
