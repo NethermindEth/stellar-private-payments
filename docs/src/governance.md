@@ -187,12 +187,14 @@ spp envelope submit tx.xdr
 ```
 
 Replace `POOL` with the pool's address and `SIGNER` with the signer's `stellar keys` identity.
-`describe` shows the call, who has signed, and the weight collected against the threshold; a
-signer who did not expect this exact call stops there. `sign` adds a signature to the file in place.
-The file holds the envelope as base64 XDR, so a signer with a hardware wallet signs it with
-`stellar tx sign --sign-with-ledger` instead. Once the weight reaches the threshold, anyone runs
-`submit`, which waits until the call lands. Without `--out`, a write signs with `--account` and
-sends the call at once.
+`describe` shows the call, who has signed, and the weight collected against the threshold; a signer
+who did not expect this exact call stops there. `sign` adds a signature to the file in place. It
+refuses a key that is not a signer, a second signature by one key, and any signature once the
+threshold is met, since an unused signature fails the call and cannot be removed. The file holds the
+envelope as base64 XDR, so a signer with a hardware wallet signs it with
+`stellar tx sign --sign-with-ledger` instead. Once the weight reaches the threshold, anyone runs `submit`, which
+refuses an envelope short of it and otherwise waits until the call lands. Without `--out`, a write
+signs with `--account` and sends the call at once.
 
 ### Sign with the CLI
 
