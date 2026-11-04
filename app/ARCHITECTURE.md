@@ -47,7 +47,7 @@ The WASM layer exposes four JS handles with different scope:
 | **`Account`** | Wallet session (address + signer) | `portfolio`, `privacyKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`, `registerPublicKeys`, `pool()` |
 | **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `balance`, `notes` |
 
-`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts. Free helpers such as `deriveAspUserLeaf(notePublicKey, membershipBlinding)` need neither wallet nor storage.
+`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts. The admin page uses the operator handles instead of an `Account`: `allowlistOperator(id)`, `blocklistOperator(id)`, `poolAdmin(id)` and `gvkAuthority(key)`, each bound to one contract or key. `AllowlistOperator.deriveUserLeaf(notePublicKey, membershipBlinding)` needs neither wallet nor storage.
 
 **JS UI (main thread)**
 
@@ -78,7 +78,8 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 - Spawns and configures the prover worker at `Client.new`, unless a pre-configured `prover` is supplied. With that prover, `circuitsBaseUrl` and `circuitLock` may be omitted. Routes storage through `StorageBridge`.
 - **Deployment-wide operations:**
   - Background sync via `backgroundSync`.
-  - Chain reads without a wallet: `contractConfig`, `operationalFeed`, `recipientLookup`, `allContractsData`, `aspState`, `verifySelectiveDisclosure`.
+  - Chain reads without a wallet: `contractConfig`, `operationalFeed`, `recipientLookup`, `allContractsData`, `verifySelectiveDisclosure`.
+  - Operator handles via `allowlistIds`/`allowlistOperator`, `blocklistIds`/`blocklistOperator`, `poolIds`/`poolAdmin` and `gvkAuthority`.
   - Account factory via `account({ networkPassphrase, userAddress?, signerAddress? }, signer)`.
 
 **`Account` (WASM, wasm-bindgen API)**

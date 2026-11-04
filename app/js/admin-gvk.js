@@ -2357,7 +2357,12 @@ async function startAudit({ reset }) {
     const pool = await client().account().pool({ poolContract: poolContractId });
     const decimals = await readDisplayDecimals(pool);
     const fee = await pool.fee();
-    state.audit = await pool.audit(privateKey);
+    const authority = client().gvkAuthority(privateKey);
+    try {
+      state.audit = await authority.audit(poolContractId);
+    } finally {
+      authority.free();
+    }
     state.tokenDecimals = decimals;
     state.poolFee = fee;
     state.auditedPoolContractId = poolContractId;

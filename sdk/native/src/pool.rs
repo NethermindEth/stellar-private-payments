@@ -21,8 +21,6 @@ use crate::{
         verify_disclosure_receipt,
     },
     error::{Error, PlanExecutionError},
-    gvk::GvkAudit,
-    operator::GvkAuthority,
     plan::PreparedTransactionPlan,
     prover::ProverHandle,
     signer::SignerHandle,
@@ -32,8 +30,8 @@ use crate::{
     transact::transact_request_from_step,
     types::{
         AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
-        Estimate, ExtAmount, Field, PoolInfo, PrivatePoolConfig, SignedTransaction,
-        TransactChainContext, TransactionResult, TransferRecipient, first_duplicate,
+        Estimate, ExtAmount, PoolInfo, PrivatePoolConfig, SignedTransaction, TransactChainContext,
+        TransactionResult, TransferRecipient, first_duplicate,
     },
 };
 
@@ -313,19 +311,6 @@ impl PrivatePool {
             .context("simulate transaction")?;
 
         Ok(())
-    }
-
-    #[deprecated(note = "use `GvkAuthority::audit`, opened with `Client::gvk_authority`")]
-    pub async fn audit(&self, global_view_private_key: Field) -> Result<GvkAudit, Error> {
-        GvkAuthority::new(
-            self.rpc.clone(),
-            self.storage.fork()?,
-            self.sync.clone(),
-            self.config.contract_config.clone(),
-            global_view_private_key,
-        )
-        .audit(&self.config.pool_contract_id)
-        .await
     }
 
     // lower level methods

@@ -17,7 +17,7 @@ import init, {
   DisclosureRequest,
   Storage,
   bootnodeRequired as sdkBootnodeRequired,
-  deriveAspUserLeaf as sdkDeriveAspUserLeaf,
+  AllowlistOperator,
   verifySelectiveDisclosure as sdkVerifySelectiveDisclosure,
   configureTelemetry,
   dump_recent_logs,
@@ -441,7 +441,7 @@ export function getCurrentRpcUrl() {
  */
 export async function deriveAspUserLeaf(notePublicKey, membershipBlinding) {
     await ensureWasmInit();
-    return sdkDeriveAspUserLeaf(notePublicKey, membershipBlinding);
+    return AllowlistOperator.deriveUserLeaf(notePublicKey, membershipBlinding);
 }
 
 /**

@@ -322,9 +322,11 @@ async function refreshState({ unlock = false } = {}) {
   try {
     setStatus('Loading contract state...', 'info');
     await ensureCryptoReady({ unlock });
-    const appState = await client().aspState();
-    const membershipState = appState.aspMembership;
-    const nonMembershipState = appState.aspNonMembership;
+    const sdk = client();
+    const [membershipState, nonMembershipState] = await Promise.all([
+      sdk.allowlistOperator(sdk.allowlistIds()[0]).state(),
+      sdk.blocklistOperator(sdk.blocklistIds()[0]).state(),
+    ]);
 
     // Keep an address the operator entered; fill an empty one from the manifest.
     membershipContractInput.value ||= membershipState.contractId;
