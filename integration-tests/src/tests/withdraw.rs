@@ -4,7 +4,8 @@
 use anyhow::Result;
 use stellar_private_payments::{
     Error,
-    types::{AssetDescriptor, NoteAmount},
+    planner::Transact,
+    types::{AssetDescriptor, ExtAmount, NoteAmount},
 };
 
 use super::support::{FEE_STROOPS, assert_contract_error, deploy_default, note_states, session};
@@ -178,6 +179,36 @@ async fn withdraw_malformed_address() -> Result<()> {
             .as_ref()
             .is_err_and(|error| error.to_string().contains("xdr value invalid")),
         "withdrawing to a syntactically invalid address must be rejected for the address: {withdrawal:?}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_raw_withdrawal_to_the_token_is_refused() -> Result<()> {
+    let session = session(deploy_default().await?).await?;
+    let pool = session.pool()?;
+    let config = pool.config();
+    let token_id = config
+        .contract_config
+        .pool(&config.pool_contract_id)?
+        .token_contract_id
+        .clone();
+
+    // No proof exists, so only a refusal before proving gets here.
+    let result = pool
+        .transact(Transact::new(
+            vec![],
+            [NoteAmount::ZERO; 2],
+            ExtAmount::from(-1_000_000),
+            token_id,
+            [None, None],
+            [None, None],
+        ))
+        .await;
+    assert!(
+        matches!(result, Err(Error::WithdrawalToContract)),
+        "{result:?}"
     );
 
     Ok(())

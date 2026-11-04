@@ -6,5 +6,6 @@ mod malformed;
 mod pool_gvk;
 mod pool_policy;
 mod support;
+mod transact;
 mod transfer;
 mod withdraw;

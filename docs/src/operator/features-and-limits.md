@@ -18,10 +18,10 @@ from the one that owns their notes.
 
 ## Admin page
 
-The admin page builds every admin call except a fee claim, which goes through the Stellar CLI. When
-the connected account can sign a call alone, it signs and sends it at once. Otherwise the call waits
-in the Admin Transaction card, where the admin account's signers review, sign, and submit it. Its
-tabs:
+The admin page builds every admin call except accepting a tree the manifest does not name, which
+goes through the Stellar CLI. When the connected account can sign a call alone, it signs and sends
+it at once. Otherwise the call waits in the Admin Transaction card, where the admin account's
+signers review, sign, and submit it. Its tabs:
 
 | Tab | Purpose |
 | --- | --- |
@@ -29,7 +29,7 @@ tabs:
 | Allowlist | Add members |
 | Blocklist | Add and remove keys |
 | Global View | Decrypt and export a GVK pool's notes with the GVK private key |
-| Pools | Pause and unpause deposits, check and build re-points, and make, sign, and send pause files |
+| Pools | Pause and unpause deposits, show and claim the fees collected, check and build re-points, and make, sign, and send pause files |
 | Admins | Propose, cancel, and accept admin transfers |
 
 ## CLI

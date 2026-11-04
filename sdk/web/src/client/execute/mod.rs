@@ -127,11 +127,10 @@ impl PrivatePool {
     }
 }
 
-/// Throws a refusal made before any step confirmed, with the code
-/// [`pool_err`] gives it, so a flow refuses the way `checkDeposit` does. Every
-/// other outcome resolves. A failure after a confirmed step comes wrapped in
-/// [`Error::PlanExecution`], which [`refusal`] does not read, so its result
-/// keeps the step's hash.
+/// Throws a refusal made before any step confirmed, coded by [`pool_err`] as
+/// `checkDeposit` codes it, and resolves every other outcome. A failure after a
+/// confirmed step is wrapped in [`Error::PlanExecution`], which [`refusal`]
+/// skips, so its result keeps the step's hash.
 pub(super) fn execute_result(outcome: ExecuteOutcome) -> Result<PoolExecuteResult, JsError> {
     match outcome {
         ExecuteOutcome::Failed(error) if refusal(&error).is_some() => Err(pool_err(error)),
