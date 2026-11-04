@@ -470,7 +470,7 @@ export async function runOnboardingWizard({
             const panel = makePanel({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Derive note keys and ASP secret',
-                body: 'Your wallet is requested to sign one message. That signature derives your privacy keys locally plus your ASP secret. This does not move funds.',
+                body: 'Your wallet is requested to sign one message. That signature derives your privacy keys locally plus your ASP secret. It does not move funds, but it gives full control of your private funds, so only sign it in the Stellar Private Payments app or CLI.',
                 aside: secretWrap,
             });
             renderContent(panel);

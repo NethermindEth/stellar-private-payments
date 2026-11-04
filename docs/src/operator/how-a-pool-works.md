@@ -93,9 +93,14 @@ recipient. Last, the pool publishes one event for each nullifier and commitment.
 
 ## Keys
 
-Each user has one Stellar account and three keys derived from it. Their wallet signs the message
-`Privacy Pool Key Derivation [v2] (KDF_DOMAIN)`, where `KDF_DOMAIN` is the deployment's KDF
-domain, and the client derives everything below from that signature:
+Each user has one Stellar account, and the client derives three keys from it. The user's wallet
+signs the message below, where `KDF_DOMAIN` is the deployment's KDF domain, and every key in the
+table comes from that one signature:
+
+```text
+Privacy Pool Key Derivation [v3] (KDF_DOMAIN)
+WARNING: signing this gives full control of your private funds. Only sign in the Stellar Private Payments app or CLI.
+```
 
 | Key | Used for |
 | --- | --- |
@@ -107,6 +112,19 @@ The same wallet and KDF domain always produce the same keys, so a user who loses
 signs again and the client rebuilds their notes from events. Only app settings and the record of
 their past operations are gone. A deployment with another KDF domain gives the same wallet
 different keys.
+
+This makes the signature the user's entire privacy secret. Whoever obtains it derives the same
+keys, so they can read the user's notes and spend them, and nothing on chain can rotate or revoke
+those keys. A phishing site that copies the app only has to get the user to sign the same text.
+After that, the user's only recourse is to move their funds to keys derived from another Stellar
+account before the attacker spends them. The second line of the message is there because the
+wallet's signing prompt is often the only thing the user reads at that moment: it says what the
+signature is worth and that only the app and CLI should ask for it.
+
+Because the message feeds the derivation, changing its text has the same effect as moving to a new
+KDF domain: every user gets different keys. Notes sent to the old keys can't be found or spent with
+the new ones. Registry entries keep the old keys too, and the registry refuses to replace them,
+because it rejects a second registration with different keys.
 
 To receive a transfer, a user shares their note public key and encryption public key. They can
 publish both in the public key registry, which lets senders pay a Stellar address directly, at the
