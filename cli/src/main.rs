@@ -205,7 +205,7 @@ enum Commands {
         #[command(subcommand)]
         command: cmd::operator::blocklist::BlocklistCommands,
     },
-    /// Read the pools, as their admin
+    /// Read and update the pools, as their admin
     PoolAdmin {
         #[command(subcommand)]
         command: cmd::operator::pool_admin::PoolAdminCommands,
@@ -484,10 +484,25 @@ mod tests {
             "spp envelope describe call.xdr",
             "spp envelope sign call.xdr --as signer",
             "spp envelope submit call.xdr",
+            "spp pool-admin repoint --pool C3 --allowlist C1",
+            "spp pool-admin repoint --pool C3 --blocklist C2 --out call.xdr",
+            "spp pool-admin pause --pool C3",
+            "spp pool-admin unpause --pool C3 --out call.xdr",
+            "spp pool-admin admin --pool C3 cancel",
         ] {
             Cli::try_parse_from(args.split(' ')).unwrap_or_else(|e| panic!("{args}: {e}"));
         }
         assert!(Cli::try_parse_from(["spp", "blocklist", "add"]).is_err());
+        for args in [
+            "spp pool-admin repoint --pool C3",
+            "spp pool-admin repoint --pool C3 --allowlist C1 --blocklist C2",
+            "spp pool-admin pause",
+        ] {
+            assert!(
+                Cli::try_parse_from(args.split(' ')).is_err(),
+                "{args} must be rejected"
+            );
+        }
     }
 
     #[test]
