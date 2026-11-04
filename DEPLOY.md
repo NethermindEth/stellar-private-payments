@@ -196,15 +196,15 @@ deployments/scripts/deploy.sh testnet \
 ## Claim collected fees
 
 A pool keeps two totals: the value of its unspent notes, and the fees it has
-collected and not paid out. Its token balance is their sum, plus any tokens
-sent to it directly, which belong to neither total and no call can pay out.
+collected and not paid out. Its token balance is their sum, plus any tokens sent
+to it directly, which belong to neither total and no call can pay out.
 `claim_fees` pays only from the fees collected, never from the value in users'
-notes, and returns `Error(Contract, #23)` for a negative amount, an amount
-above the fees collected, or the pool itself as recipient. A claim needs the
-admin's authorization, works while deposits are paused, and publishes a
-`FeesClaimed` event. An M-of-N admin claims with the admin page's Claim fees
-button or with the CLI, as the
-[governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md#claim-collected-fees)
+notes. It returns `Error(Contract, #23)` for a negative amount or an amount
+above the fees collected, and `Error(Contract, #24)` for a claim paid to the
+pool or its token contract. A claim needs the admin's authorization, works while
+deposits are paused, and publishes a `FeesClaimed` event. An M-of-N admin claims
+with the admin page's Claim fees button or with the CLI, as the [governance
+runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md#claim-collected-fees)
 describes. For a classic asset, the admin account needs a trustline to the
 asset, authorized by the issuer if the asset requires authorization, before a
 claim can pay it.
