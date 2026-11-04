@@ -128,9 +128,11 @@ What `spp onboard` does:
    wallet key envelope (`spp.db.key`) using `--storage-account` (defaulting to
    `--account`) via `stellar message sign`.
 2. Accepts the disclaimer.
-3. When privacy keys are missing, signs `Privacy Pool Key Derivation [v2] (<kdf_domain>)`
-   via `stellar message sign` using the account alias (the Stellar secret key
-   never enters the `spp` process).
+3. When privacy keys are missing, signs the key-derivation message with
+   `stellar message sign` under the account alias, so the Stellar secret key
+   never enters the `spp` process. The message is
+   `Privacy Pool Key Derivation [v3] (<kdf_domain>)`, and its second line warns
+   that the signature gives full control of the account's private funds.
 4. Strictly verifies the SEP-53 signature against the account's own public key,
    then derives and stores the privacy note/encryption keys and ASP blinding.
    An invalid signature or one made by another account aborts onboarding
