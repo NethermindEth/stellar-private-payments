@@ -82,6 +82,8 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
     export class DisclosureRequest {};
     export function bootnodeRequired() {};
     export class AllowlistOperator {};
+    export class BlocklistOperator {};
+    export class PoolAdmin {};
     export async function verifySelectiveDisclosure(rpc, receipt, hash, options) { verifications.push(options); }
     export function configureTelemetry() {};
     export function dump_recent_logs() {};

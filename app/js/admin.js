@@ -1,14 +1,14 @@
 import { deploymentDefaults } from './network-config.js';
 import { StrKey, contract, scValToNative, xdr } from '@stellar/stellar-sdk';
-import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, loadDeploymentConfig, isStorageUnlocked, lockStorage, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, loadDeploymentConfig, openOperator, isStorageUnlocked, lockStorage, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
 import { explorerPreference } from './public-settings.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
-import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
+import { NoAnswer, adminTxFromHash, adminTxLink, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, entriesLine, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance, replacesLine, unusedListWarning, usesList } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, countedEntry, decodeAuthorization, depositsPaused, describeAuthorization, encodeAuthorization, ledgerDate, mergeSignatures, nonceSpent, pauseFileProblem, pauseFileState, pauseFileWeight, pauseTransaction, uncountedSigners, verifySignatures, walletSignature } from './pause-authorization.js';
 
@@ -519,20 +519,20 @@ function loadAdminTx(xdr, kind) {
   renderAdminTx(kind);
 }
 
-// Builds an admin call into the card, and signs and submits it at once when the
-// connected account's weight alone meets the source's threshold.
-async function prepareAdminCall(kind, call) {
+// Builds `build(operator)` for `contractId` into the card, and signs and submits
+// it at once when the connected account's weight alone meets the source's threshold.
+async function prepareAdminCall(kind, contractId, build) {
   if (state.busy) throw new Error('Wait for the current step to finish.');
   setBusy(true);
   let signed;
   try {
     let built;
+    let listed;
     try {
-      built = await buildAdminCall({
-        rpcUrl: state.rpcUrl,
-        networkPassphrase: state.networkPassphrase,
-        ...call,
-      });
+      const operator = await openOperator(kind, state.rpcUrl, contractId);
+      listed = operator.listed;
+      const unsigned = await build(operator);
+      built = { xdr: unsigned.envelopeXdr, source: unsigned.call.source };
     } catch (err) {
       // The card keeps the extend commands, which outlast the toast.
       if (err.extendCommands) {
@@ -543,8 +543,9 @@ async function prepareAdminCall(kind, call) {
       throw err;
     }
     loadAdminTx(built.xdr, kind);
+    if (!listed) warnAdminTx(`${shortAddress(contractId)} is not in the deployment config.`);
     // The card reports an account it cannot read.
-    const account = await rpcServer(state.rpcUrl).getAccountEntry(call.source).catch(() => null);
+    const account = await rpcServer(state.rpcUrl).getAccountEntry(built.source).catch(() => null);
     const rule = account && signingRule(account);
     if (!rule || (rule.weights.get(state.address) ?? 0) < rule.threshold) {
       setStatus('Admin call built. Each signer signs it, then submit it.', 'ok');
@@ -673,7 +674,7 @@ async function copyText(text, what) {
 // Admin calls
 // -----------------------------
 // Reads a contract's admin from its `Admin` entry, which also works for
-// contracts without `get_admin`. Every call the page builds uses it as source.
+// contracts without `get_admin`.
 async function storedAdmin(contractId) {
   const { val } = await rpcServer(state.rpcUrl).getContractData(contractId, xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('Admin')]));
   return scValToNative(val.contractData.val);
@@ -712,17 +713,8 @@ async function insertMembershipLeaf() {
     addToAllowlistBtn.textContent = 'Processing...';
 
     setStatus('Building the allowlist insert...', 'info');
-    await ensureCryptoReady({ unlock: true });
-
-    const leafHex = await deriveAspUserLeaf(notePublicKey, aspSecret);
-    const leafValue = BigInt(leafHex);
-
-    await prepareAdminCall('asp-membership', {
-      source: await storedAdmin(contractId),
-      contractId,
-      method: 'insert_leaf',
-      args: { leaf: leafValue },
-    });
+    const leaf = await deriveAspUserLeaf(notePublicKey, aspSecret);
+    await prepareAdminCall('asp-membership', contractId, (tree) => tree.insertLeaf(leaf));
 
     allowlistPublicKeyInput.value = '';
     allowlistAspSecretInput.value = '';
@@ -759,8 +751,7 @@ async function insertNonMembershipLeaf() {
     addToBlocklistBtn.textContent = 'Processing...';
 
     setStatus('Building the blocklist insert...', 'info');
-    const call = blocklistInsertCall(keys, Boolean((await readClient(contractId)).insert_leaves));
-    await prepareAdminCall('asp-non-membership', { source: await storedAdmin(contractId), contractId, ...call });
+    await prepareAdminCall('asp-non-membership', contractId, (tree) => tree.insertKeys(keys.map(blocklistKeyToNoteKey)));
 
     blocklistPublicKeyInput.value = '';
   } catch (err) {
@@ -789,12 +780,7 @@ async function removeNonMembershipLeaf() {
     removeFromBlocklistBtn.textContent = 'Processing...';
 
     setStatus('Building the blocklist removal...', 'info');
-    await prepareAdminCall('asp-non-membership', {
-      source: await storedAdmin(contractId),
-      contractId,
-      method: 'delete_leaf',
-      args: { key: keyValue },
-    });
+    await prepareAdminCall('asp-non-membership', contractId, (tree) => tree.deleteKey(blocklistKeyToNoteKey(keyValue)));
 
     blocklistPublicKeyInput.value = '';
   } catch (err) {
@@ -870,16 +856,15 @@ async function poolRow(contractId, lists) {
       row.querySelector('.pool-actions').remove();
       return row;
     }
-    const [{ result }, admin] = await Promise.all([pool.deposits_paused(), storedAdmin(contractId)]);
-    const paused = result.unwrap();
+    const paused = (await pool.deposits_paused()).result.unwrap();
     depositsEl.textContent = paused ? 'paused' : 'open';
     // A pause on a paused pool changes nothing but still costs a signed transaction.
     const pause = row.querySelector('.pause-deposits-btn');
     const unpause = row.querySelector('.unpause-deposits-btn');
     pause.disabled = paused;
     unpause.disabled = !paused;
-    pause.addEventListener('click', () => buildRowCall(pause, 'pool', { source: admin, contractId, method: 'pause_deposits' }));
-    unpause.addEventListener('click', () => buildRowCall(unpause, 'pool', { source: admin, contractId, method: 'unpause_deposits' }));
+    pause.addEventListener('click', () => buildRowCall(pause, 'pool', contractId, 'pause_deposits', (admin) => admin.pauseDeposits()));
+    unpause.addEventListener('click', () => buildRowCall(unpause, 'pool', contractId, 'unpause_deposits', (admin) => admin.unpauseDeposits()));
   } catch (err) {
     depositsEl.textContent = `could not be read: ${err.message}`;
     row.querySelector('.pool-actions').remove();
@@ -888,7 +873,7 @@ async function poolRow(contractId, lists) {
 }
 
 // Builds a table row's call, holding the pressed button at its width until done.
-async function buildRowCall(button, kind, call) {
+async function buildRowCall(button, kind, contractId, method, build) {
   if (refuseWhileBusy()) return;
   const { disabled, textContent } = button;
   button.style.minWidth = `${button.offsetWidth}px`;
@@ -896,11 +881,11 @@ async function buildRowCall(button, kind, call) {
   button.textContent = 'Processing...';
   try {
     ensureWalletConnected();
-    setStatus(`${callName(call.method)}: building the call...`, 'info');
-    await prepareAdminCall(kind, call);
+    setStatus(`${callName(method)}: building the call...`, 'info');
+    await prepareAdminCall(kind, contractId, build);
   } catch (err) {
-    setStatus(`${callName(call.method)}: couldn't build the call`, 'error');
-    showToast(`${callName(call.method)} failed: ${explainFailure(err, kind)}`, 'error');
+    setStatus(`${callName(method)}: couldn't build the call`, 'error');
+    showToast(`${callName(method)} failed: ${explainFailure(err, kind)}`, 'error');
   } finally {
     Object.assign(button, { disabled, textContent });
     button.style.minWidth = '';
@@ -1090,7 +1075,7 @@ async function checkRepoint() {
         source: admin,
         contractId: pool,
         method: repointMethod(allowlist),
-        args: allowlist ? { new_asp_membership: tree } : { new_asp_non_membership: tree },
+        build: (poolAdmin) => (allowlist ? poolAdmin.repointAllowlist(tree) : poolAdmin.repointBlocklist(tree)),
       },
     });
     renderRepoint();
@@ -1443,9 +1428,7 @@ function showAddress(cell, address) {
   cell.replaceChildren(button);
 }
 
-// A contract without `get_pending_admin` hands over control at once on
-// `update_admin`, and an unreadable contract shows its error; neither row gets
-// buttons.
+// An unreadable contract shows its error and gets no buttons.
 async function adminRow({ label, kind, contractId }) {
   const row = adminRowTemplate.content.cloneNode(true).firstElementChild;
   row.querySelector('.admin-label').textContent = label;
@@ -1453,14 +1436,8 @@ async function adminRow({ label, kind, contractId }) {
   const adminEl = row.querySelector('.admin-current');
   const pendingEl = row.querySelector('.admin-pending');
   try {
-    const [admin, target] = await Promise.all([storedAdmin(contractId), readClient(contractId)]);
+    const { admin, pendingAdmin: pending } = await (await openOperator(kind, state.rpcUrl, contractId)).admin();
     showAddress(adminEl, admin);
-    if (!target.get_pending_admin) {
-      pendingEl.textContent = 'not available';
-      row.querySelector('.admin-actions').remove();
-      return row;
-    }
-    const { result: pending } = await target.get_pending_admin();
     const newAdminInput = row.querySelector('.new-admin-input');
     const propose = row.querySelector('.propose-admin-btn');
     propose.addEventListener('click', async () => {
@@ -1474,7 +1451,7 @@ async function adminRow({ label, kind, contractId }) {
       propose.disabled = true;
       const confirmed = await confirmCustody(newAdmin).finally(() => { propose.disabled = false; });
       if (confirmed) {
-        buildRowCall(propose, kind, { source: admin, contractId, method: 'update_admin', args: { new_admin: newAdmin } });
+        buildRowCall(propose, kind, contractId, 'update_admin', (operator) => operator.proposeAdmin(newAdmin));
       }
     });
     if (!pending) {
@@ -1485,8 +1462,8 @@ async function adminRow({ label, kind, contractId }) {
     showAddress(pendingEl, pending);
     const cancel = row.querySelector('.cancel-admin-btn');
     const accept = row.querySelector('.accept-admin-btn');
-    cancel.addEventListener('click', () => buildRowCall(cancel, kind, { source: admin, contractId, method: 'cancel_admin_transfer' }));
-    accept.addEventListener('click', () => buildRowCall(accept, kind, { source: pending, contractId, method: 'accept_admin' }));
+    cancel.addEventListener('click', () => buildRowCall(cancel, kind, contractId, 'cancel_admin_transfer', (operator) => operator.cancelAdminTransfer()));
+    accept.addEventListener('click', () => buildRowCall(accept, kind, contractId, 'accept_admin', (operator) => operator.acceptAdmin()));
   } catch (err) {
     adminEl.textContent = `could not be read: ${err.message}`;
     row.querySelector('.admin-actions').remove();
@@ -1594,7 +1571,8 @@ clearRepointRecordsBtn.addEventListener('click', () => {
 checkRepointBtn.addEventListener('click', checkRepoint);
 // The build restores the button; re-sync it with the check and the card.
 buildRepointBtn.addEventListener('click', async () => {
-  await buildRowCall(buildRepointBtn, 'pool', state.repoint.call);
+  const { contractId, method, build } = state.repoint.call;
+  await buildRowCall(buildRepointBtn, 'pool', contractId, method, build);
   renderRepoint();
 });
 

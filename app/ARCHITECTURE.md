@@ -47,7 +47,7 @@ The WASM layer exposes four JS handles with different scope:
 | **`Account`** | Wallet session (address + signer) | `portfolio`, `privacyKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`, `registerPublicKeys`, `pool()` |
 | **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `balance`, `notes` |
 
-`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts. The admin page uses the operator handles instead of an `Account`: `allowlistOperator(id)`, `blocklistOperator(id)`, `poolAdmin(id)` and `gvkAuthority(key)`, each bound to one contract or key. `AllowlistOperator.deriveUserLeaf(notePublicKey, membershipBlinding)` needs neither wallet nor storage.
+`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts. The admin page uses the operator handles instead of an `Account`: `allowlistOperator(id)`, `blocklistOperator(id)`, `poolAdmin(id)` and `gvkAuthority(key)`, each bound to one contract or key. `AllowlistOperator.deriveUserLeaf(notePublicKey, membershipBlinding)` needs neither wallet nor storage. Admin writes and the admin rows open a handle with the static `open(rpcUrl, contractConfig, id)` (`openOperator` in `wasm-facade.js`), which needs no storage either; `admin-transactions.js` keeps signing, submission and failure messages.
 
 **JS UI (main thread)**
 
