@@ -122,7 +122,7 @@ use stellar_xdr as xdr;
 
 use crate::{
     Error,
-    chain::{RpcClient, scval_to_address_string},
+    chain::{RpcClient, RpcError, scval_to_address_string},
     types::ContractConfig,
 };
 
@@ -177,10 +177,17 @@ async fn read_admin(
     contract_id: &str,
 ) -> Result<AdminState, Error> {
     let source = &config.deployer;
-    let (admin, pending) = futures::try_join!(
-        rpc.read_contract(contract_id, source, "get_admin", Vec::new()),
-        rpc.read_contract(contract_id, source, "get_pending_admin", Vec::new()),
-    )?;
+    let read = |method: &'static str| async move {
+        rpc.read_contract(contract_id, source, method, Vec::new())
+            .await
+            .map_err(|e| match e {
+                RpcError::Simulation(reason) => {
+                    RpcError::Simulation(format!("{method} of {contract_id}: {reason}"))
+                }
+                other => other,
+            })
+    };
+    let (admin, pending) = futures::try_join!(read("get_admin"), read("get_pending_admin"))?;
     Ok(AdminState {
         admin: scval_to_address_string(&admin)?,
         pending_admin: match pending {
@@ -369,5 +376,90 @@ mod tests {
         assert!(client.blocklist_operator(NON_MEMBERSHIP).is_listed());
         assert!(client.pool_admin(POOL).is_listed());
         assert!(!client.pool_admin(NON_MEMBERSHIP).is_listed());
+    }
+
+    mod admin_getters {
+        use serde_json::json;
+        use stellar_xdr::{self as xdr, Limits, WriteXdr};
+        use wiremock::{Mock, MockServer};
+
+        use super::refusal;
+        use crate::operator::{
+            PoolAdmin,
+            call::tests::{rpc_answer, simulating},
+            test_support::config,
+        };
+
+        const CONTRACT: &str = "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE";
+
+        fn admin() -> String {
+            stellar_strkey::ed25519::PublicKey([3; 32])
+                .to_string()
+                .as_str()
+                .to_string()
+        }
+
+        /// A pool whose getters return the given values, or fail as on a
+        /// contract that lacks them.
+        async fn pool(
+            admin_value: Option<xdr::ScVal>,
+            pending_value: Option<xdr::ScVal>,
+        ) -> (MockServer, PoolAdmin) {
+            let server = MockServer::start().await;
+            for (method, value) in [
+                ("get_admin", admin_value),
+                ("get_pending_admin", pending_value),
+            ] {
+                let result = match value {
+                    Some(value) => json!({
+                        "latestLedger": 1,
+                        "results": [{ "xdr": value.to_xdr_base64(Limits::none()).expect("xdr") }],
+                    }),
+                    None => {
+                        json!({ "latestLedger": 1, "error": "HostError: non-existent contract function" })
+                    }
+                };
+                Mock::given(simulating(method))
+                    .respond_with(rpc_answer(result))
+                    .mount(&server)
+                    .await;
+            }
+            let mut deployment = config();
+            deployment.deployer = admin();
+            let pool = PoolAdmin::open(&server.uri(), deployment, CONTRACT).expect("pool admin");
+            (server, pool)
+        }
+
+        fn address() -> Option<xdr::ScVal> {
+            Some(xdr::ScVal::Address(admin().parse().expect("address")))
+        }
+
+        fn error(result: Result<impl Sized, crate::Error>) -> String {
+            result.err().expect("an error").to_string()
+        }
+
+        #[tokio::test]
+        async fn a_contract_without_get_pending_admin_names_it() {
+            let (_server, pool) = pool(address(), None).await;
+            let named = format!("get_pending_admin of {CONTRACT}");
+            assert!(error(pool.admin().await).contains(&named));
+            assert!(error(pool.accept_admin().await).contains(&named));
+        }
+
+        #[tokio::test]
+        async fn a_contract_without_get_admin_names_it() {
+            let (_server, pool) = pool(None, Some(xdr::ScVal::Void)).await;
+            let named = format!("get_admin of {CONTRACT}");
+            assert!(error(pool.admin().await).contains(&named));
+            assert!(error(pool.pause_deposits().await).contains(&named));
+        }
+
+        #[tokio::test]
+        async fn accept_admin_refuses_without_a_pending_admin() {
+            let (_server, pool) = pool(address(), Some(xdr::ScVal::Void)).await;
+            let state = pool.admin().await.expect("admin");
+            assert_eq!((state.admin, state.pending_admin), (admin(), None));
+            assert!(refusal(pool.accept_admin().await).contains("has no pending admin transfer"));
+        }
     }
 }

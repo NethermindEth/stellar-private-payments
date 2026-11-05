@@ -705,4 +705,186 @@ pub(super) mod tests {
             matches!(result, Err(Error::Refused(message)) if message.contains("is a contract"))
         );
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::operator) fn rpc_answer(result: serde_json::Value) -> wiremock::ResponseTemplate {
+        wiremock::ResponseTemplate::new(200)
+            .set_body_json(serde_json::json!({ "jsonrpc": "2.0", "id": 1, "result": result }))
+    }
+
+    /// Matches a simulation of a call to `method`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::operator) fn simulating(
+        method: &'static str,
+    ) -> impl Fn(&wiremock::Request) -> bool + Send + Sync {
+        move |request| {
+            let Ok(body) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
+                return false;
+            };
+            let Some(tx) = body["params"]["transaction"].as_str() else {
+                return false;
+            };
+            let Ok(envelope) = xdr::TransactionEnvelope::from_xdr_base64(tx, Limits::none()) else {
+                return false;
+            };
+            let xdr::TransactionEnvelope::Tx(envelope) = envelope else {
+                return false;
+            };
+            contract_call(&envelope.tx)
+                .is_some_and(|(_, call)| call.function_name.0.as_slice() == method.as_bytes())
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    mod chain {
+        use serde_json::json;
+        use wiremock::{Mock, MockServer, matchers::body_partial_json};
+
+        use super::*;
+
+        pub const LATEST: u32 = 1_000;
+        pub const MAX_ENTRY_TTL: u32 = 3_110_400;
+        pub const PASSPHRASE: &str = "Test SDF Network ; September 2015";
+
+        fn b64(value: &impl WriteXdr) -> String {
+            value.to_xdr_base64(Limits::none()).expect("xdr")
+        }
+
+        async fn ledger_entries(
+            server: &MockServer,
+            keys: &[xdr::LedgerKey],
+            entries: serde_json::Value,
+        ) {
+            let keys: Vec<String> = keys.iter().map(b64).collect();
+            Mock::given(body_partial_json(
+                json!({ "method": "getLedgerEntries", "params": { "keys": keys } }),
+            ))
+            .respond_with(rpc_answer(
+                json!({ "latestLedger": LATEST, "entries": entries }),
+            ))
+            .mount(server)
+            .await;
+        }
+
+        /// A chain where the source's sequence is 41 and `pause_deposits` on
+        /// the contract reads `entries`, each live until the given ledger.
+        pub async fn serve(entries: &[(xdr::LedgerKey, u32)]) -> MockServer {
+            let server = MockServer::start().await;
+            let account_id =
+                xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(SOURCE)));
+            let account = xdr::LedgerEntryData::Account(xdr::AccountEntry {
+                account_id: account_id.clone(),
+                seq_num: xdr::SequenceNumber(41),
+                ..Default::default()
+            });
+            let account_key = xdr::LedgerKey::Account(xdr::LedgerKeyAccount { account_id });
+            let found = json!([{ "key": b64(&account_key), "xdr": b64(&account), "lastModifiedLedgerSeq": 0 }]);
+            ledger_entries(&server, &[account_key], found).await;
+
+            let keys: Vec<xdr::LedgerKey> = entries.iter().map(|(key, _)| key.clone()).collect();
+            let footprint = xdr::LedgerFootprint {
+                read_only: keys.clone().try_into().expect("keys"),
+                read_write: xdr::VecM::default(),
+            };
+            Mock::given(simulating("pause_deposits"))
+                .respond_with(rpc_answer(json!({
+                    "latestLedger": LATEST,
+                    "minResourceFee": "500",
+                    "transactionData": b64(&soroban_data(footprint, Vec::new())),
+                    "results": [{ "auth": [b64(&source_auth())], "xdr": b64(&xdr::ScVal::Void) }],
+                })))
+                .mount(&server)
+                .await;
+            if entries.is_empty() {
+                return server;
+            }
+
+            // The check reads only the keys and TTLs.
+            let found = entries
+                .iter()
+                .map(|(key, live_until)| {
+                    json!({ "key": b64(key), "xdr": "", "lastModifiedLedgerSeq": 0, "liveUntilLedgerSeq": live_until })
+                })
+                .collect();
+            ledger_entries(&server, &keys, found).await;
+            let settings = xdr::LedgerKey::ConfigSetting(xdr::LedgerKeyConfigSetting {
+                config_setting_id: xdr::ConfigSettingId::StateArchival,
+            });
+            let archival = xdr::LedgerEntryData::ConfigSetting(
+                xdr::ConfigSettingEntry::StateArchival(xdr::StateArchivalSettings {
+                    max_entry_ttl: MAX_ENTRY_TTL,
+                    ..Default::default()
+                }),
+            );
+            let found = json!([{ "key": b64(&settings), "xdr": b64(&archival), "lastModifiedLedgerSeq": 0 }]);
+            ledger_entries(&server, &[settings], found).await;
+            server
+        }
+
+        pub async fn build(
+            server: &MockServer,
+        ) -> (RpcClient, Result<UnsignedOperatorCall, Error>) {
+            let rpc = RpcClient::new(&server.uri()).expect("rpc");
+            let source = stellar_strkey::ed25519::PublicKey(SOURCE).to_string();
+            let contract = stellar_strkey::Contract(CONTRACT).to_string();
+            let result = build_call(
+                &rpc,
+                PASSPHRASE,
+                &source,
+                &contract,
+                "pause_deposits",
+                Vec::new(),
+            )
+            .await;
+            (rpc, result)
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn build_call_bounds_pads_and_describes_the_call() {
+        let server = chain::serve(&[]).await;
+        let before = unix_now().expect("now");
+        let (_, result) = chain::build(&server).await;
+        let after = unix_now().expect("now");
+        let unsigned = result.expect("call");
+
+        let envelope =
+            xdr::TransactionEnvelope::from_xdr_base64(&unsigned.envelope_xdr, Limits::none())
+                .expect("envelope");
+        let call = describe(&envelope).expect("describe");
+        assert_eq!(call, unsigned.call);
+        assert_eq!(call.sequence, 42);
+        assert!((before + VALIDITY_SECS..=after + VALIDITY_SECS).contains(&call.valid_until));
+        // The simulation asks a resource fee of 500 for an empty footprint.
+        assert_eq!(call.fee, BASE_FEE + 500 + ADMIN_RENT_MARGIN);
+        let xdr::TransactionEnvelope::Tx(v1) = &envelope else {
+            unreachable!()
+        };
+        let xdr::TransactionExt::V1(data) = &v1.tx.ext else {
+            panic!("expected Soroban data")
+        };
+        assert_eq!(data.resource_fee, 500 + i64::from(ADMIN_RENT_MARGIN));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn build_call_refuses_an_entry_that_archives_within_a_day() {
+        use chain::*;
+
+        let lasts = data_key(1, xdr::ContractDataDurability::Persistent);
+        let archives = data_key(2, xdr::ContractDataDurability::Persistent);
+        let server = serve(&[
+            (lasts, LATEST + MIN_REMAINING_LEDGERS),
+            (archives.clone(), LATEST + MIN_REMAINING_LEDGERS - 1),
+        ])
+        .await;
+        let (rpc, result) = build(&server).await;
+        let Err(Error::EntriesArchiveSoon { extend_commands }) = result else {
+            panic!("expected EntriesArchiveSoon, got {result:?}")
+        };
+        let command = extend_command(&archives, MAX_ENTRY_TTL - 1, rpc.base_url(), PASSPHRASE)
+            .expect("command");
+        assert_eq!(extend_commands, vec![command]);
+    }
 }
