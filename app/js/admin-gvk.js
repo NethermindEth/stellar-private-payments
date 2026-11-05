@@ -2305,9 +2305,8 @@ function resetAuditState() {
   fullPkGraphCache = null;
 }
 
-async function startAudit({ reset }) {
-  const poolContractId = poolSelectEl?.value?.trim();
-  const privateKey = privateKeyEl?.value?.trim();
+async function startAudit(privateKey) {
+  const poolContractId = poolSelectEl.value;
 
   if (!poolContractId) {
     throw new Error('Select a GVK-enabled pool');
@@ -2316,32 +2315,28 @@ async function startAudit({ reset }) {
     throw new Error('Enter the authority private key');
   }
 
-  if (reset) {
-    resetAuditState();
-    renderResults();
-  }
+  resetAuditState();
+  renderResults();
 
-  if (!state.audit) {
-    const wallet = getWalletAccount();
-    if (!wallet) {
-      throw new Error('Connect a wallet before starting a Global View audit');
-    }
-    await client().openAccount(wallet);
-    const pool = await client().account().pool({ poolContract: poolContractId });
-    const decimals = await readDisplayDecimals(pool);
-    const fee = await pool.fee();
-    // An overlapping Sync & Audit may have opened a cursor during the awaits.
-    const audit = await pool.audit(privateKey);
-    if (state.audit) releaseCursor(state.audit);
-    state.audit = audit;
-    state.tokenDecimals = decimals;
-    state.poolFee = fee;
-    state.auditedPoolContractId = poolContractId;
-    const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
-    state.tokenSymbol = tokenLabel(poolEntry);
-    setFilterControlsDisabled(false);
-    state.poolGvkMode = poolEntry?.gvkMode ?? null;
+  const wallet = getWalletAccount();
+  if (!wallet) {
+    throw new Error('Connect a wallet before starting a Global View audit');
   }
+  await client().openAccount(wallet);
+  const pool = await client().account().pool({ poolContract: poolContractId });
+  const decimals = await readDisplayDecimals(pool);
+  const fee = await pool.fee();
+  // An overlapping Sync & Audit may have opened a cursor during the awaits.
+  const audit = await pool.audit(privateKey);
+  if (state.audit) releaseCursor(state.audit);
+  state.audit = audit;
+  state.tokenDecimals = decimals;
+  state.poolFee = fee;
+  state.auditedPoolContractId = poolContractId;
+  const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
+  state.tokenSymbol = tokenLabel(poolEntry);
+  setFilterControlsDisabled(false);
+  state.poolGvkMode = poolEntry?.gvkMode ?? null;
 
   await fetchBatch(BATCH_SIZE);
 }
@@ -2392,7 +2387,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
     resetAuditState();
     renderResults();
     syncActionButtons();
-    setPanelStatus('Pool changed — click Sync & Audit to load it.', 'info');
+    setPanelStatus('Pool changed — enter the authority key and run Sync & Audit.', 'info');
   });
 
   filtersClearBtnEl?.addEventListener('click', () => {
@@ -2420,6 +2415,8 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
   }
 
   auditBtnEl?.addEventListener('click', async () => {
+    const privateKey = privateKeyEl.value.trim();
+    privateKeyEl.value = '';
     const originalText = auditBtnEl.textContent;
     try {
       auditBtnEl.disabled = true;
@@ -2427,7 +2424,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
       auditBtnEl.textContent = 'Syncing…';
       setPanelStatus('Syncing chain data and opening audit cursor…', 'info');
       await ensurePanelReady({ unlock: true });
-      await startAudit({ reset: true });
+      await startAudit(privateKey);
       await applyFiltersAndRender();
     } catch (err) {
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
@@ -2455,7 +2452,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalle
     try {
       loadMoreBtnEl.disabled = true;
       loadMoreBtnEl.textContent = 'Loading…';
-      await startAudit({ reset: false });
+      await fetchBatch(BATCH_SIZE);
       await applyFiltersAndRender();
     } catch (err) {
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
