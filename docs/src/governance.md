@@ -412,10 +412,11 @@ than the RPC's event retention, about seven days on the public testnet RPC:
    For an allowlist, the records file holds the leaves as `0x` hex values. Insert each one:
 
    ```bash
-   spp allowlist add --tree TREE --leaf LEAF --account DEPLOYER
+   spp allowlist add --tree TREE --leaf LEAF --account DEPLOYER --yes
    ```
 
-   Replace `TREE` with the new tree's address and `LEAF` with each line of the records file. A
+   Replace `TREE` with the new tree's address and `LEAF` with each line of the records file.
+   `--yes` answers the question `add` asks before writing to a tree no pool uses yet. A
    leaf is the hash the Allowlist tab derives from a member's note public key and the ASP
    secret. To remove a member, load the current allowlist's leaves less the member's, from the
    ASP's records or that allowlist's `LeafAdded` events.
@@ -425,7 +426,7 @@ than the RPC's event retention, about seven days on the public testnet RPC:
    byte order and leave its owner unblocked:
 
    ```bash
-   spp blocklist add --tree TREE --account DEPLOYER $(cat RECORDS)
+   spp blocklist add --tree TREE --account DEPLOYER --yes $(cat RECORDS)
    ```
 
    Replace `RECORDS` with the records file. A call that needs more resources than one transaction
@@ -460,6 +461,12 @@ than the RPC's event retention, about seven days on the public testnet RPC:
 6. Once every check passes, press Build and make the admin call. The panel reads Built while the
    call waits for signers in the Admin Transaction card, and Done once the card sees it land.
 
+With the CLI, `spp pool-admin repoint --pool POOL --allowlist TREE`, or `--blocklist TREE`, runs
+the panel's checks except the entry comparison. It refuses the tree the pool already uses, and an
+allowlist the deployment config doesn't name or whose levels differ from the current one's. It asks
+before a tree whose admin is not the pool's; `--yes` answers for scripts. Compare the entries with
+your records before running it.
+
 `deploy.sh` points every pool at the same trees, so re-point each pool that reads the old tree,
 one admin call per pool. The keep-alive loop in
 [Keep a deployment alive](./deploy.md#keep-a-deployment-alive) reads each pool's trees, so it
@@ -478,7 +485,9 @@ drop an allowlist's entry once no pool reads it.
 The Allowlist and Blocklist tabs write to the trees in the Overview tab's contract ID fields,
 which start as the manifest's. After a re-point, enter the new tree's address there before writing
 to it. The page asks before a write to a list no pool on the Pools tab uses, and that tab marks a
-list a pool's policy leaves out as not used.
+list a pool's policy leaves out as not used. `spp allowlist` and `spp blocklist` read the enabled
+pools instead: without `--tree`, they act on the tree those pools use, and they ask before a write
+to a tree none of them uses.
 
 Without a file of expected entries, the panel reads storage, which has no age limit: a blocklist's
 keys, or an allowlist's entry count. That is the way back to an allowlist older than the RPC's event

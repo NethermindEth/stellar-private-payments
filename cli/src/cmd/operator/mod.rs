@@ -8,6 +8,7 @@ pub mod allowlist;
 pub mod blocklist;
 pub mod envelope;
 pub mod gvk;
+mod lists;
 pub mod pool_admin;
 mod write;
 

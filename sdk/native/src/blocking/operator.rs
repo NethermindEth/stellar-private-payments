@@ -6,7 +6,7 @@ use crate::{
     operator::{
         AdminState, AllowlistOperator as AsyncAllowlistOperator,
         BlocklistOperator as AsyncBlocklistOperator, CallStatus, Envelopes as AsyncEnvelopes,
-        GvkAuthority as AsyncGvkAuthority, OperatorCall, PoolAdmin as AsyncPoolAdmin,
+        GvkAuthority as AsyncGvkAuthority, OperatorCall, PoolAdmin as AsyncPoolAdmin, PoolLists,
         SigningStatus, UnsignedOperatorCall,
     },
     types::{AspMembership, AspNonMembership, ContractConfig, Field, NotePublicKey},
@@ -94,6 +94,10 @@ impl BlocklistOperator {
 }
 
 impl PoolAdmin {
+    pub fn lists(&self) -> Result<PoolLists, Error> {
+        block_on(self.inner.lists())
+    }
+
     pub fn repoint_allowlist(&self, tree: &str) -> Result<UnsignedOperatorCall, Error> {
         block_on(self.inner.repoint_allowlist(tree))
     }

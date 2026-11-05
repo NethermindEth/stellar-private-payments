@@ -25,6 +25,9 @@ pub struct WriteArgs {
     /// sending it
     #[arg(long)]
     pub out: Option<PathBuf>,
+    /// Continue past a check that asks for confirmation, without asking
+    #[arg(long)]
+    pub yes: bool,
 }
 
 /// Admin transfer of one contract.

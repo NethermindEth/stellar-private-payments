@@ -1,12 +1,17 @@
 //! `pool-admin` — reads and admin calls for the admin of the pools.
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{ArgGroup, Subcommand};
 use serde::Serialize;
-use stellar_private_payments::{blocking::PoolAdmin, operator::pool_ids};
+use stellar_private_payments::{
+    blocking::{AllowlistOperator, BlocklistOperator, PoolAdmin},
+    operator::{PoolLists, allowlist_ids, pool_ids},
+};
 
 use super::{
-    AdminRow, print_admin, rpc_url, selected_ids, warn_unlisted,
+    AdminRow,
+    lists::{ListKind, confirm},
+    print_admin, rpc_url, selected_ids, warn_unlisted,
     write::{AdminCommands, WriteArgs, deliver},
 };
 use crate::{config::CliConfig, output};
@@ -80,10 +85,15 @@ pub fn run(config: &CliConfig, command: PoolAdminCommands, json: bool) -> Result
         } => {
             let network = config.resolve_network()?;
             let admin = open(config, &network.rpc_url, &pool)?;
-            let built = match (allowlist, blocklist) {
-                (Some(tree), _) => admin.repoint_allowlist(&tree)?,
-                (None, Some(tree)) => admin.repoint_blocklist(&tree)?,
+            let (kind, tree) = match (allowlist, blocklist) {
+                (Some(tree), _) => (ListKind::Allowlist, tree),
+                (None, Some(tree)) => (ListKind::Blocklist, tree),
                 (None, None) => unreachable!("clap requires --allowlist or --blocklist"),
+            };
+            check_repoint(config, &network.rpc_url, &admin, kind, &tree, write.yes)?;
+            let built = match kind {
+                ListKind::Allowlist => admin.repoint_allowlist(&tree)?,
+                ListKind::Blocklist => admin.repoint_blocklist(&tree)?,
             };
             deliver(config, &network, built, &write, json)
         }
@@ -108,6 +118,92 @@ pub fn run(config: &CliConfig, command: PoolAdminCommands, json: bool) -> Result
             deliver(config, &network, built, command.write(), json)
         }
     }
+}
+
+/// Runs the admin page's re-point checks, except the entry comparison. The
+/// pool itself checks only the tree's code.
+fn check_repoint(
+    config: &CliConfig,
+    rpc_url: &str,
+    admin: &PoolAdmin,
+    kind: ListKind,
+    tree: &str,
+    yes: bool,
+) -> Result<()> {
+    let lists = admin.lists()?;
+    let listed = allowlist_ids(&config.deployment)
+        .iter()
+        .any(|id| id == tree);
+    if !repoint_changes_users(kind, &lists, tree, listed)? {
+        eprintln!(
+            "note: the pool's policy doesn't use its {}, so this changes nothing for users",
+            kind.name()
+        );
+        return Ok(());
+    }
+    let pool_admin = admin.admin()?.admin;
+    let tree_admin = match kind {
+        ListKind::Allowlist => {
+            let open = |id: &str| AllowlistOperator::open(rpc_url, config.deployment.clone(), id);
+            let new = open(tree)?.state()?;
+            let current = open(&lists.allowlist)?.state()?;
+            check_levels(tree, new.levels, current.levels)?;
+            new.admin
+        }
+        ListKind::Blocklist => {
+            BlocklistOperator::open(rpc_url, config.deployment.clone(), tree)?
+                .state()?
+                .admin
+        }
+    };
+    if tree_admin != pool_admin {
+        confirm(
+            &format!(
+                "{} {tree} is run by {tree_admin}, not the pool's admin {pool_admin}",
+                kind.name()
+            ),
+            yes,
+        )?;
+    }
+    eprintln!(
+        "note: entries are not compared; check them on the admin page or against your records"
+    );
+    Ok(())
+}
+
+/// Whether pointing the pool at `tree` changes what its users prove against.
+/// Refuses the tree the pool already uses, and an allowlist the deployment
+/// config doesn't list, which clients would refuse.
+fn repoint_changes_users(
+    kind: ListKind,
+    lists: &PoolLists,
+    tree: &str,
+    listed: bool,
+) -> Result<bool> {
+    let name = kind.name();
+    if kind.tree(lists) == tree {
+        bail!("the pool already uses {name} {tree}");
+    }
+    if !kind.is_used(lists) {
+        return Ok(false);
+    }
+    if kind == ListKind::Allowlist && !listed {
+        bail!(
+            "the deployment config doesn't list allowlist {tree}, so clients would refuse the \
+             pool; add it to added_asp_memberships in deployments.json first"
+        );
+    }
+    Ok(true)
+}
+
+fn check_levels(tree: &str, levels: u32, needed: u32) -> Result<()> {
+    if levels != needed {
+        bail!(
+            "allowlist {tree} has {levels} levels, but the pool needs {needed}; use an allowlist \
+             built with {needed} levels"
+        );
+    }
+    Ok(())
 }
 
 fn open(config: &CliConfig, rpc_url: &str, pool: &str) -> Result<PoolAdmin> {
@@ -151,4 +247,57 @@ fn show(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use stellar_private_payments::types::PolicyFlags;
+
+    use super::*;
+
+    fn lists(policy_flags: PolicyFlags) -> PoolLists {
+        PoolLists {
+            allowlist: "A-old".to_string(),
+            blocklist: "B-old".to_string(),
+            policy_flags,
+        }
+    }
+
+    #[test]
+    fn a_repoint_to_the_current_tree_is_refused() {
+        let lists = lists(PolicyFlags::ALLOWLIST);
+        let err = repoint_changes_users(ListKind::Allowlist, &lists, "A-old", true)
+            .expect_err("same tree");
+        assert!(err.to_string().contains("already uses"), "{err}");
+    }
+
+    #[test]
+    fn an_unlisted_allowlist_is_refused_only_when_the_pool_uses_it() {
+        let used = lists(PolicyFlags::ALLOWLIST);
+        let err = repoint_changes_users(ListKind::Allowlist, &used, "A-new", false)
+            .expect_err("unlisted");
+        assert!(err.to_string().contains("added_asp_memberships"), "{err}");
+        assert!(repoint_changes_users(ListKind::Allowlist, &used, "A-new", true).expect("listed"));
+
+        let unused = lists(PolicyFlags::BLOCKLIST);
+        assert!(
+            !repoint_changes_users(ListKind::Allowlist, &unused, "A-new", false)
+                .expect("unused allowlist")
+        );
+    }
+
+    #[test]
+    fn a_blocklist_needs_no_listing() {
+        let lists = lists(PolicyFlags::BLOCKLIST);
+        assert!(
+            repoint_changes_users(ListKind::Blocklist, &lists, "B-new", false).expect("blocklist")
+        );
+    }
+
+    #[test]
+    fn an_allowlist_of_other_levels_is_refused() {
+        check_levels("A-new", 10, 10).expect("same levels");
+        let err = check_levels("A-new", 20, 10).expect_err("other levels");
+        assert!(err.to_string().contains("needs 10"), "{err}");
+    }
 }

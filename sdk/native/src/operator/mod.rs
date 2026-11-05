@@ -132,7 +132,7 @@ pub use blocklist::BlocklistOperator;
 pub use call::{OperatorCall, UnsignedOperatorCall, describe};
 pub use envelope::{CallStatus, Envelopes, SignerWeight, SigningStatus};
 pub use gvk::GvkAuthority;
-pub use pool_admin::PoolAdmin;
+pub use pool_admin::{PoolAdmin, PoolLists};
 
 /// A contract's admin and the admin proposed to replace it.
 #[derive(Debug, Clone, PartialEq, Eq)]

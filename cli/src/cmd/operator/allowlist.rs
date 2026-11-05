@@ -15,7 +15,9 @@ use stellar_private_payments::{
 };
 
 use super::{
-    AdminRow, print_admin, rpc_url, selected_ids, warn_unlisted,
+    AdminRow,
+    lists::{ListAccess, ListKind, resolve_tree},
+    print_admin, rpc_url, selected_ids,
     write::{AdminCommands, WriteArgs, deliver},
 };
 use crate::{config::CliConfig, output};
@@ -33,8 +35,8 @@ pub enum AllowlistCommands {
         /// The leaf (hex), from `spp allowlist leaf`
         #[arg(long)]
         leaf: String,
-        /// Membership tree contract id (C…); default: the deployment's
-        /// allowlist
+        /// Membership tree contract id (C…); default: the allowlist the
+        /// enabled pools use
         #[arg(long)]
         tree: Option<String>,
         #[command(flatten)]
@@ -42,8 +44,8 @@ pub enum AllowlistCommands {
     },
     /// Hand a membership tree to a new admin
     Admin {
-        /// Membership tree contract id (C…); default: the deployment's
-        /// allowlist
+        /// Membership tree contract id (C…); default: the allowlist the
+        /// enabled pools use
         #[arg(long)]
         tree: Option<String>,
         #[command(subcommand)]
@@ -90,12 +92,14 @@ pub fn run(config: &CliConfig, command: AllowlistCommands, json: bool) -> Result
         AllowlistCommands::Add { leaf, tree, write } => {
             let leaf = Field::from_str(&leaf).context("parse --leaf")?;
             let network = config.resolve_network()?;
-            let built = open(config, &network.rpc_url, tree.as_deref())?.insert_leaf(leaf)?;
+            let access = ListAccess::Write { yes: write.yes };
+            let built =
+                open(config, &network.rpc_url, tree.as_deref(), access)?.insert_leaf(leaf)?;
             deliver(config, &network, built, &write, json)
         }
         AllowlistCommands::Admin { tree, command } => {
             let network = config.resolve_network()?;
-            let operator = open(config, &network.rpc_url, tree.as_deref())?;
+            let operator = open(config, &network.rpc_url, tree.as_deref(), ListAccess::Admin)?;
             let built = match &command {
                 AdminCommands::Propose { new_admin, .. } => operator.propose_admin(new_admin)?,
                 AdminCommands::Cancel { .. } => operator.cancel_admin_transfer()?,
@@ -106,11 +110,18 @@ pub fn run(config: &CliConfig, command: AllowlistCommands, json: bool) -> Result
     }
 }
 
-fn open(config: &CliConfig, rpc_url: &str, tree: Option<&str>) -> Result<AllowlistOperator> {
-    let tree = tree.unwrap_or(&config.deployment.asp_membership);
-    let operator = AllowlistOperator::open(rpc_url, config.deployment.clone(), tree)?;
-    warn_unlisted(operator.is_listed(), "membership tree", tree);
-    Ok(operator)
+fn open(
+    config: &CliConfig,
+    rpc_url: &str,
+    tree: Option<&str>,
+    access: ListAccess,
+) -> Result<AllowlistOperator> {
+    let tree = resolve_tree(config, rpc_url, ListKind::Allowlist, tree, access)?;
+    Ok(AllowlistOperator::open(
+        rpc_url,
+        config.deployment.clone(),
+        &tree,
+    )?)
 }
 
 fn show(config: &CliConfig, tree: Option<&str>, json: bool) -> Result<()> {

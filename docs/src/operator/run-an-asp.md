@@ -54,7 +54,8 @@ sequenceDiagram
    `ASP_ADMIN` with the tree admin's `stellar keys` identity. `leaf` reads the ASP secret from
    stdin, which keeps it out of the shell history: paste it and press Ctrl-D, or pass a file
    instead of `-`. For a multisig admin, pass
-   `--out tx.xdr` instead of `--account`.
+   `--out tx.xdr` instead of `--account`. Without `--tree`, `add` writes to the allowlist the
+   deployment's enabled pools use, and stops if they use none or several.
 4. Once the call lands, the user can deposit. Before then, the app tells them to share their keys
    with the ASP.
 
@@ -81,6 +82,9 @@ per call. The CLI takes the keys the same way:
 spp blocklist add NOTE_KEY... --account ASP_ADMIN
 spp blocklist remove NOTE_KEY --account ASP_ADMIN
 ```
+
+Without `--tree`, both write to the blocklist the deployment's enabled pools use. After a re-point
+that is not the manifest's `asp_non_membership`, which keeps the old tree.
 
 Write to the blocklist through the admin page or `spp blocklist`. Both convert each key to the byte
 order the contract expects; a key passed raw to `insert_leaf` through the Stellar CLI is stored
@@ -116,8 +120,8 @@ pool:
    A blocklist takes only `--admin`, so drop `--levels 10` for one.
 2. Enter your tree's address in the admin page's Overview tab, and load the entries on the
    Allowlist or Blocklist tab, signing as `ASP_ADMIN`. With the CLI, pass `--tree TREE` to
-   `spp allowlist add` or `spp blocklist add`, with `TREE` your tree's address. Both warn that the
-   manifest doesn't name the tree, which is expected for a new one.
+   `spp allowlist add` or `spp blocklist add`, with `TREE` your tree's address. Both ask before
+   writing to a tree no pool uses, which is expected for a new one; `--yes` answers for scripts.
 3. Send the pool's operator the tree's address, your records of its entries, and, for an
    allowlist, its deployment ledger. They check the tree on the Switch allowlist or blocklist panel
    and re-point their pool. For an allowlist, they first add it to `added_asp_memberships` in their

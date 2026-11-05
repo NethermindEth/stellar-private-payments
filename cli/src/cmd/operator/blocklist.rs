@@ -8,7 +8,9 @@ use stellar_private_payments::{
 };
 
 use super::{
-    AdminRow, print_admin, rpc_url, selected_ids, warn_unlisted,
+    AdminRow,
+    lists::{ListAccess, ListKind, resolve_tree},
+    print_admin, rpc_url, selected_ids,
     write::{AdminCommands, WriteArgs, deliver},
 };
 use crate::{config::CliConfig, output};
@@ -26,8 +28,8 @@ pub enum BlocklistCommands {
         /// Note public keys (hex), as users share them from `spp keys`
         #[arg(required = true)]
         note_keys: Vec<String>,
-        /// Non-membership tree contract id (C…); default: the deployment's
-        /// blocklist
+        /// Non-membership tree contract id (C…); default: the blocklist the
+        /// enabled pools use
         #[arg(long)]
         tree: Option<String>,
         #[command(flatten)]
@@ -37,8 +39,8 @@ pub enum BlocklistCommands {
     Remove {
         /// Note public key (hex)
         note_key: String,
-        /// Non-membership tree contract id (C…); default: the deployment's
-        /// blocklist
+        /// Non-membership tree contract id (C…); default: the blocklist the
+        /// enabled pools use
         #[arg(long)]
         tree: Option<String>,
         #[command(flatten)]
@@ -46,8 +48,8 @@ pub enum BlocklistCommands {
     },
     /// Hand a non-membership tree to a new admin
     Admin {
-        /// Non-membership tree contract id (C…); default: the deployment's
-        /// blocklist
+        /// Non-membership tree contract id (C…); default: the blocklist the
+        /// enabled pools use
         #[arg(long)]
         tree: Option<String>,
         #[command(subcommand)]
@@ -83,7 +85,9 @@ pub fn run(config: &CliConfig, command: BlocklistCommands, json: bool) -> Result
                 })
                 .collect::<Result<Vec<_>>>()?;
             let network = config.resolve_network()?;
-            let built = open(config, &network.rpc_url, tree.as_deref())?.insert_keys(&keys)?;
+            let access = ListAccess::Write { yes: write.yes };
+            let built =
+                open(config, &network.rpc_url, tree.as_deref(), access)?.insert_keys(&keys)?;
             deliver(config, &network, built, &write, json)
         }
         BlocklistCommands::Remove {
@@ -93,12 +97,14 @@ pub fn run(config: &CliConfig, command: BlocklistCommands, json: bool) -> Result
         } => {
             let key = NotePublicKey::parse(&note_key).context("parse note key")?;
             let network = config.resolve_network()?;
-            let built = open(config, &network.rpc_url, tree.as_deref())?.delete_key(&key)?;
+            let access = ListAccess::Write { yes: write.yes };
+            let built =
+                open(config, &network.rpc_url, tree.as_deref(), access)?.delete_key(&key)?;
             deliver(config, &network, built, &write, json)
         }
         BlocklistCommands::Admin { tree, command } => {
             let network = config.resolve_network()?;
-            let operator = open(config, &network.rpc_url, tree.as_deref())?;
+            let operator = open(config, &network.rpc_url, tree.as_deref(), ListAccess::Admin)?;
             let built = match &command {
                 AdminCommands::Propose { new_admin, .. } => operator.propose_admin(new_admin)?,
                 AdminCommands::Cancel { .. } => operator.cancel_admin_transfer()?,
@@ -109,11 +115,18 @@ pub fn run(config: &CliConfig, command: BlocklistCommands, json: bool) -> Result
     }
 }
 
-fn open(config: &CliConfig, rpc_url: &str, tree: Option<&str>) -> Result<BlocklistOperator> {
-    let tree = tree.unwrap_or(&config.deployment.asp_non_membership);
-    let operator = BlocklistOperator::open(rpc_url, config.deployment.clone(), tree)?;
-    warn_unlisted(operator.is_listed(), "non-membership tree", tree);
-    Ok(operator)
+fn open(
+    config: &CliConfig,
+    rpc_url: &str,
+    tree: Option<&str>,
+    access: ListAccess,
+) -> Result<BlocklistOperator> {
+    let tree = resolve_tree(config, rpc_url, ListKind::Blocklist, tree, access)?;
+    Ok(BlocklistOperator::open(
+        rpc_url,
+        config.deployment.clone(),
+        &tree,
+    )?)
 }
 
 fn show(config: &CliConfig, tree: Option<&str>, json: bool) -> Result<()> {
