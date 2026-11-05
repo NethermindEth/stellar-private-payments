@@ -114,7 +114,7 @@ Examples:
   # Mixed plain + GVK in one deployment
   deployments/scripts/deploy.sh futurenet \
     --deployer alice \
-    --gvk-authority-pubkey-file ./admin-d.json \
+    --gvk-authority-pubkey-file ./admin-pub.json \
     --pool blocklist:gvk-off:native:CB... \
     --pool blocklist:gvk-traceable:native:CB... \
     --asp-levels 10 \
