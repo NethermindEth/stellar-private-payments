@@ -41,7 +41,10 @@ jobs:
         uses: ./.github/actions/circuits
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.128
+          fallback: none
 
       - name: Setup Node.js
         uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
@@ -86,7 +89,10 @@ jobs:
           npm run test:unit --prefix integration-tests-app
 
       - name: Install Trunk
-        run: cargo install trunk --locked
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
+        with:
+          tool: trunk@0.21.14
+          fallback: none
 
       - name: Smoke-test Trunk app build
         run: trunk build --release --dist /tmp/app-dist
@@ -127,7 +133,10 @@ jobs:
           cache-targets: "true"
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.128
+          fallback: none
 
       - name: Run wasm tests
         run: cargo test --target wasm32-unknown-unknown -p stellar-private-payments --lib

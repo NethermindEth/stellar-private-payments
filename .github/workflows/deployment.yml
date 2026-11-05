@@ -52,7 +52,12 @@ jobs:
       - name: Install wasm build prerequisites
         run: |
           rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
+
+      - name: Install wasm build tools
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.128,trunk@0.21.14
+          fallback: none
 
       - name: Build circuit artifacts
         run: make circuits

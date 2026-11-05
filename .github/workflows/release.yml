@@ -224,9 +224,12 @@ jobs:
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
-      - if: steps.registry.outputs.publish == 'true'
-        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
-        working-directory: .
+      - name: Install wasm-bindgen-cli
+        if: steps.registry.outputs.publish == 'true'
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.128
+          fallback: none
       - name: Prepare canonical circuit keys
         if: steps.registry.outputs.publish == 'true'
         working-directory: .

@@ -45,12 +45,15 @@ jobs:
           cache-targets: "true"
 
       - name: Install Trunk
-        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
         with:
           tool: trunk@0.21.14
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.128
+          fallback: none
 
       # deployments/scripts/deploy-local.sh needs the stellar CLI to deploy
       # fresh contracts to the local quickstart container.

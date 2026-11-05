@@ -58,7 +58,10 @@ jobs:
         run: cargo clippy --target wasm32-unknown-unknown --all-targets
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.128
+          fallback: none
 
       - name: Install Stellar CLI
         uses: stellar/stellar-cli@c0f4d0da891bbf214c08b8c5035ae6db80e9a3bd # v28.1.0

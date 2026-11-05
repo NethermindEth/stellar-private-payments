@@ -85,9 +85,13 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: sdk/web/package-lock.json
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.128
+          fallback: none
       - name: Install build dependencies
         run: |
-          cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
           npm ci --prefix sdk/web
           make circuits
       - name: Cache verified binaryen
