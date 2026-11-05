@@ -2263,9 +2263,8 @@ async function readPoolFee(poolContractId) {
   return BigInt(pool.fee);
 }
 
-async function startAudit({ reset }) {
-  const poolContractId = poolSelectEl?.value?.trim();
-  const privateKey = privateKeyEl?.value?.trim();
+async function startAudit(privateKey) {
+  const poolContractId = poolSelectEl.value;
 
   if (!poolContractId) {
     throw new Error('Select a GVK-enabled pool');
@@ -2274,33 +2273,29 @@ async function startAudit({ reset }) {
     throw new Error('Enter the authority private key');
   }
 
-  if (reset) {
-    resetAuditState();
-    renderResults();
-  }
+  resetAuditState();
+  renderResults();
 
-  if (!state.audit) {
-    const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
-    const [decimals, fee] = await Promise.all([
-      readDisplayDecimals({ tokenDecimals: () => readTokenDecimals(getCurrentRpcUrl(), poolEntry.tokenContractId) }),
-      readPoolFee(poolContractId),
-    ]);
-    const authority = client().gvkAuthority(privateKey);
-    try {
-      // An overlapping Sync & Audit may have opened a cursor during the awaits.
-      const audit = await authority.audit(poolContractId);
-      if (state.audit) releaseCursor(state.audit);
-      state.audit = audit;
-    } finally {
-      authority.free();
-    }
-    state.tokenDecimals = decimals;
-    state.poolFee = fee;
-    state.auditedPoolContractId = poolContractId;
-    state.tokenSymbol = tokenLabel(poolEntry);
-    setFilterControlsDisabled(false);
-    state.poolGvkMode = poolEntry?.gvkMode ?? null;
+  const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
+  const [decimals, fee] = await Promise.all([
+    readDisplayDecimals({ tokenDecimals: () => readTokenDecimals(getCurrentRpcUrl(), poolEntry.tokenContractId) }),
+    readPoolFee(poolContractId),
+  ]);
+  const authority = client().gvkAuthority(privateKey);
+  try {
+    // An overlapping Sync & Audit may have opened a cursor during the awaits.
+    const audit = await authority.audit(poolContractId);
+    if (state.audit) releaseCursor(state.audit);
+    state.audit = audit;
+  } finally {
+    authority.free();
   }
+  state.tokenDecimals = decimals;
+  state.poolFee = fee;
+  state.auditedPoolContractId = poolContractId;
+  state.tokenSymbol = tokenLabel(poolEntry);
+  setFilterControlsDisabled(false);
+  state.poolGvkMode = poolEntry?.gvkMode ?? null;
 
   await fetchBatch(BATCH_SIZE);
 }
@@ -2348,7 +2343,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     resetAuditState();
     renderResults();
     syncActionButtons();
-    setPanelStatus('Pool changed — click Sync & Audit to load it.', 'info');
+    setPanelStatus('Pool changed — enter the authority key and run Sync & Audit.', 'info');
   });
 
   filtersClearBtnEl?.addEventListener('click', () => {
@@ -2376,6 +2371,8 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
   }
 
   auditBtnEl?.addEventListener('click', async () => {
+    const privateKey = privateKeyEl.value.trim();
+    privateKeyEl.value = '';
     const originalText = auditBtnEl.textContent;
     try {
       auditBtnEl.disabled = true;
@@ -2383,7 +2380,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       auditBtnEl.textContent = 'Syncing…';
       setPanelStatus('Syncing chain data and opening audit cursor…', 'info');
       await ensurePanelReady({ unlock: true });
-      await startAudit({ reset: true });
+      await startAudit(privateKey);
       await applyFiltersAndRender();
     } catch (err) {
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
@@ -2411,7 +2408,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     try {
       loadMoreBtnEl.disabled = true;
       loadMoreBtnEl.textContent = 'Loading…';
-      await startAudit({ reset: false });
+      await fetchBatch(BATCH_SIZE);
       await applyFiltersAndRender();
     } catch (err) {
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
