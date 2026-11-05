@@ -1,0 +1,44 @@
+name: Circuit artifacts
+description: >
+  Use the released circuits when the sources match the release, with the
+  committed keys instead of generating new ones on the runner. Otherwise, build them.
+  The released path stages circomlib without the compiler's hint patches, so
+  jobs that ship the circuits source bundle must run make circuits instead.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      working-directory: ${{ github.workspace }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -eu
+        tag="circuits-v$(jq -r .version deployments/testnet/circuits.json)"
+        # Only these feed the production R1CS; Rust code and test circuits don't.
+        inputs=(
+          circuits/circom.lock
+          circuits/circomlib.lock
+          ':(glob)circuits/src/**/*.circom'
+          ':(exclude,glob)circuits/**/test/**'
+          tools/circuit-compiler
+          deployments/testnet/circuits.json
+        )
+        if git fetch --depth=1 origin "refs/tags/$tag:refs/tags/$tag" &&
+          git diff --quiet "$tag" HEAD -- "${inputs[@]}"; then
+          echo "Using $tag"
+          gh release download "$tag" -p 'circuits.tar.gz*' -D "$RUNNER_TEMP"
+          (cd "$RUNNER_TEMP" && sha256sum -c circuits.tar.gz.sha256)
+          mkdir -p target/circuits-artifacts testdata
+          tar -xzf "$RUNNER_TEMP/circuits.tar.gz" -C target/circuits-artifacts --wildcards '*.r1cs'
+          cp deployments/testnet/circuit_keys/*.bin deployments/testnet/circuit_keys/*.json testdata/
+          sh deployments/scripts/circuit-artifacts.sh verify
+          # The circuits source bundle packs circomlib, which only the compiler stages.
+          git init -q circuits/src/circomlib
+          git -C circuits/src/circomlib fetch -q --depth=1 https://github.com/iden3/circomlib.git \
+            "$(tr -d '[:space:]' < circuits/circomlib.lock)"
+          git -C circuits/src/circomlib checkout -q --detach FETCH_HEAD
+        else
+          echo "Circuits differ from $tag; building them"
+          make circuits
+        fi
