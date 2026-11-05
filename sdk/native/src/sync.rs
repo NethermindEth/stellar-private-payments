@@ -428,6 +428,10 @@ fn bootnode_gap(e: RpcError) -> RetentionGap {
 
 /// Sync historical range via bootnode until retention handoff, then clear
 /// cursors for main RPC resume.
+///
+/// Without `stop` (inline sync), waits at the bootnode tip once; if the next
+/// round still ends there without a handoff, returns
+/// [`RetentionGap::BootnodeNotReady`] instead of polling forever.
 async fn bootnode_catch_up(
     storage: &StorageHandle,
     contract_config: &ContractConfig,
@@ -455,6 +459,7 @@ async fn bootnode_catch_up(
             Err(IndexerError::Other(e)) => return Err(e.into()),
         };
 
+    let mut waited_at_tip = false;
     loop {
         if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
             return Ok(());
@@ -466,6 +471,13 @@ async fn bootnode_catch_up(
                 if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
                     return Ok(());
                 }
+                if stop.is_none() && waited_at_tip {
+                    return Err(RetentionGap::BootnodeNotReady(
+                        "bootnode reached its tip without a retention handoff".into(),
+                    )
+                    .into());
+                }
+                waited_at_tip = true;
                 sleep(BACKGROUND_SYNC_INTERVAL_MS).await;
             }
             // bootnode handoff, use main RPC
@@ -1515,10 +1527,9 @@ mod tests {
         assert!(at_cursor("main-cursor")(&rows), "{rows:?}");
     }
 
-    /// Inline sync has no stop flag, so `bootnode_catch_up` waits 5 s and
-    /// polls again for as long as the bootnode serves pages without a handoff.
+    /// Inline sync has no stop flag, so it waits at the bootnode tip once,
+    /// then reports the bootnode as not ready instead of polling forever.
     #[tokio::test]
-    #[ignore = "bug: inline sync waits forever at a bootnode tip that never hands off"]
     async fn inline_sync_reports_a_bootnode_tip_that_never_hands_off() {
         let rpc = main_rpc_with_a_gap().await;
         let bootnode = MockServer::start().await;
