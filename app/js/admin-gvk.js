@@ -21,7 +21,6 @@ const BATCH_SIZE = 20;
 
 const poolSelectEl = document.getElementById('gvkPoolSelect');
 const privateKeyEl = document.getElementById('gvkPrivateKey');
-const keyHintEl = document.getElementById('gvkKeyHint');
 const auditBtnEl = document.getElementById('gvkAuditBtn');
 const loadMoreBtnEl = document.getElementById('gvkLoadMoreBtn');
 const viewTxBtnEl = document.getElementById('gvkViewTxBtn');
@@ -2246,22 +2245,6 @@ async function populatePools() {
   auditBtnEl.disabled = false;
 }
 
-async function loadStoredAuthorityKey() {
-  if (!privateKeyEl) return;
-
-  try {
-    const setting = await client().storage().getGvkAuthoritySetting();
-    if (setting?.privateKey) {
-      privateKeyEl.value = setting.privateKey;
-      if (keyHintEl) {
-        keyHintEl.textContent = 'Loaded authority key from local DB (gvk_authority). Not saved from this page.';
-      }
-    }
-  } catch (err) {
-    console.warn('[global-view] authority key load failed:', err);
-  }
-}
-
 function resetAuditState() {
   state.audit = null;
   state.auditedPoolContractId = null;
@@ -2395,7 +2378,6 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     await ensureCryptoReady(options);
     if (!panelReady) {
       await populatePools();
-      await loadStoredAuthorityKey();
       panelReady = true;
     }
   }
