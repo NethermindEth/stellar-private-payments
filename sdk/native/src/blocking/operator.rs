@@ -5,9 +5,9 @@ use crate::{
     gvk::{GvkAudit as AsyncGvkAudit, GvkTxAudit},
     operator::{
         AdminState, AllowlistOperator as AsyncAllowlistOperator,
-        BlocklistOperator as AsyncBlocklistOperator, CallStatus, Envelopes as AsyncEnvelopes,
-        GvkAuthority as AsyncGvkAuthority, OperatorCall, PoolAdmin as AsyncPoolAdmin, PoolLists,
-        SigningStatus, UnsignedOperatorCall,
+        BlocklistOperator as AsyncBlocklistOperator, CallState, CallStatus,
+        Envelopes as AsyncEnvelopes, GvkAuthority as AsyncGvkAuthority, OperatorCall,
+        PoolAdmin as AsyncPoolAdmin, PoolLists, SigningStatus, UnsignedOperatorCall,
     },
     types::{AspMembership, AspNonMembership, ContractConfig, Field, NotePublicKey},
 };
@@ -133,6 +133,10 @@ impl Envelopes {
 
     pub fn signing_status(&self, envelope_xdr: &str) -> Result<SigningStatus, Error> {
         block_on(self.inner.signing_status(envelope_xdr))
+    }
+
+    pub fn state(&self, envelope_xdr: &str) -> Result<CallState, Error> {
+        block_on(self.inner.state(envelope_xdr))
     }
 
     pub fn submit(&self, signed_envelope_xdr: &str) -> Result<String, Error> {

@@ -542,7 +542,7 @@ pub(crate) async fn confirm_tx(
                     tx_hash: hash.to_string(),
                 });
             }
-            TxConfirmStatus::Failed { result_xdr } => {
+            TxConfirmStatus::Failed { result_xdr, .. } => {
                 let detail = result_xdr
                     .map(|xdr| format!(" (resultXdr: {xdr})"))
                     .unwrap_or_default();

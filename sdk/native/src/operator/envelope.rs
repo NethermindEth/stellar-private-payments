@@ -9,7 +9,12 @@ use crate::{
     chain::{RpcClient, TxConfirmStatus, confirm_tx, network_id, submit_tx},
 };
 
-use super::call::{OperatorCall, describe};
+use super::call::{OperatorCall, describe, unix_now};
+
+/// How long [`Envelopes::state`] looks for a call whose sequence number is
+/// used before it reports another transaction: about two ledger closes.
+const LANDED_POLL_ATTEMPTS: u32 = 10;
+const LANDED_POLL_INTERVAL_MS: u32 = 1_000;
 
 /// One key that may sign for an admin account.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,11 +47,38 @@ impl SigningStatus {
 pub enum CallStatus {
     Success,
     /// The call landed and failed; `result_xdr` is the base64
-    /// `TransactionResult`, when the RPC returned one.
+    /// `TransactionResult`, when the RPC returned one, and `host_error` the
+    /// contract or host error that stopped it, such as `Error(Contract, #6)`.
     Failed {
         result_xdr: Option<String>,
+        host_error: Option<String>,
     },
     Pending,
+}
+
+/// Whether an admin call can still land, read before signing or sending it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallState {
+    /// Its sequence number is unused and its time bound has not passed.
+    Live,
+    /// It landed and succeeded, whoever sent it.
+    Landed { hash: String },
+    /// It landed and failed; the rest as in [`CallStatus::Failed`].
+    Failed {
+        hash: String,
+        result_xdr: Option<String>,
+        host_error: Option<String>,
+    },
+    /// The source sent another transaction with its sequence number first.
+    SequenceUsed,
+    /// Its time bound passed before it landed.
+    Expired,
+}
+
+/// Names the code of a base64 `TransactionResult`, as [`CallStatus::Failed`]
+/// carries it: `TxBadSeq`, or `TxFailed: InvokeHostFunctionTrapped`.
+pub fn result_code(result_xdr: &str) -> Option<String> {
+    crate::chain::result_code(result_xdr)
 }
 
 /// Session for reading, submitting and confirming admin call envelopes.
@@ -76,6 +108,46 @@ impl Envelopes {
         signing_status(&account, &envelope, &self.network_passphrase)
     }
 
+    /// Whether `envelope_xdr` can still land, or how it already did.
+    ///
+    /// The RPC can serve the account a ledger ahead of the transaction, so
+    /// once the sequence number is used this polls the call's hash for up to
+    /// [`LANDED_POLL_ATTEMPTS`] seconds before it reports
+    /// [`CallState::SequenceUsed`].
+    pub async fn state(&self, envelope_xdr: &str) -> Result<CallState, Error> {
+        let envelope = decode(envelope_xdr)?;
+        let call = describe(&envelope)?;
+        let account = self.rpc.get_account(&call.source).await?;
+        if let Some(state) = state_before_landing(account.seq_num.0, &call, unix_now()?) {
+            return Ok(state);
+        }
+        let hash = hex::encode(
+            envelope
+                .hash(network_id(&self.network_passphrase))
+                .context("hash transaction envelope")?,
+        );
+        for attempt in 1..=LANDED_POLL_ATTEMPTS {
+            if attempt > 1 {
+                crate::sleep::sleep(LANDED_POLL_INTERVAL_MS).await;
+            }
+            match confirm_tx(&self.rpc, &hash).await? {
+                TxConfirmStatus::Success => return Ok(CallState::Landed { hash }),
+                TxConfirmStatus::Failed {
+                    result_xdr,
+                    host_error,
+                } => {
+                    return Ok(CallState::Failed {
+                        hash,
+                        result_xdr,
+                        host_error,
+                    });
+                }
+                TxConfirmStatus::Pending => {}
+            }
+        }
+        Ok(CallState::SequenceUsed)
+    }
+
     /// Sends a signed envelope and returns its transaction hash.
     pub async fn submit(&self, signed_envelope_xdr: &str) -> Result<String, Error> {
         let envelope = decode(signed_envelope_xdr)?;
@@ -87,10 +159,29 @@ impl Envelopes {
     pub async fn confirm(&self, hash: &str) -> Result<CallStatus, Error> {
         Ok(match confirm_tx(&self.rpc, hash).await? {
             TxConfirmStatus::Success => CallStatus::Success,
-            TxConfirmStatus::Failed { result_xdr } => CallStatus::Failed { result_xdr },
+            TxConfirmStatus::Failed {
+                result_xdr,
+                host_error,
+            } => CallStatus::Failed {
+                result_xdr,
+                host_error,
+            },
             TxConfirmStatus::Pending => CallStatus::Pending,
         })
     }
+}
+
+/// The state of `call` while its source is at `account_sequence`, or `None`
+/// once a transaction used the call's sequence number.
+fn state_before_landing(account_sequence: i64, call: &OperatorCall, now: u64) -> Option<CallState> {
+    if account_sequence >= call.sequence {
+        return None;
+    }
+    Some(if call.valid_until <= now {
+        CallState::Expired
+    } else {
+        CallState::Live
+    })
 }
 
 fn decode(envelope_xdr: &str) -> Result<xdr::TransactionEnvelope, Error> {
@@ -250,6 +341,85 @@ mod tests {
         let status = signing_status(&account, &twice, PASSPHRASE).expect("status");
         assert_eq!(status.signed_weight, 2);
         assert!(status.is_ready());
+    }
+
+    #[test]
+    fn a_call_is_live_until_its_sequence_is_used_or_its_bound_passes() {
+        let call = OperatorCall {
+            source: String::new(),
+            sequence: 11,
+            fee: 100,
+            valid_until: 1_000,
+            contract_id: String::new(),
+            method: String::new(),
+            args: Vec::new(),
+        };
+        assert_eq!(state_before_landing(10, &call, 999), Some(CallState::Live));
+        assert_eq!(
+            state_before_landing(10, &call, 1_000),
+            Some(CallState::Expired)
+        );
+        assert_eq!(state_before_landing(11, &call, 999), None);
+    }
+
+    /// The RPC can serve an account whose sequence a call used before it
+    /// serves the call.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn state_waits_for_a_call_its_account_already_shows() {
+        use serde_json::json;
+        use stellar_xdr::WriteXdr;
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::body_partial_json};
+
+        let envelope = super::super::call::tests::envelope();
+        let xdr::TransactionEnvelope::Tx(v1) = &envelope else {
+            unreachable!()
+        };
+        let xdr::MuxedAccount::Ed25519(xdr::Uint256(source)) = v1.tx.source_account else {
+            unreachable!()
+        };
+        let mut used = account(source, [1, 0, 1, 0], &[]);
+        used.seq_num = v1.tx.seq_num.clone();
+        let entry = xdr::LedgerEntryData::Account(used);
+        let key = xdr::LedgerKey::Account(xdr::LedgerKeyAccount {
+            account_id: xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(source))),
+        });
+
+        let server = MockServer::start().await;
+        let rpc_answer = |result: serde_json::Value| {
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "jsonrpc": "2.0", "id": 1, "result": result }))
+        };
+        Mock::given(body_partial_json(json!({ "method": "getLedgerEntries" })))
+            .respond_with(rpc_answer(json!({
+                "latestLedger": 100,
+                "entries": [{
+                    "key": key.to_xdr_base64(Limits::none()).expect("key"),
+                    "xdr": entry.to_xdr_base64(Limits::none()).expect("entry"),
+                    "lastModifiedLedgerSeq": 99,
+                }],
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(body_partial_json(json!({ "method": "getTransaction" })))
+            .respond_with(rpc_answer(json!({ "status": "NOT_FOUND" })))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        Mock::given(body_partial_json(json!({ "method": "getTransaction" })))
+            .respond_with(rpc_answer(json!({ "status": "SUCCESS" })))
+            .with_priority(2)
+            .mount(&server)
+            .await;
+
+        let envelope_xdr = envelope.to_xdr_base64(Limits::none()).expect("envelope");
+        let state = Envelopes::open(&server.uri(), PASSPHRASE)
+            .expect("envelopes")
+            .state(&envelope_xdr)
+            .await
+            .expect("state");
+        assert!(matches!(state, CallState::Landed { .. }), "{state:?}");
     }
 
     #[test]

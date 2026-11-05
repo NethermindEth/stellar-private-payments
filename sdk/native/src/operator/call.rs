@@ -225,7 +225,7 @@ pub(crate) fn account_strkey(account: &xdr::MuxedAccount) -> String {
         .to_string()
 }
 
-fn unix_now() -> Result<u64, Error> {
+pub(super) fn unix_now() -> Result<u64, Error> {
     Ok(web_time::SystemTime::now()
         .duration_since(web_time::UNIX_EPOCH)
         .context("system clock is before the Unix epoch")?
@@ -377,7 +377,7 @@ fn extend_command(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     const SOURCE: [u8; 32] = [7; 32];
@@ -433,7 +433,7 @@ mod tests {
         }
     }
 
-    fn envelope() -> xdr::TransactionEnvelope {
+    pub(in crate::operator) fn envelope() -> xdr::TransactionEnvelope {
         xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
             tx: xdr::Transaction {
                 source_account: xdr::MuxedAccount::Ed25519(xdr::Uint256(SOURCE)),
@@ -583,7 +583,16 @@ mod tests {
                 signature_expiration_ledger: 0,
                 signature: xdr::ScVal::Void,
             });
-        for entry in [nested, other_account] {
+        // Covered by the source's signatures like the call itself, so a
+        // `pause_deposits` envelope would move the admin's tokens unseen.
+        let mut transfer = source_auth();
+        transfer.root_invocation.function =
+            xdr::SorobanAuthorizedFunction::ContractFn(xdr::InvokeContractArgs {
+                contract_address: xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash([9; 32]))),
+                function_name: xdr::ScSymbol::try_from("transfer").expect("symbol"),
+                args: xdr::VecM::default(),
+            });
+        for entry in [nested, other_account, transfer] {
             let envelope =
                 with_tx(|tx| tx.operations = vec![operation(vec![entry])].try_into().expect("ops"));
             assert!(refusal_of(&envelope).contains("authorizes something other"));

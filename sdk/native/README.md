@@ -146,7 +146,9 @@ if envelopes.signing_status(&signed).await?.is_ready() {
 
 A builder refuses a call that reads an entry archiving within those 24 hours
 with `Error::EntriesArchiveSoon`, which lists the `stellar contract extend`
-commands that fix it. `blocking::` mirrors every handle and `Envelopes`.
+commands that fix it. `Envelopes::state` tells whether an envelope can still
+land, or whether another signer already sent it, and `result_code` names the
+code of a failed call. `blocking::` mirrors every handle and `Envelopes`.
 
 Migrating to 0.3:
 

@@ -172,9 +172,32 @@ async fn a_rejected_submission_is_not_confirmed() -> Result<()> {
         .expect_err("the submission is rejected");
 
     assert!(
-        format!("{err:#}").contains("sendTransaction failed: AAAAAAAAAGT////7AAAAAA=="),
+        format!("{err:#}").contains("sendTransaction failed: TxBadSeq"),
         "{err:#}"
     );
+    assert_eq!(stages(&h).await, ["simulateTransaction", "sendTransaction"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_submission_the_node_did_not_queue_is_not_confirmed() -> Result<()> {
+    let h = OfflinePool::builder().build().await?;
+    h.rpc.answer_next(
+        "sendTransaction",
+        json!({
+            "hash": tx_hash(0),
+            "status": "TRY_AGAIN_LATER",
+            "latestLedger": 100,
+        }),
+    );
+
+    let err = h
+        .pool
+        .deposit(NoteAmount::from(10u128))
+        .await
+        .expect_err("the node queued nothing");
+
+    assert!(format!("{err:#}").contains("TRY_AGAIN_LATER"), "{err:#}");
     assert_eq!(stages(&h).await, ["simulateTransaction", "sendTransaction"]);
     Ok(())
 }

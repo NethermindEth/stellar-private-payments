@@ -9,8 +9,8 @@ use stellar_private_payments::{
 };
 
 use super::{
-    AdminRow,
-    lists::{ListKind, confirm},
+    AdminRow, confirm,
+    lists::ListKind,
     print_admin, rpc_url, selected_ids, warn_unlisted,
     write::{AdminCommands, WriteArgs, deliver},
 };
@@ -134,7 +134,9 @@ fn check_repoint(
     let listed = allowlist_ids(&config.deployment)
         .iter()
         .any(|id| id == tree);
-    if !repoint_changes_users(kind, &lists, tree, listed)? {
+    let changes_users = repoint_changes_users(kind, &lists, tree, listed)?;
+    eprintln!("replaces {} {}", kind.name(), kind.tree(&lists));
+    if !changes_users {
         eprintln!(
             "note: the pool's policy doesn't use its {}, so this changes nothing for users",
             kind.name()

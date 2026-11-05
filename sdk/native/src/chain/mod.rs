@@ -27,6 +27,6 @@ pub(crate) use indexer::{Indexer, IndexerError};
 pub(crate) use rpc::{ContractDataBulkRequest, Error as RpcError, INVALID_PARAMS_CODE};
 pub(crate) use signer::network_id;
 pub(crate) use soroban_encode::BASE_FEE;
-pub(crate) use submit::{TxConfirmStatus, confirm_tx, submit_tx};
+pub(crate) use submit::{TxConfirmStatus, confirm_tx, result_code, submit_tx};
 pub(crate) use tx_assemble::build_invoke_contract_tx_envelope;
 pub(crate) use tx_prepare::PoolTransactInput;

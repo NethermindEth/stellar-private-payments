@@ -36,8 +36,14 @@ async fn send(rpc_url: &str, built: UnsignedOperatorCall, secret: &str) -> Resul
     for _ in 0..60 {
         match envelopes.confirm(&hash).await? {
             CallStatus::Success => return Ok(()),
-            CallStatus::Failed { result_xdr } => {
-                bail!("{} failed: {result_xdr:?}", built.call.method)
+            CallStatus::Failed {
+                result_xdr,
+                host_error,
+            } => {
+                bail!(
+                    "{} failed: {result_xdr:?} {host_error:?}",
+                    built.call.method
+                )
             }
             CallStatus::Pending => tokio::time::sleep(Duration::from_millis(500)).await,
         }

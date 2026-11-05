@@ -11,7 +11,7 @@ use clap::{Args, Subcommand};
 use serde::Serialize;
 use stellar_private_payments::{
     blocking::Envelopes,
-    operator::{CallStatus, OperatorCall, UnsignedOperatorCall},
+    operator::{CallState, CallStatus, OperatorCall, UnsignedOperatorCall, result_code},
 };
 
 use crate::{config::CliConfig, output, stellar_cli, stellar_cli::StellarNetwork};
@@ -141,28 +141,14 @@ pub fn submit(envelopes: &Envelopes, signed: &str, call: &OperatorCall, json: bo
     let hash = envelopes.submit(signed)?;
     for _ in 0..CONFIRM_ATTEMPTS {
         match envelopes.confirm(&hash)? {
-            CallStatus::Success => {
-                #[derive(Serialize)]
-                struct Sent<'a> {
-                    hash: &'a str,
-                    #[serde(flatten)]
-                    call: CallRow<'a>,
-                }
-                let sent = Sent {
-                    hash: &hash,
-                    call: CallRow::from(call),
-                };
-                if json {
-                    return output::emit(&sent, true);
-                }
-                print_call(&sent.call);
-                output::print_kv("hash", hash);
-                return Ok(());
-            }
-            CallStatus::Failed { result_xdr } => bail!(
-                "{} {hash} failed (resultXdr: {})",
+            CallStatus::Success => return report_sent(&hash, call, json),
+            CallStatus::Failed {
+                result_xdr,
+                host_error,
+            } => bail!(
+                "{} {hash} failed: {}",
                 call.method,
-                result_xdr.as_deref().unwrap_or("none")
+                failure(result_xdr.as_deref(), host_error.as_deref())
             ),
             CallStatus::Pending => std::thread::sleep(Duration::from_secs(1)),
         }
@@ -171,6 +157,61 @@ pub fn submit(envelopes: &Envelopes, signed: &str, call: &OperatorCall, json: bo
         "{} {hash} did not land within {CONFIRM_ATTEMPTS} seconds",
         call.method
     )
+}
+
+/// Prints the call that landed in `hash`.
+pub fn report_sent(hash: &str, call: &OperatorCall, json: bool) -> Result<()> {
+    #[derive(Serialize)]
+    struct Sent<'a> {
+        hash: &'a str,
+        #[serde(flatten)]
+        call: CallRow<'a>,
+    }
+    let sent = Sent {
+        hash,
+        call: CallRow::from(call),
+    };
+    if json {
+        return output::emit(&sent, true);
+    }
+    print_call(&sent.call);
+    output::print_kv("hash", hash);
+    Ok(())
+}
+
+/// Why a call in `state` can no longer land, or `None` while it can.
+pub fn dead_call(state: &CallState, method: &str) -> Option<String> {
+    match state {
+        CallState::Live => None,
+        CallState::Landed { hash } => Some(format!("{method} already landed in {hash}")),
+        CallState::Failed {
+            hash,
+            result_xdr,
+            host_error,
+        } => Some(format!(
+            "{method} already landed in {hash} and failed: {}",
+            failure(result_xdr.as_deref(), host_error.as_deref())
+        )),
+        CallState::SequenceUsed => Some(
+            "the call is out of date: its source sent another transaction first; build it again \
+             if it is still needed"
+                .to_string(),
+        ),
+        CallState::Expired => Some("the call has expired; build it again".to_string()),
+    }
+}
+
+/// The result code of a failed call, or its raw result when that does not
+/// decode, followed by the error that stopped it.
+fn failure(result_xdr: Option<&str>, host_error: Option<&str>) -> String {
+    let code = match result_xdr {
+        Some(xdr) => result_code(xdr).unwrap_or_else(|| format!("resultXdr {xdr}")),
+        None => "no result returned".to_string(),
+    };
+    match host_error {
+        Some(error) => format!("{code}, {error}"),
+        None => code,
+    }
 }
 
 /// `alias`, else --sign-as, else --account.
@@ -215,4 +256,37 @@ fn print_call(call: &CallRow) {
 
 pub(super) fn print_call_of(call: &OperatorCall) {
     print_call(&CallRow::from(call));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_live_call_can_still_land() {
+        assert_eq!(dead_call(&CallState::Live, "pause_deposits"), None);
+        let landed = CallState::Landed {
+            hash: "ab".to_string(),
+        };
+        assert_eq!(
+            dead_call(&landed, "pause_deposits").as_deref(),
+            Some("pause_deposits already landed in ab")
+        );
+        for state in [CallState::SequenceUsed, CallState::Expired] {
+            assert!(
+                dead_call(&state, "pause_deposits")
+                    .is_some_and(|reason| reason.contains("build it again")),
+                "{state:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_failure_names_its_code_and_the_error_that_stopped_it() {
+        assert_eq!(failure(Some("zz"), None), "resultXdr zz");
+        assert_eq!(
+            failure(None, Some("Error(Contract, #6)")),
+            "no result returned, Error(Contract, #6)"
+        );
+    }
 }

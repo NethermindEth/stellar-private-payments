@@ -5,9 +5,17 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use serde::Serialize;
-use stellar_private_payments::{blocking::Envelopes, operator::SigningStatus};
+use stellar_private_payments::{
+    blocking::Envelopes,
+    operator::{CallState, SigningStatus},
+};
 
-use super::write::{print_call_of, read_envelope, signing_alias, submit, write_envelope};
+use super::{
+    ask,
+    write::{
+        dead_call, print_call_of, read_envelope, report_sent, signing_alias, submit, write_envelope,
+    },
+};
 use crate::{config::CliConfig, output, stellar_cli};
 
 #[derive(Debug, Subcommand)]
@@ -17,7 +25,8 @@ pub enum EnvelopeCommands {
         /// Envelope file, as `--out` writes it
         file: PathBuf,
     },
-    /// Add a signature to an envelope file, in place
+    /// Show the call an envelope file makes and add a signature to it, in
+    /// place
     Sign {
         /// Envelope file, as `--out` writes it
         file: PathBuf,
@@ -25,6 +34,9 @@ pub enum EnvelopeCommands {
         /// --account)
         #[arg(long = "as")]
         alias: Option<String>,
+        /// Sign without asking, once the call has been checked
+        #[arg(long)]
+        yes: bool,
     },
     /// Send an envelope file once it carries enough signatures, and wait
     /// until it lands
@@ -70,15 +82,33 @@ pub fn run(config: &CliConfig, command: EnvelopeCommands, json: bool) -> Result<
             print_status(&status);
             Ok(())
         }
-        EnvelopeCommands::Sign { file, alias } => {
+        EnvelopeCommands::Sign { file, alias, yes } => {
             let envelope = read_envelope(&file)?;
             let call = envelopes.describe(&envelope)?;
             let alias = signing_alias(config, alias.as_deref())?;
             let signer = stellar_cli::public_key(alias, config.stellar_config_dir.as_deref())?;
-            if let Some(refusal) =
-                sign_refusal(&envelopes.signing_status(&envelope)?, &signer, &call.source)
-            {
+            if let Some(dead) = dead_call(&envelopes.state(&envelope)?, &call.method) {
+                bail!("`{alias}` must not sign: {dead}");
+            }
+            let status = envelopes.signing_status(&envelope)?;
+            if let Some(refusal) = sign_refusal(&status, &signer, &call.source) {
                 bail!("`{alias}` must not sign: {refusal}");
+            }
+            if !json {
+                print_call_of(&call);
+                print_status(&status);
+            }
+            if !yes {
+                if json {
+                    bail!(
+                        "--json signs only with --yes; check the call with `spp envelope describe`"
+                    );
+                }
+                ask(
+                    &format!("Sign this call as `{alias}`?"),
+                    "no terminal to confirm the call on; check it with `spp envelope describe` and \
+                     pass --yes",
+                )?;
             }
             let signed = stellar_cli::sign_tx(
                 alias,
@@ -99,6 +129,14 @@ pub fn run(config: &CliConfig, command: EnvelopeCommands, json: bool) -> Result<
         EnvelopeCommands::Submit { file } => {
             let envelope = read_envelope(&file)?;
             let call = envelopes.describe(&envelope)?;
+            let state = envelopes.state(&envelope)?;
+            if let CallState::Landed { hash } = &state {
+                eprintln!("{} already landed", call.method);
+                return report_sent(hash, &call, json);
+            }
+            if let Some(dead) = dead_call(&state, &call.method) {
+                bail!("{dead}");
+            }
             let status = envelopes.signing_status(&envelope)?;
             if !status.is_ready() {
                 bail!(

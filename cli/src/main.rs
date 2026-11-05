@@ -10,7 +10,7 @@ mod session;
 mod signer;
 mod stellar_cli;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, process::ExitCode};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -290,7 +290,36 @@ enum ConfigCommands {
     },
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("Error: {err:?}");
+            if let Some(commands) = extend_commands(&err) {
+                eprintln!(
+                    "\nExtend commands, with ACCOUNT a funded `stellar keys` identity that pays \
+                     for them:"
+                );
+                for command in commands {
+                    eprintln!("  {command}");
+                }
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The commands that extend the entries an admin call was refused for.
+fn extend_commands(err: &anyhow::Error) -> Option<&[String]> {
+    err.chain().find_map(|cause| match cause.downcast_ref() {
+        Some(stellar_private_payments::Error::EntriesArchiveSoon { extend_commands }) => {
+            Some(extend_commands.as_slice())
+        }
+        _ => None,
+    })
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
     logging::init(cli.verbose, cli.json);
     let json = cli.json;
@@ -484,6 +513,7 @@ mod tests {
             "spp blocklist admin accept --out call.xdr",
             "spp envelope describe call.xdr",
             "spp envelope sign call.xdr --as signer",
+            "spp envelope sign call.xdr --yes",
             "spp envelope submit call.xdr",
             "spp pool-admin repoint --pool C3 --allowlist C1",
             "spp pool-admin repoint --pool C3 --blocklist C2 --out call.xdr",
@@ -505,6 +535,19 @@ mod tests {
                 "{args} must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn extend_commands_are_found_under_context() {
+        let refused = anyhow::Error::from(stellar_private_payments::Error::EntriesArchiveSoon {
+            extend_commands: vec!["stellar contract extend --id C1".to_string()],
+        })
+        .context("build the call");
+        assert_eq!(
+            extend_commands(&refused),
+            Some(["stellar contract extend --id C1".to_string()].as_slice())
+        );
+        assert_eq!(extend_commands(&anyhow::anyhow!("other")), None);
     }
 
     #[test]

@@ -188,7 +188,17 @@ impl CallStatus {
     #[wasm_bindgen(getter, js_name = resultXdr)]
     pub fn result_xdr(&self) -> Option<String> {
         match &self.inner {
-            NativeCallStatus::Failed { result_xdr } => result_xdr.clone(),
+            NativeCallStatus::Failed { result_xdr, .. } => result_xdr.clone(),
+            _ => None,
+        }
+    }
+
+    /// Contract or host error that stopped a failed call, such as
+    /// `Error(Contract, #6)`, when the RPC returned its diagnostic events.
+    #[wasm_bindgen(getter, js_name = hostError)]
+    pub fn host_error(&self) -> Option<String> {
+        match &self.inner {
+            NativeCallStatus::Failed { host_error, .. } => host_error.clone(),
             _ => None,
         }
     }

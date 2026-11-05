@@ -166,8 +166,8 @@ The card shows the maximum network fee before anyone signs.
 
 An entry that archives while signers sign makes the call fail once sent, so the page refuses to
 build a call that reads an entry with less than 25 hours left, the call's 24 hours plus an hour.
-The card then lists a `stellar contract extend` command for each such entry. Run them from any
-funded account, replacing `ACCOUNT`, then build the call again.
+The card then lists a `stellar contract extend` command for each such entry, and `spp` prints them
+after its error. Run them from any funded account, replacing `ACCOUNT`, then build the call again.
 
 `accept_admin` and `update_admin` extend an admin entry from the ledger they land on, so every
 call the page builds carries 100,000 stroops of refundable fee beyond its simulation. The network
@@ -188,13 +188,16 @@ spp envelope submit tx.xdr
 
 Replace `POOL` with the pool's address and `SIGNER` with the signer's `stellar keys` identity.
 `describe` shows the call, who has signed, and the weight collected against the threshold; a signer
-who did not expect this exact call stops there. `sign` adds a signature to the file in place. It
-refuses a key that is not a signer, a second signature by one key, and any signature once the
-threshold is met, since an unused signature fails the call and cannot be removed. The file holds the
-envelope as base64 XDR, so a signer with a hardware wallet signs it with
-`stellar tx sign --sign-with-ledger` instead. Once the weight reaches the threshold, anyone runs `submit`, which
-refuses an envelope short of it and otherwise waits until the call lands. Without `--out`, a write
-signs with `--account` and sends the call at once.
+who did not expect this exact call stops there. `sign` shows the same, asks before it adds a
+signature to the file in place, and takes `--yes` once the call is checked. It refuses a key that
+is not a signer, a second signature by one key, and any signature once the threshold is met, since
+an unused signature fails the call and cannot be removed. It also refuses an envelope that can no
+longer land: one that landed, expired, or whose sequence number the admin account used for another
+transaction. The file holds the envelope as base64 XDR, so a signer with a hardware wallet signs it
+with `stellar tx sign --sign-with-ledger` instead. Once the weight reaches the threshold, anyone
+runs `submit`, which refuses an envelope short of it and otherwise waits until the call lands. A
+call another signer already sent reads as landed, and a failure names its result code, such as
+`TxBadSeq`, and the contract error that stopped it, such as `Error(Contract, #6)`. Without `--out`, a write signs with `--account` and sends the call at once.
 
 ### Sign with the CLI
 

@@ -130,7 +130,7 @@ pub use crate::crypto::derive_asp_user_leaf;
 pub use allowlist::AllowlistOperator;
 pub use blocklist::BlocklistOperator;
 pub use call::{OperatorCall, UnsignedOperatorCall, describe};
-pub use envelope::{CallStatus, Envelopes, SignerWeight, SigningStatus};
+pub use envelope::{CallState, CallStatus, Envelopes, SignerWeight, SigningStatus, result_code};
 pub use gvk::GvkAuthority;
 pub use pool_admin::{PoolAdmin, PoolLists};
 

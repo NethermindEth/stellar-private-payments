@@ -12,7 +12,9 @@ mod lists;
 pub mod pool_admin;
 mod write;
 
-use anyhow::Result;
+use std::io::{BufRead, IsTerminal, Write};
+
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use stellar_private_payments::operator::AdminState;
 
@@ -47,6 +49,39 @@ fn warn_unlisted(listed: bool, kind: &str, contract_id: &str) {
     }
 }
 
+/// Proceeds past `warning` with `--yes`, or once the user agrees on a
+/// terminal.
+fn confirm(warning: &str, yes: bool) -> Result<()> {
+    if yes {
+        eprintln!("warning: {warning}");
+        return Ok(());
+    }
+    ask(
+        &format!("{warning}. Continue?"),
+        &format!("{warning}; pass --yes to continue"),
+    )
+}
+
+/// Asks `question` on a terminal, and fails with `without_terminal` when
+/// there is none to ask on.
+fn ask(question: &str, without_terminal: &str) -> Result<()> {
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        bail!("{without_terminal}");
+    }
+    eprint!("{question} [y/N] ");
+    std::io::stderr().flush().ok();
+    let mut answer = String::new();
+    stdin
+        .lock()
+        .read_line(&mut answer)
+        .context("read from stdin")?;
+    if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+        bail!("cancelled");
+    }
+    Ok(())
+}
+
 fn rpc_url(config: &CliConfig) -> Result<String> {
     Ok(config.resolve_network()?.rpc_url)
 }
@@ -57,4 +92,14 @@ fn print_admin(admin: &AdminRow) {
         "  pending_admin",
         admin.pending_admin.as_deref().unwrap_or("none"),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confirm_passes_with_yes() {
+        confirm("a warning", true).expect("--yes continues");
+    }
 }

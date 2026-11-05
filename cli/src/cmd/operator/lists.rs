@@ -1,14 +1,13 @@
 //! The trees the enabled pools use. A re-point changes them without changing
 //! the deployment config, so list commands resolve their tree from the pools.
 
-use std::io::{BufRead, IsTerminal, Write};
-
 use anyhow::{Context, Result, bail};
 use stellar_private_payments::{
     blocking::PoolAdmin,
     operator::{PoolLists, allowlist_ids},
 };
 
+use super::confirm;
 use crate::config::CliConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,30 +161,6 @@ fn unused_warning(kind: ListKind, tree: &str) -> String {
     }
 }
 
-/// Proceeds past `warning` with `--yes`, or once the user agrees on a
-/// terminal.
-pub fn confirm(warning: &str, yes: bool) -> Result<()> {
-    if yes {
-        eprintln!("warning: {warning}");
-        return Ok(());
-    }
-    let stdin = std::io::stdin();
-    if !stdin.is_terminal() {
-        bail!("{warning}; pass --yes to continue");
-    }
-    eprint!("{warning}. Continue? [y/N] ");
-    std::io::stderr().flush().ok();
-    let mut answer = String::new();
-    stdin
-        .lock()
-        .read_line(&mut answer)
-        .context("read from stdin")?;
-    if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
-        bail!("cancelled");
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use stellar_private_payments::types::{PolicyFlag, PolicyFlags};
@@ -260,10 +235,5 @@ mod tests {
             target_tree(ListKind::Blocklist, &pools, Some("B-old")).expect("unused"),
             target("B-old", &[])
         );
-    }
-
-    #[test]
-    fn confirm_passes_with_yes() {
-        confirm("a warning", true).expect("--yes continues");
     }
 }
