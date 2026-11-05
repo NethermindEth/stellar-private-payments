@@ -78,7 +78,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 - Spawns and configures the prover worker at `Client.new`, unless a pre-configured `prover` is supplied. With that prover, `circuitsBaseUrl` and `circuitLock` may be omitted. Routes storage through `StorageBridge`.
 - **Deployment-wide operations:**
   - Background sync via `backgroundSync`.
-  - Chain reads without a wallet: `contractConfig`, `operationalFeed`, `recipientLookup`, `allContractsData`, `verifySelectiveDisclosure`.
+  - Chain reads without a wallet: `contractConfig`, `operationalFeed`, `recipientLookup`, `allContractsData`, `poolContractsData`, `verifySelectiveDisclosure`.
   - Operator handles via `allowlistIds`/`allowlistOperator`, `blocklistIds`/`blocklistOperator`, `poolIds`/`poolAdmin` and `gvkAuthority`.
   - Account factory via `account({ networkPassphrase, userAddress?, signerAddress? }, signer)`.
 

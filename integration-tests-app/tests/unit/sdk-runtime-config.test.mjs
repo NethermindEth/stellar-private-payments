@@ -19,7 +19,6 @@ export const Client = {async new(rpc, storage, prover, config) {
 }};
 export function registerTelemetrySinks() { return {free() {}}; }
 export class BlocklistOperator {};
-export class Envelopes {};
 export class PoolAdmin {};
 export async function verifySelectiveDisclosure(rpc, prover, receipt, hash, options) { return options.contractConfig; }
 export function readTokenDecimals() {};

@@ -19,11 +19,13 @@ const LANDED_POLL_INTERVAL_MS: u32 = 1_000;
 /// One key that may sign for an admin account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignerWeight {
-    /// `G…` strkey of the signing key.
+    /// Strkey of the signer: `G…` for a key, `T…` for a pre-authorized
+    /// transaction, `X…` for a hash, `P…` for a signed payload.
     pub key: String,
     pub weight: u32,
-    /// Whether the envelope already carries this key's signature.
-    pub signed: bool,
+    /// Whether the envelope already carries this key's signature; `None` for
+    /// a signer that is not a plain key, which no envelope signature shows.
+    pub signed: Option<bool>,
 }
 
 /// How far an envelope is from the weight its source requires.
@@ -204,30 +206,29 @@ fn signing_status(
         .context("hash transaction envelope")?;
     let [master, _, medium, _] = account.thresholds.0;
 
-    let xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(master_key)) = &account.account_id.0;
-    let keys =
-        std::iter::once((*master_key, u32::from(master))).chain(account.signers.iter().filter_map(
-            |signer| match &signer.key {
-                xdr::SignerKey::Ed25519(xdr::Uint256(key)) => Some((*key, signer.weight)),
+    let xdr::PublicKey::PublicKeyTypeEd25519(master_key) = &account.account_id.0;
+    let master = xdr::Signer {
+        key: xdr::SignerKey::Ed25519(master_key.clone()),
+        weight: u32::from(master),
+    };
+    let signers: Vec<SignerWeight> = std::iter::once(&master)
+        .chain(account.signers.iter())
+        .map(|signer| SignerWeight {
+            key: signer.key.to_string(),
+            weight: signer.weight,
+            signed: match &signer.key {
+                xdr::SignerKey::Ed25519(xdr::Uint256(key)) => Some(
+                    v1.signatures
+                        .iter()
+                        .any(|signature| signed_by(key, &hash, signature)),
+                ),
                 _ => None,
             },
-        ));
-    let signers: Vec<SignerWeight> = keys
-        .map(|(key, weight)| SignerWeight {
-            key: stellar_strkey::ed25519::PublicKey(key)
-                .to_string()
-                .as_str()
-                .to_string(),
-            weight,
-            signed: v1
-                .signatures
-                .iter()
-                .any(|signature| signed_by(&key, &hash, signature)),
         })
         .collect();
     let signed_weight = signers
         .iter()
-        .filter(|signer| signer.signed)
+        .filter(|signer| signer.signed == Some(true))
         .map(|signer| signer.weight)
         .fold(0u32, u32::saturating_add);
 
@@ -334,7 +335,7 @@ mod tests {
             status
                 .signers
                 .iter()
-                .any(|s| s.key == second.public_key() && s.signed)
+                .any(|s| s.key == second.public_key() && s.signed == Some(true))
         );
 
         let twice = master.sign_transaction(once, PASSPHRASE).expect("sign");
@@ -420,6 +421,23 @@ mod tests {
             .await
             .expect("state");
         assert!(matches!(state, CallState::Landed { .. }), "{state:?}");
+    }
+
+    #[test]
+    fn a_signer_that_is_not_a_key_is_listed_as_unknown() {
+        let master = LocalSigner::from_seed([1; 32]);
+        let mut account = account(public_key(&master), [1, 0, 1, 0], &[]);
+        account.signers = vec![xdr::Signer {
+            key: xdr::SignerKey::HashX(xdr::Uint256([5; 32])),
+            weight: 1,
+        }]
+        .try_into()
+        .expect("signers");
+        let status =
+            signing_status(&account, &envelope(public_key(&master)), PASSPHRASE).expect("status");
+        let hash_x = &status.signers[1];
+        assert!(hash_x.key.starts_with('X'), "{}", hash_x.key);
+        assert_eq!((hash_x.weight, hash_x.signed), (1, None));
     }
 
     #[test]

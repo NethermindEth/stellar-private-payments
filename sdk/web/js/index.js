@@ -2,7 +2,6 @@ import init, {
   Client as WasmClient,
   AllowlistOperator,
   BlocklistOperator,
-  Envelopes,
   PoolAdmin,
   DisclosureRequest,
   readTokenDecimals,
@@ -152,6 +151,7 @@ function wrapClient(wasmClient, telemetrySinks) {
     poolAdmin: (contractId) => wasmClient.poolAdmin(contractId),
     gvkAuthority: (globalViewPrivateKeyHex) => wasmClient.gvkAuthority(globalViewPrivateKeyHex),
     allContractsData: () => wasmClient.allContractsData(),
+    poolContractsData: (poolContractId) => wasmClient.poolContractsData(poolContractId),
     verifySelectiveDisclosure: (receiptJson, expectedVkHash) =>
       wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash),
   };
@@ -239,7 +239,7 @@ export const Storage = { open: openStorage, openPlaintext: openPlaintextStorage 
 export const Client = {
   new: newClient,
 };
-export { AllowlistOperator, BlocklistOperator, Envelopes, PoolAdmin, DisclosureRequest, readTokenDecimals, parseTokenAmount, ProverBridge, bootnodeRequired, verifySelectiveDisclosure };
+export { AllowlistOperator, BlocklistOperator, PoolAdmin, DisclosureRequest, readTokenDecimals, parseTokenAmount, ProverBridge, bootnodeRequired, verifySelectiveDisclosure };
 export {
   configureTelemetry,
   set_log_level,

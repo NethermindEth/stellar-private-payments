@@ -105,7 +105,7 @@ pub fn run(config: &CliConfig, command: EnvelopeCommands, json: bool) -> Result<
                     );
                 }
                 ask(
-                    &format!("Sign this call as `{alias}`?"),
+                    "Sign this call?",
                     "no terminal to confirm the call on; check it with `spp envelope describe` and \
                      pass --yes",
                 )?;
@@ -163,7 +163,7 @@ struct StatusRow {
 struct SignerRow {
     key: String,
     weight: u32,
-    signed: bool,
+    signed: Option<bool>,
 }
 
 impl From<&SigningStatus> for StatusRow {
@@ -198,9 +198,7 @@ fn sign_refusal(status: &SigningStatus, signer: &str, source: &str) -> Option<St
     if status.is_ready() {
         return Some("the envelope already carries the signatures it needs; submit it".into());
     }
-    entry
-        .signed
-        .then(|| format!("{signer} has already signed the envelope"))
+    (entry.signed == Some(true)).then(|| format!("{signer} has already signed the envelope"))
 }
 
 fn print_status(status: &SigningStatus) {
@@ -223,10 +221,10 @@ fn print_status(status: &SigningStatus) {
             format!(
                 "weight {}, {}",
                 signer.weight,
-                if signer.signed {
-                    "signed"
-                } else {
-                    "not signed"
+                match signer.signed {
+                    Some(true) => "signed",
+                    Some(false) => "not signed",
+                    None => "not a key; its signature isn't counted",
                 }
             ),
         );
@@ -245,10 +243,14 @@ mod tests {
             .map(|&(key, weight, signed)| SignerWeight {
                 key: key.to_string(),
                 weight,
-                signed,
+                signed: Some(signed),
             })
             .collect();
-        let signed_weight = signers.iter().filter(|s| s.signed).map(|s| s.weight).sum();
+        let signed_weight = signers
+            .iter()
+            .filter(|s| s.signed == Some(true))
+            .map(|s| s.weight)
+            .sum();
         SigningStatus {
             threshold,
             signers,

@@ -187,6 +187,7 @@ export interface Client {
   poolAdmin(contractId: string): PoolAdmin;
   gvkAuthority(globalViewPrivateKeyHex: string): GvkAuthority;
   allContractsData(): Promise<ContractsStateData>;
+  poolContractsData(poolContractId: string): Promise<ContractsStateData>;
   verifySelectiveDisclosure(
     receiptJson: string,
     expectedVkHash: string,

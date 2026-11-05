@@ -30,9 +30,7 @@ use crate::{
 };
 
 pub use account::Account;
-pub use envelope::{
-    CallStatus, Envelopes, OperatorCall, SignerWeight, SigningStatus, UnsignedOperatorCall,
-};
+pub use envelope::{OperatorCall, UnsignedOperatorCall};
 pub use gvk::GvkAudit;
 pub use operator::{AdminState, AllowlistOperator, BlocklistOperator, GvkAuthority, PoolAdmin};
 pub use pool::PrivatePool;
@@ -253,6 +251,21 @@ impl Client {
         let fetcher = self.state_fetcher()?;
         let data = fetcher
             .all_contracts_data()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(ContractsStateData::from(data))
+    }
+
+    /// On-chain state of one enabled pool and of the trees it uses. A pool
+    /// that fails to read fails only its own call.
+    #[wasm_bindgen(js_name = poolContractsData)]
+    pub async fn pool_contracts_data(
+        &self,
+        pool_contract_id: String,
+    ) -> Result<ContractsStateData, JsError> {
+        let fetcher = self.state_fetcher()?;
+        let data = fetcher
+            .contracts_data_for_pool(&pool_contract_id)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(ContractsStateData::from(data))

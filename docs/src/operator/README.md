@@ -33,7 +33,7 @@ role:
 | ASP of an allowlist | `spp allowlist` | `AllowlistOperator` |
 | ASP of a blocklist | `spp blocklist` | `BlocklistOperator` |
 | Admin of a pool | `spp pool-admin` | `PoolAdmin` |
-| Admin account signers | `spp envelope` | `Envelopes` |
+| Admin account signers | `spp envelope` | `Envelopes`, Rust only |
 | GVK holder | `spp gvk audit` | `GvkAuthority` |
 
 A write command signs with `--account` and sends the call at once, which suits a single-key admin.

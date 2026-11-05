@@ -2333,9 +2333,7 @@ function resetAuditState() {
 }
 
 async function readPoolFee(poolContractId) {
-  const { pools } = await client().allContractsData();
-  const pool = pools.find((entry) => entry.contractId === poolContractId);
-  if (!pool) throw new Error(`Pool ${poolContractId} is not enabled in this deployment`);
+  const { pools: [pool] } = await client().poolContractsData(poolContractId);
   return BigInt(pool.fee);
 }
 

@@ -75,19 +75,14 @@ Admins reach their contracts through one handle per contract, as in the
 `Client`:
 
 ```js
-import init, { AllowlistOperator, BlocklistOperator, PoolAdmin, Envelopes } from 'stellar-private-payments';
+import init, { AllowlistOperator, BlocklistOperator, PoolAdmin } from 'stellar-private-payments';
 
 await init();
 const tree = AllowlistOperator.open(rpcUrl, contractConfig, contractConfig.asp_membership);
 const { admin, pendingAdmin } = await tree.admin();
 const leaf = AllowlistOperator.deriveUserLeaf(notePublicKey, aspSecret);
 const { envelopeXdr, call } = await tree.insertLeaf(leaf);
-// Each signer of call.source adds a signature to envelopeXdr, giving `signed`.
-const envelopes = Envelopes.open(rpcUrl, networkPassphrase);
-if ((await envelopes.signingStatus(signed)).ready) {
-  const hash = await envelopes.submit(signed);
-  const status = await envelopes.confirm(hash); // .status: 'success', 'failed' or 'pending'
-}
+// Each signer of call.source adds a signature to envelopeXdr, then anyone sends it.
 ```
 
 `BlocklistOperator` builds `insertKeys(noteKeys)` and `deleteKey(noteKey)`, and

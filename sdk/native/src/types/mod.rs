@@ -344,8 +344,7 @@ pub fn parse_0x_hex_32(s: &str) -> Result<[u8; 32]> {
     }
 
     let mut out = [0u8; 32];
-    hex::decode_to_slice(s, &mut out)
-        .map_err(|e| anyhow!("cannot decode hex `{s}` to 32 bytes: {e}"))?;
+    hex::decode_to_slice(s, &mut out).map_err(|e| anyhow!("cannot decode hex to 32 bytes: {e}"))?;
     Ok(out)
 }
 
@@ -811,5 +810,21 @@ mod contract_config_tests {
         let config: ContractConfig = serde_json::from_value(manifest)?;
         assert!(config.added_asp_memberships.is_empty());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod hex_tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn a_hex_error_leaves_the_input_out() {
+        let secret = format!("{}g", "1f".repeat(31) + "1");
+        let err = parse_0x_hex_32(&secret).expect_err("bad character");
+        assert!(!err.to_string().contains(&secret[..16]), "{err}");
+        let err = Field::from_str(&secret).expect_err("bad character");
+        assert!(!format!("{err:#}").contains(&secret[..16]), "{err:#}");
     }
 }
