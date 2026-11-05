@@ -8,7 +8,8 @@ on:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: true
+  # Let main finish saving caches; cancel superseded PR runs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -37,13 +38,14 @@ jobs:
         with:
           toolchain: stable
           components: clippy
+      # Pin rustfmt: rust-cache includes every installed compiler in its key.
       - name: Install nightly rustfmt
-        run: rustup toolchain install nightly --component rustfmt --profile minimal
+        run: rustup toolchain install nightly-2026-10-17 --component rustfmt --profile minimal
       - uses: ./.github/actions/rust-cache
       - name: Provide circuit artifacts
         uses: ./.github/actions/circuits
       - name: Run Fmt
-        run: cargo +nightly fmt --all -- --check --config-path rustfmt.toml
+        run: cargo +nightly-2026-10-17 fmt --all -- --check --config-path rustfmt.toml
 
       - name: Run Clippy
         run: cargo clippy --all-targets

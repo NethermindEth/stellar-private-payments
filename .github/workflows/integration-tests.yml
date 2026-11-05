@@ -8,7 +8,8 @@ on:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: true
+  # Let main finish saving caches; cancel superseded PR runs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -35,8 +36,9 @@ jobs:
           toolchain: stable
           components: clippy
 
+      # Pin rustfmt: rust-cache includes every installed compiler in its key.
       - name: Install nightly rustfmt
-        run: rustup toolchain install nightly --component rustfmt --profile minimal
+        run: rustup toolchain install nightly-2026-10-17 --component rustfmt --profile minimal
 
       - name: Install System dependencies
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
@@ -54,7 +56,7 @@ jobs:
 
       - name: Run Fmt
         working-directory: integration-tests
-        run: cargo +nightly fmt --all -- --check --config-path ../rustfmt.toml
+        run: cargo +nightly-2026-10-17 fmt --all -- --check --config-path ../rustfmt.toml
 
       - name: Run Clippy
         working-directory: integration-tests

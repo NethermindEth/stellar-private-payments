@@ -12,7 +12,8 @@ permissions:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: true
+  # Let main finish saving caches; cancel superseded PR runs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   msrv:

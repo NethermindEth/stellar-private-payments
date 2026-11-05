@@ -18,7 +18,8 @@ on:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: true
+  # Let main finish saving caches; cancel superseded PR runs.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -51,8 +52,9 @@ jobs:
       - name: Check for unused dependencies
         run: cargo shear
 
+      # Pin rustfmt: rust-cache includes every installed compiler in its key.
       - name: Install nightly rustfmt
-        run: rustup toolchain install nightly --component rustfmt --profile minimal
+        run: rustup toolchain install nightly-2026-10-17 --component rustfmt --profile minimal
 
       - uses: ./.github/actions/rust-cache
         with:
@@ -65,7 +67,7 @@ jobs:
         run: cargo deny --config ../../deny.toml check
 
       - name: Fmt
-        run: cargo +nightly fmt --all -- --check --config-path ../../rustfmt.toml
+        run: cargo +nightly-2026-10-17 fmt --all -- --check --config-path ../../rustfmt.toml
 
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings

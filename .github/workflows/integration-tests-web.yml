@@ -30,8 +30,9 @@ jobs:
           components: clippy
           override: true
 
+      # Pin rustfmt: rust-cache includes every installed compiler in its key.
       - name: Install nightly rustfmt
-        run: rustup toolchain install nightly --component rustfmt --profile minimal
+        run: rustup toolchain install nightly-2026-10-17 --component rustfmt --profile minimal
 
       - name: Cache
         uses: ./.github/actions/rust-cache
@@ -43,7 +44,7 @@ jobs:
 
       - name: Run Fmt
         working-directory: integration-tests-web
-        run: cargo +nightly fmt --all -- --check --config-path ../rustfmt.toml
+        run: cargo +nightly-2026-10-17 fmt --all -- --check --config-path ../rustfmt.toml
 
       # tests/e2e.rs include_str!'s this file; only parsed at test runtime.
       - name: Provide a placeholder local deployment
