@@ -12,6 +12,7 @@ import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
 import { chargeSpend, classifyTx, emptyPkNode, withdrawalsByPk } from './gvk-classify.js';
+import { queueCursorOp } from './gvk-cursor.js';
 import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, readTokenDecimals, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
 import { amountByPk, collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId, parseFieldAmount, unspentByPk } from './gvk-notes.js';
 import { friendlyErrorMessage } from './facade-errors.js';
@@ -1968,18 +1969,6 @@ function pushTx(tx) {
   const index = state.txCounter;
   const kind = state.poolGvkMode === 'traceable' ? txKind(tx) : null;
   state.rows.push({ tx, index, kind });
-}
-
-// Serializes all cursor access — a filter change can trigger a background
-// drain (see ensureFullyLoaded) while a user-initiated fetch is in flight,
-// and `state.audit.nextTx()` is a stateful iterator that isn't safe to call
-// concurrently from two call sites.
-let cursorQueue = Promise.resolve();
-
-function queueCursorOp(fn) {
-  const run = cursorQueue.then(fn, fn);
-  cursorQueue = run.then(() => {}, () => {});
-  return run;
 }
 
 async function fetchBatch(limit) {
