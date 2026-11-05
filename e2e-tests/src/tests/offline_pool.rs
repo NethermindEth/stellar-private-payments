@@ -51,9 +51,9 @@ use stellar_private_payments::{
     transact::{PreparedTxPublic, TransactRequest},
     types::{
         AspMembershipSync, ContractConfig, ContractsEventData, DisclosureReceipt,
-        EncryptionKeyPair, EncryptionPublicKey, ExtData, Field, NoteKeyPair, NoteOwnerAddress,
-        NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, RecipientLookup,
-        SignedTransaction, SignerAddress, SyncMetadata, UserNoteSummary,
+        EncryptionKeyPair, EncryptionPublicKey, ExtData, Field, NoteKeyOwnerLookup, NoteKeyPair,
+        NoteOwnerAddress, NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry,
+        RecipientLookup, SignedTransaction, SignerAddress, SyncMetadata, UserNoteSummary,
     },
     zk::flows::TransactParams,
 };
@@ -789,6 +789,14 @@ impl Storage for FaultyStorage {
         config: &ContractConfig,
     ) -> Result<RecipientLookup, Error> {
         self.inner.recipient_lookup(address, config).await
+    }
+
+    async fn note_key_owner_lookup(
+        &self,
+        note_keys: &[Field],
+        config: &ContractConfig,
+    ) -> Result<NoteKeyOwnerLookup, Error> {
+        self.inner.note_key_owner_lookup(note_keys, config).await
     }
 
     async fn build_transact_params(&self, req: &TransactRequest) -> Result<TransactParams, Error> {
