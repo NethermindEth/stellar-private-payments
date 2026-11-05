@@ -12,7 +12,7 @@ import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
 import { classifyTx, withdrawalsByPk } from './gvk-classify.js';
-import { queueCursorOp } from './gvk-cursor.js';
+import { queueCursorOp, releaseCursor } from './gvk-cursor.js';
 import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
 import { collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId } from './gvk-notes.js';
 import { friendlyErrorMessage } from './facade-errors.js';
@@ -2282,6 +2282,7 @@ async function populatePools() {
 }
 
 function resetAuditState() {
+  if (state.audit) releaseCursor(state.audit);
   state.audit = null;
   state.auditedPoolContractId = null;
   state.tokenDecimals = null;
@@ -2329,7 +2330,10 @@ async function startAudit({ reset }) {
     const pool = await client().account().pool({ poolContract: poolContractId });
     const decimals = await readDisplayDecimals(pool);
     const fee = await pool.fee();
-    state.audit = await pool.audit(privateKey);
+    // An overlapping Sync & Audit may have opened a cursor during the awaits.
+    const audit = await pool.audit(privateKey);
+    if (state.audit) releaseCursor(state.audit);
+    state.audit = audit;
     state.tokenDecimals = decimals;
     state.poolFee = fee;
     state.auditedPoolContractId = poolContractId;
