@@ -13,6 +13,8 @@ export type {
   DisclosureVerificationReport,
   GlobalViewKeyCiphertext,
   GvkAudit,
+  NoteKeyOwner,
+  NoteKeyOwnerLookup,
   OperationalFeedItem,
   PoolConfigEntry,
   PoolEstimate,

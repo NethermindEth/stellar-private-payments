@@ -11,7 +11,7 @@ mod portfolio_balance;
 mod user_note_summary;
 
 pub(crate) use chain::operational_feed_items;
-pub use chain::{ContractsStateData, OperationalFeedItem, RecipientLookup};
+pub use chain::{ContractsStateData, NoteKeyOwnerLookup, OperationalFeedItem, RecipientLookup};
 pub use config::ContractConfig;
 pub(crate) use config::contract_config_from_js;
 pub use disclosure::{DisclosureReceipt, DisclosureRequest, DisclosureVerificationReport};

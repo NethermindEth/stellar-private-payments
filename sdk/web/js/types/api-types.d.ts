@@ -9,6 +9,7 @@ import type {
   ContractConfig,
   ContractsStateData,
   DisclosureVerificationReport,
+  NoteKeyOwnerLookup,
   OperationalFeedItem,
   ProverBridge,
   RecipientLookup,
@@ -175,6 +176,8 @@ export interface Client {
   contractConfig(): ContractConfig;
   account(options: AccountOptions, signer: WalletSigner): Promise<Account>;
   recipientLookup(address: string): Promise<RecipientLookup>;
+  /** Addresses that ever registered each note key (`0x` big-endian hex, as GVK `note.pk`). */
+  noteKeyOwnerLookup(noteKeys: string[]): Promise<NoteKeyOwnerLookup>;
   aspState(): Promise<ContractsStateData>;
   allContractsData(): Promise<ContractsStateData>;
   verifySelectiveDisclosure(
