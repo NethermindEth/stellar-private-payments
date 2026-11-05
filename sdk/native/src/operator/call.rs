@@ -51,24 +51,55 @@ pub struct OperatorCall {
 }
 
 impl OperatorCall {
-    /// The arguments as their signers read them: addresses as strkeys, 256-bit
-    /// integers as `0x` hex, lists in brackets.
+    /// The arguments as their signers read them: addresses as strkeys, lists
+    /// in brackets, 256-bit integers as `0x` hex. Blocklist keys keep their
+    /// input byte order.
     pub fn args_text(&self) -> Vec<String> {
-        self.args.iter().map(arg_text).collect()
+        let order = if self.takes_note_keys() {
+            ByteOrder::NoteKey
+        } else {
+            ByteOrder::BigEndian
+        };
+        self.args.iter().map(|arg| arg_text(arg, order)).collect()
+    }
+
+    /// Blocklist writes. The allowlist `insert_leaf` takes one argument.
+    fn takes_note_keys(&self) -> bool {
+        match self.method.as_str() {
+            "insert_leaf" => self.args.len() == 2,
+            "insert_leaves" | "delete_leaf" => true,
+            _ => false,
+        }
     }
 }
 
-fn arg_text(arg: &xdr::ScVal) -> String {
+#[derive(Clone, Copy)]
+enum ByteOrder {
+    BigEndian,
+    NoteKey,
+}
+
+fn arg_text(arg: &xdr::ScVal, order: ByteOrder) -> String {
     match arg {
         xdr::ScVal::Address(_) => {
             scval_to_address_string(arg).unwrap_or_else(|_| format!("{arg:?}"))
         }
-        xdr::ScVal::U256(parts) => format!(
-            "0x{:016x}{:016x}{:016x}{:016x}",
-            parts.hi_hi, parts.hi_lo, parts.lo_hi, parts.lo_lo
-        ),
+        xdr::ScVal::U256(parts) => {
+            let mut bytes = [0u8; 32];
+            for (chunk, part) in
+                bytes
+                    .chunks_exact_mut(8)
+                    .zip([parts.hi_hi, parts.hi_lo, parts.lo_hi, parts.lo_lo])
+            {
+                chunk.copy_from_slice(&part.to_be_bytes());
+            }
+            if let ByteOrder::NoteKey = order {
+                bytes.reverse();
+            }
+            format!("0x{}", hex::encode(bytes))
+        }
         xdr::ScVal::Vec(Some(items)) => {
-            let items: Vec<String> = items.iter().map(arg_text).collect();
+            let items: Vec<String> = items.iter().map(|item| arg_text(item, order)).collect();
             format!("[{}]", items.join(", "))
         }
         other => format!("{other:?}"),

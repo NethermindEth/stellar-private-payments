@@ -119,6 +119,49 @@ mod tests {
         );
     }
 
+    fn call(method: &str, args: Vec<stellar_xdr::ScVal>) -> crate::operator::OperatorCall {
+        crate::operator::OperatorCall {
+            source: String::new(),
+            sequence: 0,
+            fee: 0,
+            valid_until: 0,
+            contract_id: String::new(),
+            method: method.to_string(),
+            args,
+        }
+    }
+
+    #[test]
+    fn a_call_shows_each_key_as_it_was_given() {
+        let mut bytes = [0u8; 32];
+        bytes[..3].copy_from_slice(&[0x2a, 0x01, 0xff]);
+        let given = format!("0x{}", hex::encode(bytes));
+        let key = NotePublicKey::parse(&given).expect("key");
+
+        let (method, args) = insert_keys_call(std::slice::from_ref(&key)).expect("one key");
+        assert_eq!(
+            call(method, args).args_text(),
+            vec![given.clone(), given.clone()]
+        );
+
+        let (method, args) = insert_keys_call(&[key.clone(), note_key(1)]).expect("several keys");
+        let one = format!("0x01{}", "00".repeat(31));
+        assert_eq!(
+            call(method, args).args_text(),
+            vec![format!("[[{given}, {given}], [{one}, {one}]]")]
+        );
+
+        let delete = vec![field_to_scval_u256(tree_key(&key).expect("tree key"))];
+        assert_eq!(call("delete_leaf", delete).args_text(), vec![given]);
+    }
+
+    #[test]
+    fn an_allowlist_leaf_shows_its_value() {
+        let leaf = Field::from(NoteAmount::from(0x2au128));
+        let text = call("insert_leaf", vec![field_to_scval_u256(leaf)]).args_text();
+        assert_eq!(text, vec![leaf.to_string()]);
+    }
+
     #[test]
     fn an_empty_list_is_refused() {
         assert!(matches!(insert_keys_call(&[]), Err(Error::Refused(_))));
