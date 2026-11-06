@@ -51,7 +51,7 @@ Environment:
   CHROMEDRIVER               Path to chromedriver (default: from PATH)
   WASM_BINDGEN_TEST_TIMEOUT  Per-test timeout in seconds (default 600)
   E2E_SKIP_LOCALNET=1        Skip starting/stopping localnet (for a <command>
-                             that never touches the network)
+                             that never touches the network, or reuses an outer localnet)
 
 integration-tests-web sits outside this workspace — pass its manifest explicitly.
 
@@ -173,6 +173,8 @@ cleanup() {
   return 0
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 main() {
   if [ "${E2E_SKIP_LOCALNET:-}" != "1" ]; then
