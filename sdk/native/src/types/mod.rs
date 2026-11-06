@@ -345,8 +345,7 @@ pub fn parse_0x_hex_32(s: &str) -> Result<[u8; 32]> {
     }
 
     let mut out = [0u8; 32];
-    hex::decode_to_slice(s, &mut out)
-        .map_err(|e| anyhow!("cannot decode hex `{s}` to 32 bytes: {e}"))?;
+    hex::decode_to_slice(s, &mut out).map_err(|e| anyhow!("cannot decode hex to 32 bytes: {e}"))?;
     Ok(out)
 }
 
@@ -638,6 +637,16 @@ mod key_serde_tests {
         let roundtrip = serde_json::to_string(&parsed)?;
         assert_eq!(roundtrip, format!("\"0x{raw}\""));
         Ok(())
+    }
+
+    #[test]
+    fn parse_0x_hex_32_error_omits_the_input() {
+        let err = parse_0x_hex_32(&format!("{}zz", "ab".repeat(31)))
+            .expect_err("a non-hex pair must be rejected");
+        assert_eq!(
+            err.to_string(),
+            "cannot decode hex to 32 bytes: Invalid character 'z' at position 62"
+        );
     }
 }
 

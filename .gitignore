@@ -85,4 +85,8 @@ spp-example-wallet.sqlite-*
 spp-example-wallet.sqlite.*
 spp-*-wallet/
 
+# GVK authority keypairs from `gvkey-gen generate --out-file` (DEPLOY.md, operator manual).
+admin-d.json
+gvk-private.json
+
 deployments/local/

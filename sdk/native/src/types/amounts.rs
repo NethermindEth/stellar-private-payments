@@ -388,6 +388,9 @@ impl<'de> Deserialize<'de> for ExtAmount {
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Field(pub U256);
 
+/// Lets `Zeroizing<Field>` wipe a secret field element.
+impl zeroize::DefaultIsZeroes for Field {}
+
 impl Field {
     /// The multiplicative identity in the field.
     pub const ONE: Field = Field(U256([1, 0, 0, 0]));

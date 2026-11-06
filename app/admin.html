@@ -2,6 +2,7 @@
 <html lang="en" class="scroll-smooth">
 <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-xX3GGzsWOBkkZFDGzlbqMQDp7AuZuYp65Q/Q32otTGk='; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="ASP Admin console." />
     <meta name="author" content="Stellar Private Payments" />
@@ -209,7 +210,7 @@
                     <div>
                         <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkPrivateKey">Authority private key (d)</label>
                         <input id="gvkPrivateKey" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" type="password" placeholder="0x..." autocomplete="off" spellcheck="false" />
-                        <p id="gvkKeyHint" class="mt-2 text-xs text-slate-500">Loaded from local DB when available; not saved from this page.</p>
+                        <p class="mt-2 text-xs text-slate-500">Cleared on Sync &amp; Audit. Not stored by this page.</p>
                     </div>
                 </div>
 
