@@ -91,16 +91,16 @@ impl StateFetcher {
         )?;
 
         let sim = self.client.simulate_transaction(&raw).await?;
-        let prepared = PreparedSorobanTx::from_simulation(&raw, &sim)?;
-        check_transact_auth(
-            &sim.auth_entries()?,
-            &pool_contract_id.parse()?,
-            args,
-            &token,
-            &sender,
-            input.ext_data.ext_amount.into(),
-        )?;
-        Ok(prepared)
+        PreparedSorobanTx::from_simulation(&raw, &sim, |entries| {
+            check_transact_auth(
+                entries,
+                &pool_contract_id.parse()?,
+                args,
+                &token,
+                &sender,
+                input.ext_data.ext_amount.into(),
+            )
+        })
     }
 
     /// Simulates `register` on the configured public key registry contract and
@@ -118,6 +118,9 @@ impl StateFetcher {
     /// signature on the envelope.
     ///
     /// `encryption_key` is the Edwards encoding the registry stores.
+    ///
+    /// Refuses any authorization beyond this `register`; see
+    /// [`check_register_auth`].
     pub async fn prepare_register(
         &self,
         owner: &NoteOwnerAddress,
@@ -128,6 +131,16 @@ impl StateFetcher {
     ) -> Result<PreparedSorobanTx> {
         let account_scval = register_account_to_scval(owner.as_str(), encryption_key, note_key)?;
         let proof_scval = registration_proof_to_scval(proof)?;
+        let args = vec![account_scval, proof_scval];
+        let registry = &self.contract_config().public_key_registry;
+        let owner: xdr::ScAddress = owner
+            .as_str()
+            .parse()
+            .map_err(|e| anyhow!("invalid owner address: {e}"))?;
+        let payer_address: xdr::ScAddress = payer
+            .as_str()
+            .parse()
+            .map_err(|e| anyhow!("invalid payer address: {e}"))?;
 
         let payer = payer.as_str();
         let seq = self.account_sequence(payer).await?;
@@ -135,14 +148,24 @@ impl StateFetcher {
             payer,
             seq,
             BASE_FEE,
-            &self.contract_config().public_key_registry,
+            registry,
             "register",
-            vec![account_scval, proof_scval],
+            args.clone(),
             Vec::new(),
         )?;
 
         let sim = self.client.simulate_transaction(&raw).await?;
-        PreparedSorobanTx::from_simulation(&raw, &sim)
+        PreparedSorobanTx::from_simulation(&raw, &sim, |entries| {
+            check_register_auth(
+                entries,
+                &registry
+                    .parse()
+                    .map_err(|e| anyhow!("invalid registry contract id: {e}"))?,
+                args,
+                &owner,
+                &payer_address,
+            )
+        })
     }
 
     async fn account_sequence(&self, source_account: &str) -> Result<xdr::SequenceNumber> {
@@ -218,6 +241,56 @@ fn check_transact_auth(
     ensure!(
         transfer.sub_invocations.is_empty(),
         "refusing to sign a deposit whose token transfer authorizes a call of its own"
+    );
+    Ok(())
+}
+
+/// Refuses simulated authorization beyond this `register`.
+///
+/// The registry asks the owner to authorize `register` and calls nothing else
+/// that needs authorization, so the simulation should return exactly one entry
+/// for that call. Anything more was added by the RPC. The wallet would sign an
+/// added address entry for the owner, and the payer's envelope signature
+/// would authorize an added source-account entry, so a `token.transfer` from
+/// either account would go through unnoticed.
+///
+/// The root must be the `register` built from `args`, or the owner would
+/// publish keys it did not choose. A source-account entry is authorized by the
+/// payer, so it is accepted only when the payer is the owner.
+fn check_register_auth(
+    entries: &[xdr::SorobanAuthorizationEntry],
+    registry: &xdr::ScAddress,
+    args: Vec<xdr::ScVal>,
+    owner: &xdr::ScAddress,
+    payer: &xdr::ScAddress,
+) -> Result<()> {
+    let [entry] = entries else {
+        bail!(
+            "refusing to sign {} authorization entries for register, which takes one",
+            entries.len()
+        );
+    };
+    let root = &entry.root_invocation;
+    let register = invoke_contract_args(registry.clone(), "register", args)?;
+    ensure!(
+        root.function == xdr::SorobanAuthorizedFunction::ContractFn(register),
+        "refusing to sign a root call other than the register built for the registry"
+    );
+    ensure!(
+        root.sub_invocations.is_empty(),
+        "refusing to sign a register that authorizes a call under it"
+    );
+    let authorizer = match &entry.credentials {
+        xdr::SorobanCredentials::SourceAccount => payer,
+        xdr::SorobanCredentials::Address(credentials)
+        | xdr::SorobanCredentials::AddressV2(credentials) => &credentials.address,
+        xdr::SorobanCredentials::AddressWithDelegates(credentials) => {
+            &credentials.address_credentials.address
+        }
+    };
+    ensure!(
+        authorizer == owner,
+        "refusing to sign a register authorized by an address other than the owner"
     );
     Ok(())
 }
@@ -377,7 +450,7 @@ mod tests {
     fn prepared_tx_applies_simulation_fee_and_auth() {
         let raw = empty_envelope();
         let sim = fixture_sim("500");
-        let prepared = PreparedSorobanTx::from_simulation(&raw, &sim).expect("prepare");
+        let prepared = PreparedSorobanTx::from_simulation(&raw, &sim, |_| Ok(())).expect("prepare");
         assert!(prepared.auth_entries.is_empty());
         assert_eq!(prepared.latest_ledger, 1);
         assert!(!prepared.tx_xdr.is_empty());
@@ -390,16 +463,67 @@ mod tests {
         assert_eq!(v1.tx.fee, 600);
     }
 
-    /// The owner is the registration; the payer only carries it. Drives the
-    /// real `prepare_register` against a mocked RPC so the routing of each
-    /// identity is asserted on production code, not on a re-implementation.
-    #[tokio::test]
-    async fn prepare_register_registers_owner_and_sources_from_payer() {
-        let owner_key = ed25519::PublicKey([1u8; 32]).to_string();
-        let payer_key = ed25519::PublicKey([2u8; 32]).to_string();
-        let owner = NoteOwnerAddress::new(owner_key.as_str());
-        let payer = SignerAddress::new(payer_key.as_str());
-        assert_ne!(owner.as_str(), payer.as_str(), "the pair must differ");
+    const NOTE_KEY: [u8; 32] = [0xAB; 32];
+    const ENCRYPTION_KEY: [u8; 32] = [0xEE; 32];
+
+    fn register_owner() -> NoteOwnerAddress {
+        NoteOwnerAddress::new(ed25519::PublicKey([1u8; 32]).to_string().as_str())
+    }
+
+    fn register_payer() -> SignerAddress {
+        SignerAddress::new(ed25519::PublicKey([2u8; 32]).to_string().as_str())
+    }
+
+    fn registration_proof() -> RegistrationProof {
+        RegistrationProof {
+            note_key_proof: vec![0x01; 256],
+            encryption_key_signature: [0x02; 64],
+            owner_signature: [0x03; 64],
+        }
+    }
+
+    fn address(strkey: &str) -> xdr::ScAddress {
+        strkey.parse().expect("address")
+    }
+
+    /// The entry the registry asks of the owner for the `register` that
+    /// [`prepare_register_with`] builds.
+    fn owner_register_entry() -> xdr::SorobanAuthorizationEntry {
+        let config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
+        let owner = register_owner();
+        let args = vec![
+            register_account_to_scval(owner.as_str(), ENCRYPTION_KEY, NOTE_KEY)
+                .expect("account scval"),
+            registration_proof_to_scval(&registration_proof()).expect("proof scval"),
+        ];
+        let register = invoke_contract_args(address(&config.public_key_registry), "register", args)
+            .expect("register args");
+        xdr::SorobanAuthorizationEntry {
+            credentials: xdr::SorobanCredentials::Address(xdr::SorobanAddressCredentials {
+                address: address(owner.as_str()),
+                nonce: 7,
+                signature_expiration_ledger: 0,
+                signature: xdr::ScVal::Void,
+            }),
+            root_invocation: xdr::SorobanAuthorizedInvocation {
+                function: xdr::SorobanAuthorizedFunction::ContractFn(register),
+                sub_invocations: xdr::VecM::default(),
+            },
+        }
+    }
+
+    /// Drives the real `prepare_register` for [`register_owner`], paid by
+    /// [`register_payer`], against a mocked RPC whose simulation returns
+    /// `auth`. Returns the server too, so a test can read the requests it got.
+    async fn prepare_register_with(
+        auth: Vec<xdr::SorobanAuthorizationEntry>,
+    ) -> (Result<PreparedSorobanTx>, MockServer) {
+        let payer = register_payer();
+        let mut sim = fixture_sim("250");
+        sim.results[0].auth = auth
+            .iter()
+            .map(|entry| entry.to_xdr_base64(Limits::none()).expect("auth entry xdr"))
+            .collect();
 
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -423,7 +547,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "jsonrpc": "2.0",
                 "id": 1,
-                "result": fixture_sim("250"),
+                "result": sim,
             })))
             .mount(&server)
             .await;
@@ -431,16 +555,30 @@ mod tests {
         let config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
         let fetcher = StateFetcher::new(RpcClient::new(&server.uri()).expect("rpc client"), config)
             .expect("state fetcher");
-
-        let proof = RegistrationProof {
-            note_key_proof: vec![0x01; 256],
-            encryption_key_signature: [0x02; 64],
-            owner_signature: [0x03; 64],
-        };
         let prepared = fetcher
-            .prepare_register(&owner, &payer, [0xAB; 32], [0xEE; 32], &proof)
-            .await
-            .expect("prepare register");
+            .prepare_register(
+                &register_owner(),
+                &payer,
+                NOTE_KEY,
+                ENCRYPTION_KEY,
+                &registration_proof(),
+            )
+            .await;
+        (prepared, server)
+    }
+
+    /// The owner is the registration; the payer only carries it. Drives the
+    /// real `prepare_register` against a mocked RPC so the routing of each
+    /// identity is asserted on production code, not on a re-implementation.
+    #[tokio::test]
+    async fn prepare_register_registers_owner_and_sources_from_payer() {
+        let owner = register_owner();
+        let payer = register_payer();
+        let proof = registration_proof();
+        assert_ne!(owner.as_str(), payer.as_str(), "the pair must differ");
+
+        let (prepared, server) = prepare_register_with(vec![owner_register_entry()]).await;
+        let prepared = prepared.expect("prepare register");
 
         let env = xdr::TransactionEnvelope::from_xdr_base64(&prepared.tx_xdr, Limits::none())
             .expect("xdr");
@@ -495,6 +633,33 @@ mod tests {
         assert_eq!(
             args.args[1],
             registration_proof_to_scval(&proof).expect("proof scval")
+        );
+    }
+
+    /// The attack from issue 776: the RPC appends a source-account entry
+    /// moving the payer's tokens, which the payer's envelope signature would
+    /// authorize without a prompt of its own.
+    #[tokio::test]
+    async fn prepare_register_refuses_an_entry_added_by_the_rpc() {
+        let theft = xdr::SorobanAuthorizationEntry {
+            credentials: xdr::SorobanCredentials::SourceAccount,
+            root_invocation: call(
+                &TOKEN,
+                "transfer",
+                vec![
+                    xdr::ScVal::Address(address(register_payer().as_str())),
+                    xdr::ScVal::Address(OTHER),
+                    xdr::ScVal::from(DEPOSIT),
+                ],
+                vec![],
+            ),
+        };
+        let (prepared, _server) = prepare_register_with(vec![owner_register_entry(), theft]).await;
+        assert_eq!(
+            prepared
+                .expect_err("the added entry must be refused")
+                .to_string(),
+            "refusing to sign 2 authorization entries for register, which takes one"
         );
     }
 
@@ -650,7 +815,7 @@ mod tests {
         .expect("raw tx");
 
         let sim = block_on(mock.simulate_transaction(&raw)).expect("simulate");
-        let prepared = PreparedSorobanTx::from_simulation(&raw, &sim).expect("prepare");
+        let prepared = PreparedSorobanTx::from_simulation(&raw, &sim, |_| Ok(())).expect("prepare");
 
         let env = xdr::TransactionEnvelope::from_xdr_base64(&prepared.tx_xdr, Limits::none())
             .expect("xdr");
@@ -919,6 +1084,150 @@ mod tests {
             refusal(DEPOSIT, vec![deposit]),
             "refusing to sign a deposit whose authorized call is not the pool token's transfer \
              of 5 from the sender to the pool"
+        );
+    }
+
+    const REGISTRY: xdr::ScAddress = xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash([9; 32])));
+    const PAYER: xdr::ScAddress = xdr::ScAddress::Account(xdr::AccountId(
+        xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256([5; 32])),
+    ));
+
+    /// The account and proof arguments the check expects.
+    fn register_args() -> Vec<xdr::ScVal> {
+        vec![xdr::ScVal::Void, xdr::ScVal::Void]
+    }
+
+    fn register_on(
+        contract: &xdr::ScAddress,
+        sub_invocations: Vec<xdr::SorobanAuthorizedInvocation>,
+    ) -> xdr::SorobanAuthorizedInvocation {
+        call(contract, "register", register_args(), sub_invocations)
+    }
+
+    fn signed_by(
+        address: &xdr::ScAddress,
+        root_invocation: xdr::SorobanAuthorizedInvocation,
+    ) -> xdr::SorobanAuthorizationEntry {
+        xdr::SorobanAuthorizationEntry {
+            credentials: xdr::SorobanCredentials::Address(xdr::SorobanAddressCredentials {
+                address: address.clone(),
+                nonce: 0,
+                signature_expiration_ledger: 0,
+                signature: xdr::ScVal::Void,
+            }),
+            root_invocation,
+        }
+    }
+
+    fn from_source(
+        root_invocation: xdr::SorobanAuthorizedInvocation,
+    ) -> xdr::SorobanAuthorizationEntry {
+        xdr::SorobanAuthorizationEntry {
+            credentials: xdr::SorobanCredentials::SourceAccount,
+            root_invocation,
+        }
+    }
+
+    /// Runs the register check for owner `SENDER`, paid by `payer`.
+    fn check_register(
+        payer: &xdr::ScAddress,
+        entries: Vec<xdr::SorobanAuthorizationEntry>,
+    ) -> Result<()> {
+        check_register_auth(&entries, &REGISTRY, register_args(), &SENDER, payer)
+    }
+
+    fn register_refusal(
+        payer: &xdr::ScAddress,
+        entries: Vec<xdr::SorobanAuthorizationEntry>,
+    ) -> String {
+        check_register(payer, entries)
+            .expect_err("the authorization must be refused")
+            .to_string()
+    }
+
+    #[test]
+    fn a_register_signed_by_the_owner_is_accepted() {
+        let entry = signed_by(&SENDER, register_on(&REGISTRY, vec![]));
+        check_register(&PAYER, vec![entry]).expect("accepted");
+    }
+
+    #[test]
+    fn a_register_from_the_source_account_is_accepted_when_the_owner_pays() {
+        let entry = from_source(register_on(&REGISTRY, vec![]));
+        check_register(&SENDER, vec![entry]).expect("accepted");
+    }
+
+    #[test]
+    fn a_register_from_a_source_account_other_than_the_owner_is_refused() {
+        let entry = from_source(register_on(&REGISTRY, vec![]));
+        assert_eq!(
+            register_refusal(&PAYER, vec![entry]),
+            "refusing to sign a register authorized by an address other than the owner"
+        );
+    }
+
+    #[test]
+    fn a_register_signed_by_another_address_is_refused() {
+        let entry = signed_by(&PAYER, register_on(&REGISTRY, vec![]));
+        assert_eq!(
+            register_refusal(&PAYER, vec![entry]),
+            "refusing to sign a register authorized by an address other than the owner"
+        );
+    }
+
+    #[test]
+    fn a_register_without_an_entry_is_refused() {
+        assert_eq!(
+            register_refusal(&PAYER, vec![]),
+            "refusing to sign 0 authorization entries for register, which takes one"
+        );
+    }
+
+    #[test]
+    fn a_second_register_entry_is_refused() {
+        let transfer = from_source(token_transfer(&TOKEN, &OTHER, vec![]));
+        let entries = vec![signed_by(&SENDER, register_on(&REGISTRY, vec![])), transfer];
+        assert_eq!(
+            register_refusal(&SENDER, entries),
+            "refusing to sign 2 authorization entries for register, which takes one"
+        );
+    }
+
+    #[test]
+    fn a_token_transfer_in_place_of_the_register_is_refused() {
+        let transfer = signed_by(&SENDER, token_transfer(&TOKEN, &OTHER, vec![]));
+        assert_eq!(
+            register_refusal(&PAYER, vec![transfer]),
+            "refusing to sign a root call other than the register built for the registry"
+        );
+    }
+
+    #[test]
+    fn a_register_on_another_contract_is_refused() {
+        let entry = signed_by(&SENDER, register_on(&OTHER, vec![]));
+        assert_eq!(
+            register_refusal(&PAYER, vec![entry]),
+            "refusing to sign a root call other than the register built for the registry"
+        );
+    }
+
+    #[test]
+    fn a_register_with_other_arguments_is_refused() {
+        let args = vec![xdr::ScVal::U32(1), xdr::ScVal::Void];
+        let entry = signed_by(&SENDER, call(&REGISTRY, "register", args, vec![]));
+        assert_eq!(
+            register_refusal(&PAYER, vec![entry]),
+            "refusing to sign a root call other than the register built for the registry"
+        );
+    }
+
+    #[test]
+    fn a_call_nested_under_the_register_is_refused() {
+        let nested = token_transfer(&TOKEN, &OTHER, vec![]);
+        let entry = signed_by(&SENDER, register_on(&REGISTRY, vec![nested]));
+        assert_eq!(
+            register_refusal(&PAYER, vec![entry]),
+            "refusing to sign a register that authorizes a call under it"
         );
     }
 }
