@@ -65,6 +65,7 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
     let _ = std::fs::remove_file(&db_path);
 
     let amounts: Vec<u64> = wallet.unwrap_or_default().to_vec();
+    let setup_timing = FixtureTiming::new("wallet/database seeding");
     seed::seed_prove_wallet(
         &db_path,
         POOL_CONTRACT_ID,
@@ -75,18 +76,15 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
         &amounts,
     )?;
 
+    drop(setup_timing);
+
     let storage_path = db_path.to_string_lossy().into_owned();
     let storage = LocalStorage::open_encrypted(
         &storage_path,
         seed::database_key(),
         stellar_private_payments::state::database_key::OpenPurpose::OpenExisting,
     )?;
-    let artifacts = test_prover_artifacts()?;
-    let stem = CircuitStem::transact(
-        PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
-        GvkMode::Off,
-    );
-    let prover = ProverHandle::from(LocalProver::from_artifacts(&[(stem, artifacts)])?);
+    let prover = test_prover()?;
     let contract_config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON)?;
     let mut client = Client::init(
         "https://soroban-testnet.stellar.org",
@@ -124,7 +122,69 @@ fn test_signer() -> Result<SignerHandle> {
     )?))
 }
 
+// Share the real engine, never wallet/database/client state. Dedicated
+// constructor and artifact tests continue to initialize their own engines.
+#[cfg(not(target_arch = "wasm32"))]
+fn test_prover() -> Result<ProverHandle> {
+    static PROVER: std::sync::OnceLock<Result<ProverHandle, String>> = std::sync::OnceLock::new();
+    PROVER
+        .get_or_init(|| new_test_prover().map_err(|error| format!("{error:#}")))
+        .as_ref()
+        .cloned()
+        .map_err(|error| anyhow::anyhow!("{error}"))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn test_prover() -> Result<ProverHandle> {
+    thread_local! {
+        static PROVER: std::cell::LazyCell<Result<ProverHandle, String>> =
+            std::cell::LazyCell::new(|| new_test_prover().map_err(|error| format!("{error:#}")));
+    }
+    PROVER.with(|prover| {
+        prover
+            .as_ref()
+            .cloned()
+            .map_err(|error| anyhow::anyhow!("{error}"))
+    })
+}
+
+fn new_test_prover() -> Result<ProverHandle> {
+    let _timing = FixtureTiming::new("prover initialization");
+    let artifacts = test_prover_artifacts()?;
+    let stem = CircuitStem::transact(
+        PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+        GvkMode::Off,
+    );
+    Ok(ProverHandle::from(LocalProver::from_artifacts(&[(
+        stem, artifacts,
+    )])?))
+}
+
+// Opt-in timings stay in test fixtures and do not affect SDK behavior.
+struct FixtureTiming {
+    label: &'static str,
+    start: Option<std::time::Instant>,
+}
+
+impl FixtureTiming {
+    fn new(label: &'static str) -> Self {
+        Self {
+            label,
+            start: std::env::var_os("SPP_TEST_TIMINGS").map(|_| std::time::Instant::now()),
+        }
+    }
+}
+
+impl Drop for FixtureTiming {
+    fn drop(&mut self) {
+        if let Some(start) = self.start {
+            eprintln!("fixture timing: {}: {:?}", self.label, start.elapsed());
+        }
+    }
+}
+
 fn test_prover_artifacts() -> Result<stellar_private_payments::types::ProverArtifacts> {
+    let _timing = FixtureTiming::new("artifact loading");
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let circuits = repo.join("target/circuits-artifacts");
     let keys = repo.join("deployments/testnet/circuit_keys");
