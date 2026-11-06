@@ -11,9 +11,17 @@ export VERIFIER_VK_JSON="$ROOT/deployments/testnet/circuit_keys/policy_tx_2_2_AB
 
 case "${1:-}" in
   native)
-    cargo build --locked --workspace --all-targets
-    cargo build --locked -p stellar-private-payments --lib
-    cargo build --locked -p stellar-private-payments --lib --features parallel
+    # Apply only to the three root-workspace builds, never nested workspaces.
+    root_cargo=(cargo)
+    if [[ -n "${MSRV_DEPENDENCY_OPT_LEVEL:-}" ]]; then
+      case "$MSRV_DEPENDENCY_OPT_LEVEL" in
+        0|3) root_cargo+=(--config "profile.dev.package.\"*\".opt-level=$MSRV_DEPENDENCY_OPT_LEVEL") ;;
+        *) echo "MSRV_DEPENDENCY_OPT_LEVEL must be 0 or 3" >&2; exit 2 ;;
+      esac
+    fi
+    "${root_cargo[@]}" build --locked --workspace --all-targets
+    "${root_cargo[@]}" build --locked -p stellar-private-payments --lib
+    "${root_cargo[@]}" build --locked -p stellar-private-payments --lib --features parallel
     cargo build --locked --manifest-path integration-tests/Cargo.toml --all-targets
     cargo test --locked --manifest-path tools/bootnode/Cargo.toml
     ;;

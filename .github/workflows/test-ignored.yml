@@ -1,6 +1,16 @@
 name: Build and test ignored code
 
 on:
+  workflow_dispatch:
+    inputs:
+      test-profile:
+        type: choice
+        options: [release, ci-native]
+        default: release
+      compiler-profile:
+        type: choice
+        options: [release, ci-native]
+        default: release
   push:
     branches: ["main"]
   pull_request:
@@ -30,10 +40,16 @@ jobs:
       - uses: ./.github/actions/rust-cache
         with:
           key: ignored
-      # compiled under --release for faster run times
+      # Defaults stay on release until the cold benchmarks pass.
       - name: Build circuit artifacts
         run: make circuits TESTS=1
+        env:
+          CIRCUIT_COMPILER_PROFILE: ${{ inputs.compiler-profile || 'release' }}
       - name: Build
-        run: cargo test --release --workspace --no-run
+        run: cargo test --profile "$TEST_PROFILE" --workspace --no-run
+        env:
+          TEST_PROFILE: ${{ inputs.test-profile || 'release' }}
       - name: Run tests
-        run: cargo test --release --workspace -- --ignored
+        run: cargo test --profile "$TEST_PROFILE" --workspace -- --ignored
+        env:
+          TEST_PROFILE: ${{ inputs.test-profile || 'release' }}

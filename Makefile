@@ -41,9 +41,11 @@ build-debug:
 	@$(MAKE) build LOGS=1
 
 .PHONY: circuits
+CIRCUIT_COMPILER_PROFILE ?= release
+
 circuits:
 	@echo "Building circuits (this may take a while)..."
-	cargo run -p circuit-compiler --bin circuit-compiler --release -- compile \
+	cargo run -p circuit-compiler --bin circuit-compiler --profile $(CIRCUIT_COMPILER_PROFILE) -- compile \
 		--circuits $(CURDIR)/circuits \
 		--out $(CURDIR)/target/circuits-artifacts $(if $(TESTS),--tests) $(if $(REGEN_KEYS),--regen-keys) $(if $(GRAPHS),--graphs)
 
