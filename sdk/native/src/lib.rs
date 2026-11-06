@@ -2,6 +2,9 @@
 //!
 //! Entry point: [`Client`] → [`Account`] → [`PrivatePool`].
 //!
+//! ASP operators, pool admins and Global View Key holders use the
+//! [`operator`] handles, opened from [`Client`].
+//!
 //! # Example
 //!
 //! ```no_run
@@ -53,6 +56,7 @@ pub mod circuits;
 pub mod disclosure;
 pub mod gvk;
 pub mod network_defaults;
+pub mod operator;
 pub mod plan;
 pub mod planner;
 pub mod prover;

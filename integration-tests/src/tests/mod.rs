@@ -3,6 +3,7 @@ mod deposit;
 mod disclosure;
 mod domain;
 mod malformed;
+mod operator;
 mod pool_gvk;
 mod pool_policy;
 mod support;

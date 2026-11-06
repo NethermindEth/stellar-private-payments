@@ -20,10 +20,3 @@ export function parseBlocklistKeys(text) {
 export function blocklistKeyToNoteKey(key) {
   return `0x${key.toString(16).padStart(64, '0').match(/../g).reverse().join('')}`;
 }
-
-/** `insert_leaves` when `batched`, else `insert_leaf` for a single key. */
-export function blocklistInsertCall(keys, batched) {
-  if (batched) return { method: 'insert_leaves', args: { entries: keys.map((key) => [key, key]) } };
-  if (keys.length > 1) throw new Error('This blocklist predates batched inserts. Add one key at a time.');
-  return { method: 'insert_leaf', args: { key: keys[0], value: keys[0] } };
-}

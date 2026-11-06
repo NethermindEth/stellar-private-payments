@@ -1,5 +1,8 @@
 import init, {
   Client as WasmClient,
+  AllowlistOperator,
+  BlocklistOperator,
+  PoolAdmin,
   DisclosureRequest,
   readTokenDecimals,
   parseTokenAmount as wasmParseTokenAmount,
@@ -7,7 +10,6 @@ import init, {
   ProverBridge,
   WalletSigner as WasmWalletSigner,
   bootnodeRequired as wasmBootnodeRequired,
-  deriveAspUserLeaf as wasmDeriveAspUserLeaf,
   verifySelectiveDisclosure as wasmVerifySelectiveDisclosure,
   configureTelemetry,
   set_log_level,
@@ -98,16 +100,6 @@ async function bootnodeRequired(rpcUrl, storage, options) {
   }
 }
 
-/**
- * Derive the ASP membership leaf from explicit public inputs.
- * @param {string} notePublicKey `0x`-prefixed 32-byte hex
- * @param {string} membershipBlinding `0x`-prefixed 32-byte hex field
- * @returns {string} leaf as `0x` hex
- */
-function deriveAspUserLeaf(notePublicKey, membershipBlinding) {
-  return wasmDeriveAspUserLeaf(notePublicKey, membershipBlinding);
-}
-
 function wrapClient(wasmClient, telemetrySinks) {
   return {
     backgroundSync: () => wasmClient.backgroundSync(),
@@ -151,8 +143,15 @@ function wrapClient(wasmClient, telemetrySinks) {
       }
     },
     recipientLookup: (address) => wasmClient.recipientLookup(address),
-    aspState: () => wasmClient.aspState(),
+    allowlistIds: () => wasmClient.allowlistIds(),
+    blocklistIds: () => wasmClient.blocklistIds(),
+    poolIds: () => wasmClient.poolIds(),
+    allowlistOperator: (contractId) => wasmClient.allowlistOperator(contractId),
+    blocklistOperator: (contractId) => wasmClient.blocklistOperator(contractId),
+    poolAdmin: (contractId) => wasmClient.poolAdmin(contractId),
+    gvkAuthority: (globalViewPrivateKeyHex) => wasmClient.gvkAuthority(globalViewPrivateKeyHex),
     allContractsData: () => wasmClient.allContractsData(),
+    poolContractsData: (poolContractId) => wasmClient.poolContractsData(poolContractId),
     verifySelectiveDisclosure: (receiptJson, expectedVkHash) =>
       wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash),
   };
@@ -240,7 +239,7 @@ export const Storage = { open: openStorage, openPlaintext: openPlaintextStorage 
 export const Client = {
   new: newClient,
 };
-export { DisclosureRequest, readTokenDecimals, parseTokenAmount, ProverBridge, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
+export { AllowlistOperator, BlocklistOperator, PoolAdmin, DisclosureRequest, readTokenDecimals, parseTokenAmount, ProverBridge, bootnodeRequired, verifySelectiveDisclosure };
 export {
   configureTelemetry,
   set_log_level,

@@ -1,5 +1,6 @@
 // wasm-bindgen domain types (generated on build; stubbed pre-build).
 export type {
+  AdminState,
   AspMembership,
   AspNonMembership,
   AssetDescriptor,
@@ -13,7 +14,9 @@ export type {
   DisclosureVerificationReport,
   GlobalViewKeyCiphertext,
   GvkAudit,
+  GvkAuthority,
   OperationalFeedItem,
+  OperatorCall,
   PoolConfigEntry,
   PoolEstimate,
   PoolExecuteResult,
@@ -22,12 +25,21 @@ export type {
   PrivatePool,
   PublicKeyEntry,
   RecipientLookup,
+  UnsignedOperatorCall,
   UserNoteSummary,
   UserPublicKeys,
   VerifierEntry,
 } from './crates/stellar_private_payments_web.js';
 
-export { DisclosureRequest, parseTokenAmount, ProverBridge, default } from './crates/stellar_private_payments_web.js';
+export {
+  AllowlistOperator,
+  BlocklistOperator,
+  DisclosureRequest,
+  parseTokenAmount,
+  PoolAdmin,
+  ProverBridge,
+  default,
+} from './crates/stellar_private_payments_web.js';
 
 // JS facade (`js/index.js`) — options and wrapped session entry points.
 export * from './api-types.js';

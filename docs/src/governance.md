@@ -137,7 +137,7 @@ signers sign the transaction itself. The admin page builds it and carries it bet
 
 1. Connect Freighter with any account on the network and build the call: list writes on the
    Allowlist and Blocklist tabs, pauses and re-points on the Pools tab, and admin transfers on the
-   Admins tab. The page reads the contract's admin from its `Admin` entry, builds the call with
+   Admins tab. The page reads the contract's admin with `get_admin`, builds the call with
    that account as the source, valid for 24 hours, and loads it into the Admin Transaction card.
 2. Press Copy link and send the link to the first signer.
 3. Each signer, on their own device, opens the link, connects Freighter, and reads the call the card
@@ -166,17 +166,42 @@ The card shows the maximum network fee before anyone signs.
 
 An entry that archives while signers sign makes the call fail once sent, so the page refuses to
 build a call that reads an entry with less than 25 hours left, the call's 24 hours plus an hour.
-The card then lists a `stellar contract extend` command for each such entry. Run them from any
-funded account, replacing `ACCOUNT`, then build the call again.
+The card then lists a `stellar contract extend` command for each such entry, and `spp` prints them
+after its error. Run them from any funded account, replacing `ACCOUNT`, then build the call again.
 
 `accept_admin` and `update_admin` extend an admin entry from the ledger they land on, so every
 call the page builds carries 100,000 stroops of refundable fee beyond its simulation. The network
 refunds what the call does not owe.
 
+### Build with spp
+
+`spp` builds the calls the admin page builds, with the same 24-hour bound, refundable fee, and
+entry check, for any contract, named in the manifest or not. Pass `--out tx.xdr` to a write and
+pass the file from signer to signer:
+
+```bash
+spp pool-admin pause --pool POOL --out tx.xdr
+spp envelope describe tx.xdr
+spp envelope sign tx.xdr --as SIGNER
+spp envelope submit tx.xdr
+```
+
+Replace `POOL` with the pool's address and `SIGNER` with the signer's `stellar keys` identity.
+`describe` shows the call, who has signed, and the weight collected against the threshold; a signer
+who did not expect this exact call stops there. `sign` shows the same, asks before it adds a
+signature to the file in place, and takes `--yes` once the call is checked. It refuses a key that
+is not a signer, a second signature by one key, and any signature once the threshold is met, since
+an unused signature fails the call and cannot be removed. It also refuses an envelope that can no
+longer land: one that landed, expired, or whose sequence number the admin account used for another
+transaction. The file holds the envelope as base64 XDR, so a signer with a hardware wallet signs it
+with `stellar tx sign --sign-with-ledger` instead. Once the weight reaches the threshold, anyone
+runs `submit`, which refuses an envelope short of it and otherwise waits until the call lands. A
+call another signer already sent reads as landed, and a failure names its result code, such as
+`TxBadSeq`, and the contract error that stopped it, such as `Error(Contract, #6)`. Without `--out`, a write signs with `--account` and sends the call at once.
+
 ### Sign with the CLI
 
-A signer change, a fee claim, and the acceptance of a tree the manifest does not name go through the
-Stellar CLI, as a file passed from signer to signer.
+A signer change and a fee claim go through the Stellar CLI, as a file passed from signer to signer.
 
 The CLI builds a transaction with no time bound, which, once signed, stays valid until another
 admin transaction uses its sequence number. Before the first signature, whoever built `tx.xdr`
@@ -334,10 +359,16 @@ The current admin keeps every power until the new admin's own signers sign the a
 and Accept show only while a transfer is pending. Propose refuses a malformed address, an account
 that does not exist, the current admin, and the pending admin, and asks for confirmation when the
 new admin lacks the shape in [Set up the admin account](#set-up-the-admin-account).
+The page and `spp` build calls only for an account admin. A contract proposed as the admin has to
+authorize its own `accept_admin`, and every later call, outside them.
 
 Replacing a signer needs no transfer. Transfer the admin only when the contracts move to another
 account, such as another organization's. A transfer moves no GVK: a `pool-gvk` pool's GVK is fixed
 at construction and stays with whoever holds its private key.
+
+With the CLI, `spp pool-admin admin --pool POOL`, `spp allowlist admin --tree TREE`, and
+`spp blocklist admin --tree TREE` take `propose --new-admin ADDRESS`, `cancel`, or `accept`, and
+build the same calls for any contract. They don't check the new admin's shape.
 
 Once the transfer completes, update `admin` in the manifest and sign pause files for the new admin.
 
@@ -384,39 +415,38 @@ than the RPC's event retention, about seven days on the public testnet RPC:
    For an allowlist, the records file holds the leaves as `0x` hex values. Insert each one:
 
    ```bash
-   stellar contract invoke --id TREE --source-account DEPLOYER --network testnet \
-     -- insert_leaf --leaf LEAF
+   spp allowlist add --tree TREE --leaf LEAF --account DEPLOYER --yes
    ```
 
-   Replace `TREE` with the new tree's address and `LEAF` with each line of the records file. A
+   Replace `TREE` with the new tree's address and `LEAF` with each line of the records file.
+   `--yes` answers the question `add` asks before writing to a tree no pool uses yet. A
    leaf is the hash the Allowlist tab derives from a member's note public key and the ASP
    secret. To remove a member, load the current allowlist's leaves less the member's, from the
    ASP's records or that allowlist's `LeafAdded` events.
 
    For a blocklist, the records file holds note public keys as the Blocklist tab takes them. Load
-   them through that tab, never the CLI's `insert_leaf`, which would store each key in the wrong
-   byte order and leave its owner unblocked. Enter the new tree's address in the Overview tab's ASP
-   Non-Membership Contract ID field, paste the keys on the Blocklist tab, and press Add to
-   Blocklist. No pool uses the tree yet, so the page asks first; confirm. The page builds the insert
-   with the deployer as its source. If Freighter is connected as the deployer, it signs and the page
-   sends the insert at once. Otherwise open Transaction XDR in the Admin Transaction card, press
-   Copy XDR, save it as `tx.xdr`, sign it with `--sign-with-key DEPLOYER`, and send it as [Sign with
-   the CLI](#sign-with-the-cli) describes.
-3. Hand the tree to the admin account. The deployer proposes it:
+   them with `spp`, never the Stellar CLI's `insert_leaf`, which would store each key in the wrong
+   byte order and leave its owner unblocked:
 
    ```bash
-   stellar contract invoke --id TREE --source-account DEPLOYER --network testnet \
-     -- update_admin --new_admin ADMIN_ACCOUNT
+   spp blocklist add --tree TREE --account DEPLOYER --yes $(cat RECORDS)
    ```
 
-   The admin page lists only the trees its manifest names, so build the acceptance with the CLI,
-   then sign and send it as in [Sign with the CLI](#sign-with-the-cli):
+   Replace `RECORDS` with the records file. A call that needs more resources than one transaction
+   allows fails, so split a long file over several calls. On the admin page instead, enter the new
+   tree's address in the Overview tab's ASP Non-Membership Contract ID field, paste the keys on the
+   Blocklist tab, and press Add to Blocklist, confirming when the page asks, since no pool uses the
+   tree yet. With Freighter connected as the deployer, the page signs and sends the insert at once.
+3. Hand the tree to the admin account. The deployer proposes it, and the admin account's signers
+   accept, as in [Build with spp](#build-with-spp), since the admin page lists only the trees its
+   manifest names:
 
    ```bash
-   stellar contract invoke --id TREE --source-account ADMIN_ACCOUNT --network testnet \
-     --build-only -- accept_admin \
-   | stellar tx simulate --source-account ADMIN_ACCOUNT --network testnet > tx.xdr
+   spp allowlist admin --tree TREE propose --new-admin ADMIN_ACCOUNT --account DEPLOYER
+   spp allowlist admin --tree TREE accept --out tx.xdr
    ```
+
+   Use `spp blocklist admin` for a blocklist.
 
 4. For an allowlist, add `{ "contractId": "TREE", "deploymentLedger": LEDGER }` to the manifest's
    `added_asp_memberships`, with `LEDGER` the deployment ledger from step 1, and merge it, since
@@ -433,6 +463,12 @@ than the RPC's event retention, about seven days on the public testnet RPC:
    key by key with the pool's current one, and an allowlist by its entry count only.
 6. Once every check passes, press Build and make the admin call. The panel reads Built while the
    call waits for signers in the Admin Transaction card, and Done once the card sees it land.
+
+With the CLI, `spp pool-admin repoint --pool POOL --allowlist TREE`, or `--blocklist TREE`, runs
+the panel's checks except the entry comparison. It refuses the tree the pool already uses, and an
+allowlist the deployment config doesn't name or whose levels differ from the current one's. It asks
+before a tree whose admin is not the pool's; `--yes` answers for scripts. Compare the entries with
+your records before running it.
 
 `deploy.sh` points every pool at the same trees, so re-point each pool that reads the old tree,
 one admin call per pool. The keep-alive loop in
@@ -452,7 +488,9 @@ drop an allowlist's entry once no pool reads it.
 The Allowlist and Blocklist tabs write to the trees in the Overview tab's contract ID fields,
 which start as the manifest's. After a re-point, enter the new tree's address there before writing
 to it. The page asks before a write to a list no pool on the Pools tab uses, and that tab marks a
-list a pool's policy leaves out as not used.
+list a pool's policy leaves out as not used. `spp allowlist` and `spp blocklist` read the enabled
+pools instead: without `--tree`, they act on the tree those pools use, and they ask before a write
+to a tree none of them uses.
 
 Without a file of expected entries, the panel reads storage, which has no age limit: a blocklist's
 keys, or an allowlist's entry count. That is the way back to an allowlist older than the RPC's event

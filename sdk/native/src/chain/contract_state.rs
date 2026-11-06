@@ -275,15 +275,8 @@ impl StateFetcher {
             requests.push(Self::pool_request(pool));
         }
 
-        requests.push(ContractDataBulkRequest {
-            contract_id: asp_membership_id,
-            enum_keys: vec!["Admin", "NextIndex"],
-        });
-
-        requests.push(ContractDataBulkRequest {
-            contract_id: asp_non_membership_id,
-            enum_keys: vec!["Admin"],
-        });
+        requests.push(Self::asp_membership_request(asp_membership_id));
+        requests.push(Self::asp_non_membership_request(asp_non_membership_id));
 
         let (bulk_state, base_latest_ledger) =
             self.client.get_contract_data_bulk(&requests).await?;
@@ -296,6 +289,57 @@ impl StateFetcher {
             out.push(Self::pool_info(pool, pool_state, base_latest_ledger)?);
         }
 
+        let asp_membership =
+            Self::asp_membership_info(&bulk_state, asp_membership_id, base_latest_ledger)?;
+        let asp_non_membership =
+            Self::asp_non_membership_info(&bulk_state, asp_non_membership_id, base_latest_ledger)?;
+
+        Ok(ContractsStateData {
+            pools: out,
+            asp_membership,
+            asp_non_membership,
+        })
+    }
+
+    /// Reads the state of one membership tree.
+    pub async fn asp_membership_state(&self, contract_id: &str) -> Result<AspMembership> {
+        let (bulk_state, ledger) = self
+            .client
+            .get_contract_data_bulk(&[Self::asp_membership_request(contract_id)])
+            .await?;
+        Self::asp_membership_info(&bulk_state, contract_id, ledger)
+    }
+
+    /// Reads the state of one non-membership tree.
+    pub async fn asp_non_membership_state(&self, contract_id: &str) -> Result<AspNonMembership> {
+        let (bulk_state, ledger) = self
+            .client
+            .get_contract_data_bulk(&[Self::asp_non_membership_request(contract_id)])
+            .await?;
+        Self::asp_non_membership_info(&bulk_state, contract_id, ledger)
+    }
+
+    fn asp_membership_request(contract_id: &str) -> ContractDataBulkRequest<'_> {
+        ContractDataBulkRequest {
+            contract_id,
+            enum_keys: vec!["Admin", "NextIndex"],
+        }
+    }
+
+    fn asp_non_membership_request(contract_id: &str) -> ContractDataBulkRequest<'_> {
+        ContractDataBulkRequest {
+            contract_id,
+            enum_keys: vec!["Admin"],
+        }
+    }
+
+    /// Decodes the state of membership tree `asp_membership_id` from its
+    /// entries, read at `base_latest_ledger`.
+    fn asp_membership_info(
+        bulk_state: &HashMap<String, HashMap<String, xdr::ScVal>>,
+        asp_membership_id: &str,
+        base_latest_ledger: u32,
+    ) -> Result<AspMembership> {
         let asp_membership_state = bulk_state
             .get(asp_membership_id)
             .ok_or_else(|| anyhow!("missing asp membership state for {asp_membership_id}"))?;
@@ -312,7 +356,7 @@ impl StateFetcher {
         let asp_mem_capacity = 2u64.pow(asp_mem_levels);
         let root_u256 =
             scval_to_u256(get_state!(asp_membership_state, "Root", asp_membership_id)?)?;
-        let asp_membership = AspMembership {
+        Ok(AspMembership {
             ledger: base_latest_ledger,
             contract_id: asp_membership_id.to_string(),
             contract_type: "ASP Membership".to_string(),
@@ -326,8 +370,16 @@ impl StateFetcher {
             )?)?,
             capacity: asp_mem_capacity,
             used_slots: asp_mem_next_index.to_string(),
-        };
+        })
+    }
 
+    /// Decodes the state of non-membership tree `asp_non_membership_id` from
+    /// its entries, read at `base_latest_ledger`.
+    fn asp_non_membership_info(
+        bulk_state: &HashMap<String, HashMap<String, xdr::ScVal>>,
+        asp_non_membership_id: &str,
+        base_latest_ledger: u32,
+    ) -> Result<AspNonMembership> {
         let asp_non_membership_state = bulk_state.get(asp_non_membership_id).ok_or_else(|| {
             anyhow!("missing asp non-membership state for {asp_non_membership_id}")
         })?;
@@ -337,7 +389,7 @@ impl StateFetcher {
             asp_non_membership_id
         )?)?;
         let asp_nonmem_root = Field::try_from_u256(asp_nonmem_root_u256)?;
-        let asp_non_membership = AspNonMembership {
+        Ok(AspNonMembership {
             ledger: base_latest_ledger,
             contract_id: asp_non_membership_id.to_string(),
             contract_type: "ASP Non-Membership (Sparse Merkle Tree)".to_string(),
@@ -348,12 +400,6 @@ impl StateFetcher {
                 "Admin",
                 asp_non_membership_id
             )?)?,
-        };
-
-        Ok(ContractsStateData {
-            pools: out,
-            asp_membership,
-            asp_non_membership,
         })
     }
 

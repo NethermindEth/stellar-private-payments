@@ -18,13 +18,15 @@ export const Client = {async new(rpc, storage, prover, config) {
   return { contractConfig() { return config; }, free() {} };
 }};
 export function registerTelemetrySinks() { return {free() {}}; }
+export class BlocklistOperator {};
+export class PoolAdmin {};
 export async function verifySelectiveDisclosure(rpc, prover, receipt, hash, options) { return options.contractConfig; }
 export function readTokenDecimals() {};
 export function parseTokenAmount() {};
 export class DisclosureRequest {};
 export class WalletSigner {};
 export function bootnodeRequired() {};
-export function deriveAspUserLeaf() {};
+export class AllowlistOperator {};
 export function configureTelemetry() {};
 export function set_log_level() {};
 export function dump_recent_logs() {};
@@ -78,7 +80,9 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
     export function parseTokenAmount() {};
     export class DisclosureRequest {};
     export function bootnodeRequired() {};
-    export function deriveAspUserLeaf() {};
+    export class AllowlistOperator {};
+    export class BlocklistOperator {};
+    export class PoolAdmin {};
     export async function verifySelectiveDisclosure(rpc, receipt, hash, options) { verifications.push(options); }
     export function configureTelemetry() {};
     export function dump_recent_logs() {};

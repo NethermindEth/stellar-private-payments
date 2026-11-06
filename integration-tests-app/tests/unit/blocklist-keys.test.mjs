@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from '../../../app/js/blocklist-keys.js';
+import { blocklistKeyToNoteKey, parseBlocklistKeys } from '../../../app/js/blocklist-keys.js';
 
 const ONE = `0x01${'00'.repeat(31)}`;
 const TWO = `0x02${'00'.repeat(31)}`;
@@ -29,19 +29,4 @@ test('parseBlocklistKeys refuses a malformed line and names it', () => {
 test('blocklistKeyToNoteKey gives the note public key parseBlocklistKeys reads back as the key', () => {
   const key = BigInt(`0x${Array.from({ length: 32 }, (_, i) => (i + 1).toString(16).padStart(2, '0')).join('')}`);
   assert.deepEqual(parseBlocklistKeys(blocklistKeyToNoteKey(key)), [key]);
-});
-
-test('blocklistInsertCall lists each key with itself in one insert_leaves call', () => {
-  assert.deepEqual(blocklistInsertCall([1n, 2n], true), { method: 'insert_leaves', args: { entries: [[1n, 1n], [2n, 2n]] } });
-});
-
-test('blocklistInsertCall falls back to insert_leaf for one key on a blocklist without insert_leaves', () => {
-  assert.deepEqual(blocklistInsertCall([1n], false), { method: 'insert_leaf', args: { key: 1n, value: 1n } });
-});
-
-test('blocklistInsertCall refuses several keys on a blocklist without insert_leaves', () => {
-  assert.throws(
-    () => blocklistInsertCall([1n, 2n], false),
-    { message: 'This blocklist predates batched inserts. Add one key at a time.' },
-  );
 });
