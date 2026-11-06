@@ -128,6 +128,14 @@ panic = "abort"
 codegen-units = 1
 lto = true
 
+# Native CI experiment: production release/contract settings remain independent.
+[profile.ci-native]
+inherits = "release"
+opt-level = 3
+lto = "off"
+codegen-units = 16
+debug = 0
+
 # For more information about this profile see https://soroban.stellar.org/docs/basic-tutorials/logging#cargotoml-profile
 [profile.release-with-logs]
 inherits = "release"
