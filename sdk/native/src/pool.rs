@@ -134,28 +134,30 @@ impl PrivatePool {
             .contracts_data_for_pool(&self.config.pool_contract_id)
             .await
             .context("fetch pool state")?;
-        data.pools.into_iter().next().ok_or_else(|| {
+        let pool = data.pools.into_iter().next().ok_or_else(|| {
             Error::Other(anyhow::anyhow!(
                 "pool {} not found in contract state",
                 self.config.pool_contract_id
             ))
-        })
+        })?;
+        let _ = self.fee.set(pool.fee);
+        Ok(pool)
     }
 
     /// Reads the fee the pool charges on every `transact`.
     ///
-    /// The pool's fee never changes, so the first read serves the session.
+    /// The pool's fee never changes, so the first read, here or by
+    /// [`Self::pool_info`], serves the session.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Other`] when the pool's state cannot be fetched or does
     /// not include this pool.
     pub async fn fee(&self) -> Result<NoteAmount, Error> {
-        if let Some(&fee) = self.fee.get() {
-            return Ok(fee);
+        match self.fee.get() {
+            Some(&fee) => Ok(fee),
+            None => Ok(self.pool_info().await?.fee),
         }
-        let fee = self.pool_info().await?.fee;
-        Ok(*self.fee.get_or_init(|| fee))
     }
 
     pub async fn estimate(&self, amount: NoteAmount, fee: NoteAmount) -> Result<Estimate, Error> {

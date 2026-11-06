@@ -279,3 +279,14 @@ async fn a_paused_pool_refuses_a_deposit_before_proving() -> Result<()> {
     assert!(stages(&h).await.is_empty());
     Ok(())
 }
+
+#[tokio::test]
+async fn reading_the_pool_state_caches_its_fee() -> Result<()> {
+    let h = OfflinePool::builder().build().await?;
+    h.pool.pool_info().await?;
+    let reads = h.rpc.count("getLedgerEntries").await;
+
+    assert_eq!(h.pool.fee().await?, NoteAmount::from(u128::from(FEE)));
+    assert_eq!(h.rpc.count("getLedgerEntries").await, reads);
+    Ok(())
+}
