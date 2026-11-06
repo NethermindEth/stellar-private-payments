@@ -25,7 +25,8 @@ use crate::{account::Account, cmd::register, config::CliConfig, explorer, stella
 
 // Reused from the web app onboarding wizard / index.html.
 const KEYS_TEXT: &str = "Your wallet is requested to sign one message. That signature derives your \
-    privacy keys locally plus your ASP secret. This does not move funds.";
+    privacy keys locally plus your ASP secret. It does not move funds, but it gives full control \
+    of your private funds, so only sign it in the Stellar Private Payments app or CLI.";
 const BOOTNODE_TEXT: &str = "Choose whether this operator station keeps a bootnode archive URL. You \
     can change bootnode settings later.";
 const BOOTNODE_RISKS: &str = "Trust assumptions when using a bootnode:\n\

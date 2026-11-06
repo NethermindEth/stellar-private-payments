@@ -176,7 +176,7 @@ jobs:
         if: steps.registry.outputs.publish == 'true'
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+      - uses: ./.github/actions/rust-cache
         if: steps.registry.outputs.publish == 'true'
       - name: Dry-run crates.io publication
         if: steps.registry.outputs.publish == 'true'
@@ -306,7 +306,7 @@ jobs:
         with:
           toolchain: stable
 
-      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+      - uses: ./.github/actions/rust-cache
 
       - name: Verify tag matches crate version
         run: |
@@ -399,7 +399,7 @@ jobs:
         if: ${{ !matrix.cross }}
         run: rustup target add ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+      - uses: ./.github/actions/rust-cache
         with:
           key: ${{ matrix.target }}
 
@@ -507,7 +507,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+      - uses: ./.github/actions/rust-cache
       - uses: rust-lang/crates-io-auth-action@bbd81622f20ce9e2dd9622e3218b975523e45bbe # v1.0.4
         id: auth
       - run: cargo publish -p stellar-private-payments --locked
