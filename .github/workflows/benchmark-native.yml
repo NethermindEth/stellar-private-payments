@@ -1,0 +1,63 @@
+name: Native CI benchmarks
+on:
+  workflow_dispatch:
+    inputs:
+      experiment:
+        type: choice
+        options: [ignored, msrv, workspace]
+        default: ignored
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  configurations:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'benchmark-native'
+    runs-on: ubuntu-24.04
+    outputs:
+      configs: ${{ steps.select.outputs.configs }}
+    steps:
+      - id: select
+        env:
+          EXPERIMENT: ${{ inputs.experiment || 'all' }}
+        run: |
+          case "$EXPERIMENT" in
+            ignored) configs='["ignored-baseline","ignored-tests","ignored-both"]' ;;
+            msrv) configs='["msrv-opt3-jobs2","msrv-opt3-jobs4","msrv-opt0-jobs2","msrv-opt0-jobs4"]' ;;
+            workspace) configs='["workspace-baseline","workspace-debug0"]' ;;
+            all) configs='["ignored-baseline","ignored-tests","ignored-both","msrv-opt3-jobs2","msrv-opt3-jobs4","msrv-opt0-jobs2","msrv-opt0-jobs4","workspace-baseline","workspace-debug0"]' ;;
+            *) exit 2 ;;
+          esac
+          echo "configs=$configs" >> "$GITHUB_OUTPUT"
+  measure:
+    needs: configurations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ${{ fromJSON(needs.configurations.outputs.configs) }}
+        repeat: [1, 2, 3]
+    env:
+      CARGO_INCREMENTAL: 0
+      SPP_NETWORK: testnet
+      CI_MEASUREMENTS: measurements
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - name: Install repository toolchain
+        run: rustup show active-toolchain
+      # Intentionally no cache restore/save: every matrix job starts cold.
+      - name: Record runner resources
+        run: |
+          nproc
+          free -m
+          df -h .
+      - name: Measure selected configuration
+        env:
+          CONFIGURATION: ${{ matrix.config }}
+        run: bash scripts/ci/benchmark-native.sh "$CONFIGURATION"
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        if: always()
+        with:
+          name: native-${{ matrix.config }}-${{ matrix.repeat }}
+          path: measurements/
