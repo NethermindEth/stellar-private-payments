@@ -243,11 +243,19 @@ fn assemble_soroban_transaction(
 impl PreparedSorobanTx {
     /// Builds a wallet-ready prepared tx from an unsigned envelope and
     /// simulation.
+    ///
+    /// The RPC chooses the auth entries, and the wallet signs every entry for
+    /// its address while its envelope signature authorizes every
+    /// source-account entry. `check_auth` must therefore refuse any entry the
+    /// caller did not ask for. It runs after assembly, so a failed simulation
+    /// reports its own error first.
     pub(crate) fn from_simulation(
         raw: &xdr::TransactionEnvelope,
         sim: &SimulateTransactionResponse,
+        check_auth: impl FnOnce(&[SorobanAuthorizationEntry]) -> Result<()>,
     ) -> Result<Self> {
         let assembled = assemble_soroban_transaction(raw, sim)?;
+        check_auth(&sim.auth_entries()?)?;
         let latest_ledger = u32::try_from(sim.latest_ledger)
             .map_err(|_| anyhow!("latestLedger does not fit into u32"))?;
         Ok(Self {
