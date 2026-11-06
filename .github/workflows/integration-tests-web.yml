@@ -107,20 +107,5 @@ jobs:
           E2E_SKIP_LOCALNET=1 bash integration-tests-web/run.sh \
             cargo test --target wasm32-unknown-unknown -p stellar-private-payments-web
 
-          # integration-tests-web's e2e tests. Each gets a fresh browser/OPFS
-          # database because sync cursors are global to the database, while
-          # note derivation is account-specific.
-          for test_name in \
-            e2e_smoke_client_construction \
-            e2e_foreign_derivation_signature_is_refused \
-            e2e_seed_deposit_creates_spendable_notes \
-            e2e_deposit_halts_at_signing \
-            e2e_transfer_halts_at_signing \
-            e2e_withdraw_halts_at_signing \
-            e2e_session_account_setup_and_sync
-          do
-            bash integration-tests-web/run.sh \
-              cargo test --target wasm32-unknown-unknown \
-              --manifest-path integration-tests-web/Cargo.toml \
-              "$test_name" -- --include-ignored
-          done
+          # Share chain/deployment; retain a fresh browser and OPFS per case.
+          bash integration-tests-web/run-suite.sh

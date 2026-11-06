@@ -1,0 +1,94 @@
+name: Test setup benchmarks
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: read
+jobs:
+  sdk:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'benchmark-test-setup'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, shared]
+        repeat: [1, 2, 3]
+        threads: [1, 4]
+    env:
+      CARGO_INCREMENTAL: 0
+      SPP_NETWORK: testnet
+      SPP_TEST_TIMINGS: 1
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        with:
+          fetch-depth: 0
+      - name: Select baseline fixture
+        if: matrix.variant == 'baseline'
+        run: git show b906d4d9:sdk/tests/src/pool.rs > sdk/tests/src/pool.rs
+      - run: rustup show active-toolchain
+      # No cache restore or save, including for the baseline.
+      - uses: ./.github/actions/circuits
+      - name: Compile suite
+        run: python3 scripts/ci/measure.py build cargo test --locked -p sdk-tests --no-run
+      - name: Record inventory and measure suite
+        env:
+          TEST_THREADS: ${{ matrix.threads }}
+        run: |
+          mkdir -p measurements
+          cargo test --locked -p sdk-tests -- --list > measurements/inventory.txt
+          python3 scripts/ci/measure.py suite cargo test --locked -p sdk-tests -- --test-threads="$TEST_THREADS" --nocapture
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        if: always()
+        with:
+          name: sdk-${{ matrix.variant }}-${{ matrix.threads }}-${{ matrix.repeat }}
+          path: measurements/
+  browser:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'benchmark-test-setup'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [baseline, shared, reverse]
+        repeat: [1, 2, 3]
+    env:
+      SPP_NETWORK: testnet
+      CARGO_INCREMENTAL: 0
+      E2E_STATIC_ORIGIN: http://127.0.0.1:8099
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - run: rustup show active-toolchain
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.128
+          fallback: none
+      - uses: stellar/stellar-cli@c0f4d0da891bbf214c08b8c5035ae6db80e9a3bd # v28.1.0
+        with:
+          version: v28.1.0
+      - uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+        with:
+          node-version: "22"
+      - uses: ./.github/actions/circuits
+      - run: |
+          npm ci --prefix sdk/web
+          npm run build --prefix sdk/web
+      # No cache actions; compilation during the suite is included in its time.
+      - name: Measure complete browser sequence
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          export CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver"
+          case "$VARIANT" in
+            baseline) args=(--fresh-localnet) ;;
+            shared) args=() ;;
+            reverse) args=(--reverse) ;;
+            *) exit 2 ;;
+          esac
+          python3 scripts/ci/measure.py suite bash integration-tests-web/run-suite.sh "${args[@]}"
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        if: always()
+        with:
+          name: browser-${{ matrix.variant }}-${{ matrix.repeat }}
+          path: measurements/
