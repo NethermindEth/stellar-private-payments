@@ -129,7 +129,6 @@ async fn recover_deposit(extra_pools: bool, port: u16) {
     let bootnode = Bootnode::setup_with_deployment(
         cfg,
         archive,
-        prom_handle(),
         DeploymentSpec::from_config(&config).expect("spec"),
     )
     .await
