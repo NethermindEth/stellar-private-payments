@@ -3,13 +3,13 @@
 use crate::{
     Error,
     chain::{OnchainProofPublicInputs, PreparedSorobanTx},
-    planner::Transact,
+    planner::{SpendableNote, Transact},
     state::{SqliteStorage, StoredPrivateKeys},
     types::{
         AspMembershipProof, AspMembershipSync, AspNonMembershipProof, BabyJubJubPoint,
         EncryptionKeyPair, EncryptionPublicKey, ExtAmount, ExtData, Field, GlobalViewKeyCiphertext,
-        GvkMode, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, PolicyFlags, SMT_DEPTH,
-        TransactChainContext,
+        GvkMode, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, PolicyFlags, PoolInfo,
+        SMT_DEPTH, TransactChainContext,
     },
     zk::{
         crypto::asp_membership_leaf,
@@ -102,9 +102,8 @@ pub(crate) fn transact_request_from_step(
     kdf_domain: &str,
     pool_address: &str,
     chain: &TransactChainContext,
-) -> Result<TransactRequest, Error> {
-    ensure_deposit_meets_minimum(step, chain)?;
-    Ok(TransactRequest {
+) -> TransactRequest {
+    TransactRequest {
         user_address: user_address.to_string(),
         kdf_domain: kdf_domain.to_string(),
         pool_root: Some(chain.pool_root),
@@ -128,25 +127,169 @@ pub(crate) fn transact_request_from_step(
         policy_flags: chain.policy_flags,
         gvk_mode: chain.gvk_mode,
         admin_view_key: chain.admin_view_key.clone(),
+    }
+}
+
+/// A pool's deposit rules, checked before a proof is built.
+pub(crate) struct DepositLimits {
+    paused: bool,
+    fee: NoteAmount,
+    minimum: NoteAmount,
+    maximum: ExtAmount,
+}
+
+impl From<&TransactChainContext> for DepositLimits {
+    fn from(chain: &TransactChainContext) -> Self {
+        Self {
+            paused: chain.deposits_paused,
+            fee: chain.fee,
+            minimum: chain.minimum_deposit_amount,
+            maximum: chain.maximum_deposit_amount,
+        }
+    }
+}
+
+impl From<&PoolInfo> for DepositLimits {
+    fn from(pool: &PoolInfo) -> Self {
+        Self {
+            paused: pool.deposits_paused,
+            fee: pool.fee,
+            minimum: pool.minimum_deposit_amount,
+            maximum: pool.maximum_deposit_amount,
+        }
+    }
+}
+
+/// Returns what a deposit of `amount` sends with the pool fee on top, or
+/// `None` past the range of [`ExtAmount`].
+pub(crate) fn deposit_ext_amount(amount: NoteAmount, fee: NoteAmount) -> Option<ExtAmount> {
+    amount
+        .checked_add(fee)
+        .and_then(|sent| ExtAmount::try_from(sent).ok())
+}
+
+impl DepositLimits {
+    /// Refuses a deposit the pool would refuse. Transfers and withdrawals pass.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::DepositsPaused`] while `pool` is paused, then
+    /// [`Error::DepositAboveMaximum`] when the deposit sends more than the
+    /// maximum, then [`Error::DepositBelowMinimum`] when it leaves less than
+    /// the minimum in notes after the fee, in the pool's order.
+    pub(crate) fn check(&self, ext_amount: ExtAmount, pool: &str) -> Result<(), Error> {
+        if ext_amount <= ExtAmount::ZERO {
+            return Ok(());
+        }
+        self.check_sent(Some(ext_amount), pool)
+    }
+
+    /// Refuses a deposit that puts `amount` in notes, with the fee on top.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Self::check`] in its order. A deposit past the
+    /// range of [`ExtAmount`] is above the maximum.
+    pub(crate) fn check_note_amount(&self, amount: NoteAmount, pool: &str) -> Result<(), Error> {
+        self.check_sent(deposit_ext_amount(amount, self.fee), pool)
+    }
+
+    /// Checks what a deposit sends, `None` past the range of [`ExtAmount`].
+    fn check_sent(&self, sent: Option<ExtAmount>, pool: &str) -> Result<(), Error> {
+        if self.paused {
+            return Err(Error::DepositsPaused {
+                pool: pool.to_string(),
+            });
+        }
+        let Some(sent) = sent.filter(|&sent| sent <= self.maximum) else {
+            return Err(Error::DepositAboveMaximum {
+                maximum: self.maximum,
+                largest_deposit: NoteAmount::try_from(self.maximum)
+                    .ok()
+                    .and_then(|maximum| maximum.checked_sub(self.fee))
+                    .unwrap_or_default(),
+            });
+        };
+        let net = NoteAmount::try_from(sent)?.checked_sub(self.fee);
+        if net.is_none_or(|net| net < self.minimum) {
+            return Err(Error::DepositBelowMinimum {
+                minimum: self.minimum,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Refuses a transaction whose `inputs` and deposit do not pay its `outputs`,
+/// withdrawal and `fee`, or whose sums overflow.
+pub(crate) fn check_balance(
+    inputs: NoteAmount,
+    outputs: impl IntoIterator<Item = NoteAmount>,
+    ext_amount: ExtAmount,
+    fee: NoteAmount,
+) -> Result<(), Error> {
+    let public = NoteAmount::from(i128::from(ext_amount).unsigned_abs());
+    let (deposit, withdrawal) = if ext_amount < ExtAmount::ZERO {
+        (NoteAmount::ZERO, public)
+    } else {
+        (public, NoteAmount::ZERO)
+    };
+    let coming_in = inputs.checked_add(deposit).ok_or_else(too_large)?;
+    let going_out = outputs
+        .into_iter()
+        .try_fold(fee, NoteAmount::checked_add)
+        .and_then(|sum| sum.checked_add(withdrawal))
+        .ok_or_else(too_large)?;
+    if coming_in == going_out {
+        return Ok(());
+    }
+    let diff = u128::from(coming_in).abs_diff(u128::from(going_out));
+    let gap = if coming_in > going_out {
+        i128::try_from(diff).ok()
+    } else {
+        0i128.checked_sub_unsigned(diff)
+    };
+    Err(Error::NotBalanced {
+        gap: gap.map(ExtAmount::from).ok_or_else(too_large)?,
     })
 }
 
-/// Refuses a deposit that leaves less than the pool minimum in notes once the
-/// fee is paid, so it fails before a proof is built.
-fn ensure_deposit_meets_minimum(
-    step: &Transact,
-    chain: &TransactChainContext,
-) -> Result<(), Error> {
-    if step.ext_amount <= ExtAmount::ZERO {
-        return Ok(());
-    }
-    let net = NoteAmount::try_from(step.ext_amount)?.checked_sub(chain.fee);
-    if net.is_none_or(|net| net < chain.minimum_deposit_amount) {
-        return Err(Error::DepositBelowMinimum {
-            minimum: chain.minimum_deposit_amount,
-        });
-    }
-    Ok(())
+/// Returns the sum of the `notes` that `inputs` names, a separate copy for
+/// each listing of a commitment.
+///
+/// Fails with [`Error::MembershipSync`] for an input not yet synced, and at
+/// once for a commitment listed more often than `notes` holds it.
+pub(crate) fn input_total(inputs: &[Field], notes: &[SpendableNote]) -> Result<NoteAmount, Error> {
+    inputs
+        .iter()
+        .enumerate()
+        .try_fold(NoteAmount::ZERO, |sum, (index, commitment)| {
+            let copy = inputs[..index]
+                .iter()
+                .filter(|earlier| *earlier == commitment)
+                .count();
+            let note = notes
+                .iter()
+                .filter(|note| note.commitment == *commitment)
+                .nth(copy)
+                .ok_or_else(|| match copy {
+                    0 => Error::MembershipSync(AspMembershipSync::SyncRequired(None)),
+                    _ => Error::Other(listed_twice()),
+                })?;
+            sum.checked_add(note.amount).ok_or_else(too_large)
+        })
+}
+
+fn listed_twice() -> anyhow::Error {
+    anyhow::anyhow!(
+        "a note ID is listed twice in the inputs, but the wallet holds only one unspent note with that ID in this pool"
+    )
+}
+
+fn too_large() -> Error {
+    Error::Other(anyhow::anyhow!(
+        "the amounts are too large for one transaction"
+    ))
 }
 
 pub fn build_transact_params(
@@ -317,9 +460,7 @@ fn build_pool_inputs(
         let Some((amount, blinding, leaf_index)) = note else {
             // Most likely one note listed twice, so fail rather than sync.
             if req.input_commitments[..index].contains(commitment) {
-                anyhow::bail!(
-                    "a note ID is listed twice in the inputs, but the wallet holds only one unspent note with that ID in this pool"
-                );
+                return Err(listed_twice());
             }
             tracing::info!(
                 commitment = ?crate::types::Sensitive(commitment),
@@ -384,16 +525,18 @@ fn build_pool_input_note(
 #[cfg(test)]
 mod tests {
     use super::{
-        TransactRequest, build_validated_pool_tree, load_user_key_material,
-        transact_request_from_step,
+        DepositLimits, build_validated_pool_tree, check_balance, input_total,
+        load_user_key_material, transact_request_from_step,
     };
     use crate::{
         Error,
-        planner::Transact,
+        planner::{SpendableNote, Transact},
         state::SqliteStorage,
         types::{
-            AspMembershipSync, ExtAmount, Field, GvkMode, NoteAmount, PolicyFlags,
-            TransactChainContext, lock_reveal_flag, set_reveal_sensitive,
+            AspMembership, AspMembershipSync, AspNonMembership, ContractsStateData, ExtAmount,
+            Field, GvkMode, NoteAmount, PolicyFlags, PoolInfo, TransactChainContext,
+            lock_reveal_flag, pool_info_gvk_tests::pool_info_with_gvk, set_reveal_sensitive,
+            transact_chain_context_from_state,
         },
         zk::merkle::MerklePrefixTree,
     };
@@ -426,18 +569,10 @@ mod tests {
         Ok(())
     }
 
-    /// Builds the request for a step with `ext_amount` on a pool with fee 5 and
-    /// minimum 10.
-    fn request(ext_amount: i128) -> Result<TransactRequest, Error> {
-        let step = Transact::new(
-            Vec::new(),
-            [NoteAmount::ZERO; 2],
-            ExtAmount::from(ext_amount),
-            "POOL".into(),
-            [None, None],
-            [None, None],
-        );
-        let chain = TransactChainContext {
+    /// Returns the chain context of a pool with fee 5, minimum 10, and
+    /// maximum 100.
+    fn chain(deposits_paused: bool) -> TransactChainContext {
+        TransactChainContext {
             pool_root: Field::ZERO,
             pool_next_index: 0,
             pool_merkle_levels: 10,
@@ -450,21 +585,40 @@ mod tests {
             policy_flags: PolicyFlags::EMPTY,
             gvk_mode: GvkMode::Off,
             admin_view_key: None,
-            deposits_paused: false,
+            deposits_paused,
             fee: NoteAmount::from(5),
             minimum_deposit_amount: NoteAmount::from(10),
-        };
-        transact_request_from_step(&step, ADDRESS, "tests", "POOL", &chain)
+            maximum_deposit_amount: ExtAmount::from(100),
+        }
+    }
+
+    /// Checks `ext_amount` against the pool of [`chain`].
+    fn check(ext_amount: i128, deposits_paused: bool) -> Result<(), Error> {
+        DepositLimits::from(&chain(deposits_paused)).check(ExtAmount::from(ext_amount), "POOL")
+    }
+
+    #[test]
+    fn a_request_carries_the_chain_fee() {
+        let step = Transact::new(
+            Vec::new(),
+            [NoteAmount::ZERO; 2],
+            ExtAmount::from(15),
+            "POOL".into(),
+            [None, None],
+            [None, None],
+        );
+        let req = transact_request_from_step(&step, ADDRESS, "tests", "POOL", &chain(false));
+        assert_eq!(req.fee, NoteAmount::from(5));
     }
 
     /// A deposit of 14 leaves 9 in notes after the fee of 5, and one of 3 does
     /// not cover the fee.
     #[test]
-    fn a_deposit_below_the_minimum_is_refused_before_proving() {
+    fn a_deposit_below_the_minimum_is_refused() {
         for ext_amount in [14, 3] {
             assert!(
                 matches!(
-                    request(ext_amount),
+                    check(ext_amount, false),
                     Err(Error::DepositBelowMinimum { minimum }) if minimum == NoteAmount::from(10)
                 ),
                 "a deposit of {ext_amount} must be refused"
@@ -472,14 +626,235 @@ mod tests {
         }
     }
 
-    /// A deposit of 15 leaves exactly the minimum, and spends are not bounded
-    /// by it.
+    /// A deposit of 15 leaves exactly the minimum. Transfers and withdrawals
+    /// pass even while deposits are paused.
     #[test]
     fn a_deposit_at_the_minimum_a_transfer_and_a_withdrawal_pass() {
-        for ext_amount in [15, 0, -1] {
-            let req = request(ext_amount).expect("the minimum admits this step");
-            assert_eq!(req.fee, NoteAmount::from(5));
+        check(15, false).expect("the minimum admits a deposit of 15");
+        for (ext_amount, deposits_paused) in [(0, false), (-1, false), (0, true), (-1, true)] {
+            check(ext_amount, deposits_paused).expect("a transfer or a withdrawal passes");
         }
+    }
+
+    /// The deposit is below the minimum, so a minimum check ahead of the pause
+    /// would answer `DepositBelowMinimum` instead.
+    #[test]
+    fn a_paused_pool_reports_the_pause_before_the_minimum() {
+        assert!(matches!(
+            check(3, true),
+            Err(Error::DepositsPaused { pool }) if pool == "POOL"
+        ));
+    }
+
+    /// The pool caps what a deposit sends, fee included, so 100 passes and 101
+    /// does not. The largest deposit leaves room for the fee of 5.
+    #[test]
+    fn a_deposit_above_the_maximum_is_refused() {
+        assert!(matches!(
+            check(101, false),
+            Err(Error::DepositAboveMaximum { maximum, largest_deposit })
+                if maximum == ExtAmount::from(100) && largest_deposit == NoteAmount::from(95)
+        ));
+        check(100, false).expect("the maximum admits a deposit that sends exactly it");
+    }
+
+    /// The deposit is above the maximum, so a maximum check ahead of the pause
+    /// would answer `DepositAboveMaximum` instead.
+    #[test]
+    fn a_paused_pool_reports_the_pause_before_the_maximum() {
+        assert!(matches!(
+            check(101, true),
+            Err(Error::DepositsPaused { pool }) if pool == "POOL"
+        ));
+    }
+
+    /// A client's check, from the pool's state, and the deposit's own check,
+    /// from the chain context built from it, give each deposit the same
+    /// verdict.
+    #[test]
+    fn deposit_limits_from_pool_info_match_the_chain_context() {
+        let open = PoolInfo {
+            fee: NoteAmount::from(5),
+            minimum_deposit_amount: NoteAmount::from(10),
+            maximum_deposit_amount: ExtAmount::from(100),
+            ..pool_info_with_gvk()
+        };
+        let paused = PoolInfo {
+            deposits_paused: true,
+            ..open.clone()
+        };
+        for pool in [open, paused] {
+            let state = ContractsStateData {
+                pools: vec![pool.clone()],
+                asp_membership: AspMembership {
+                    ledger: 0,
+                    contract_id: "ASP".into(),
+                    contract_type: "ASP Membership".into(),
+                    root: Field::ZERO,
+                    levels: 10,
+                    next_index: "0".into(),
+                    admin: "ADMIN".into(),
+                    capacity: 1024,
+                    used_slots: "0".into(),
+                },
+                asp_non_membership: AspNonMembership {
+                    ledger: 0,
+                    contract_id: "ASPN".into(),
+                    contract_type: "ASP Non-Membership".into(),
+                    root: Field::ZERO,
+                    is_empty: true,
+                    admin: "ADMIN".into(),
+                },
+            };
+            let chain = transact_chain_context_from_state(state, &pool.contract_id, None)
+                .expect("the state holds the pool");
+
+            for (source, limits) in [
+                ("pool info", DepositLimits::from(&pool)),
+                ("chain context", DepositLimits::from(&chain)),
+            ] {
+                let check = |ext_amount: i128| limits.check(ExtAmount::from(ext_amount), "POOL");
+                if pool.deposits_paused {
+                    assert!(
+                        matches!(check(15), Err(Error::DepositsPaused { .. })),
+                        "{source}: paused"
+                    );
+                    continue;
+                }
+                assert!(
+                    matches!(check(14), Err(Error::DepositBelowMinimum { .. })),
+                    "{source}: 14"
+                );
+                assert!(
+                    check(15).is_ok() && check(100).is_ok(),
+                    "{source}: 15 and 100"
+                );
+                assert!(
+                    matches!(check(101), Err(Error::DepositAboveMaximum { .. })),
+                    "{source}: 101"
+                );
+            }
+        }
+    }
+
+    /// A deposit of 10 leaves the minimum in notes and one of 95 sends the
+    /// maximum, with the fee of 5 on top. An amount past the range of
+    /// `ExtAmount` is above it.
+    #[test]
+    fn a_deposit_amount_is_checked_with_the_fee_on_top() {
+        let check = |amount: u128, deposits_paused: bool| {
+            DepositLimits::from(&chain(deposits_paused))
+                .check_note_amount(NoteAmount::from(amount), "POOL")
+        };
+        for amount in [10, 95] {
+            check(amount, false).expect("the pool admits this deposit");
+        }
+        assert!(matches!(
+            check(9, false),
+            Err(Error::DepositBelowMinimum { .. })
+        ));
+        for amount in [96, u128::MAX] {
+            assert!(
+                matches!(check(amount, false), Err(Error::DepositAboveMaximum { .. })),
+                "a deposit of {amount} must be refused"
+            );
+        }
+        assert!(matches!(
+            check(u128::MAX, true),
+            Err(Error::DepositsPaused { .. })
+        ));
+    }
+
+    fn balance(inputs: u128, outputs: &[u128], ext_amount: i128, fee: u128) -> Result<(), Error> {
+        check_balance(
+            NoteAmount::from(inputs),
+            outputs.iter().map(|&output| NoteAmount::from(output)),
+            ExtAmount::from(ext_amount),
+            NoteAmount::from(fee),
+        )
+    }
+
+    #[test]
+    fn a_transaction_balances_with_the_fee() {
+        balance(10, &[7, 0], 0, 3).expect("a transfer leaves the fee");
+        balance(0, &[10], 15, 5).expect("a deposit pays the fee on top");
+        balance(10, &[], -7, 3).expect("a withdrawal leaves the fee");
+    }
+
+    #[test]
+    fn an_unbalanced_transaction_names_its_gap() {
+        for (outputs, ext_amount, gap) in [(10, 0, -3), (6, 0, 1), (0, -8, -1)] {
+            let result = balance(10, &[outputs], ext_amount, 3);
+            assert!(
+                matches!(result, Err(Error::NotBalanced { gap: actual }) if actual == ExtAmount::from(gap)),
+                "outputs {outputs}, ext_amount {ext_amount}: {result:?}"
+            );
+        }
+        let message = |outputs| {
+            balance(10, &[outputs], 0, 3)
+                .expect_err("the transaction does not balance")
+                .to_string()
+        };
+        assert_eq!(
+            message(10),
+            "transaction does not balance: the private outputs, withdrawal and pool fee exceed the input notes and deposit"
+        );
+        assert_eq!(
+            message(6),
+            "transaction does not balance: the input notes and deposit exceed the private outputs, withdrawal and pool fee"
+        );
+    }
+
+    #[test]
+    fn amounts_past_their_range_are_too_large() {
+        for result in [
+            balance(u128::MAX, &[1 << 127], 1, 0),
+            balance((1 << 127) - 1, &[u128::MAX], -1, 0),
+            balance(1 << 127, &[u128::MAX], 0, 2),
+            balance(u128::MAX, &[0], 0, 0),
+            balance(0, &[u128::MAX], 0, 0),
+        ] {
+            assert!(
+                matches!(&result, Err(Error::Other(error)) if error.to_string() == "the amounts are too large for one transaction"),
+                "{result:?}"
+            );
+        }
+        let result = balance(0, &[1 << 127], 0, 0);
+        assert!(
+            matches!(result, Err(Error::NotBalanced { gap }) if gap == ExtAmount::from(i128::MIN)),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn input_total_sums_the_inputs_it_holds() {
+        let notes = [Field::ZERO, Field::ONE].map(|commitment| SpendableNote {
+            commitment,
+            amount: NoteAmount::from(4),
+        });
+        assert_eq!(
+            input_total(&[Field::ZERO, Field::ONE], &notes).expect("both inputs are held"),
+            NoteAmount::from(8)
+        );
+        let unknown = Field::from(NoteAmount::from(2));
+        assert!(matches!(
+            input_total(&[Field::ZERO, unknown], &notes),
+            Err(Error::MembershipSync(AspMembershipSync::SyncRequired(None)))
+        ));
+
+        let twice = [Field::ZERO; 2];
+        let copies = twice.map(|commitment| SpendableNote {
+            commitment,
+            amount: NoteAmount::from(4),
+        });
+        assert_eq!(
+            input_total(&twice, &copies).expect("each listing takes its own copy"),
+            NoteAmount::from(8)
+        );
+        assert!(matches!(
+            input_total(&twice, &copies[..1]),
+            Err(Error::Other(error)) if error.to_string().contains("listed twice")
+        ));
     }
 
     #[test]

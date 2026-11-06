@@ -14,8 +14,10 @@ pub enum Error {
     NotesTotalExceeded,
     /// A total would overflow `i128`.
     Overflow,
-    /// A claim is negative, above the fees total, or paid to the pool.
+    /// A claim is negative or above the fees collected.
     InvalidClaimAmount,
+    /// A payout goes to the pool or its token contract.
+    InvalidPayee,
 }
 
 /// Storage keys for the two totals, both instance keys.
@@ -61,17 +63,26 @@ pub fn record(env: &Env, net: i128, fee: i128) -> Result<(), Error> {
     Ok(())
 }
 
-/// Subtracts `amount` from the fees total for a claim paid to `to`.
+/// Refuses a payout to the pool itself or to its token contract.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidPayee`] if `to` is the pool or `token`.
+pub fn check_payee(env: &Env, to: &Address, token: &Address) -> Result<(), Error> {
+    if *to == env.current_contract_address() || to == token {
+        return Err(Error::InvalidPayee);
+    }
+    Ok(())
+}
+
+/// Subtracts `amount` from the fees total.
 ///
 /// # Errors
 ///
 /// Returns [`Error::InvalidClaimAmount`] if `amount` is negative or above the
-/// fees total or `to` is the pool itself, and [`Error::NotInitialized`] if the
-/// fees total is not stored.
-pub fn claim(env: &Env, to: &Address, amount: i128) -> Result<(), Error> {
-    if *to == env.current_contract_address() {
-        return Err(Error::InvalidClaimAmount);
-    }
+/// fees collected, and [`Error::NotInitialized`] if the fees total is not
+/// stored.
+pub fn claim(env: &Env, amount: i128) -> Result<(), Error> {
     let fees = fees_total(env)?;
     let remaining = fees
         .checked_sub(amount)
@@ -149,17 +160,6 @@ mod test {
         env.as_contract(&id, || {
             assert_eq!(record(&env, 2, 0), Err(Error::Overflow));
             assert_eq!(totals(&env), (Some(i128::MAX - 1), Some(0)));
-        });
-    }
-
-    #[test]
-    fn claim_refuses_the_contract_itself() {
-        let env = Env::default();
-        let id = register_with_totals(&env, 0, 5);
-
-        env.as_contract(&id, || {
-            assert_eq!(claim(&env, &id, 5), Err(Error::InvalidClaimAmount));
-            assert_eq!(totals(&env), (Some(0), Some(5)));
         });
     }
 }

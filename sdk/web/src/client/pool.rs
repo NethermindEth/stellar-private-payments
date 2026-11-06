@@ -13,7 +13,7 @@ use crate::{
     correlation::{new_correlation_id, with_correlation_id},
     models::{
         DisclosureReceipt, DisclosureRequest, DisclosureVerificationReport, PoolEstimate,
-        PoolExecuteResult, UserNoteSummary, transact_from_js, user_note_summaries,
+        PoolExecuteResult, PoolInfo, UserNoteSummary, transact_from_js, user_note_summaries,
     },
 };
 
@@ -62,22 +62,44 @@ impl PrivatePool {
         Ok(u128::from(fee))
     }
 
+    /// Pool state read from the chain: fee, deposit limits, and pause flag.
+    #[wasm_bindgen(js_name = poolInfo)]
+    pub async fn pool_info(&self) -> Result<PoolInfo, JsError> {
+        let pool = self.inner().pool_info().await.map_err(pool_err)?;
+        Ok(PoolInfo::from(pool))
+    }
+
+    /// Refuses a deposit of `amount` stroops (`bigint` in JS) that the pool
+    /// would refuse, without building it.
+    #[wasm_bindgen(js_name = checkDeposit)]
+    pub async fn check_deposit(&self, amount: u128) -> Result<(), JsError> {
+        self.inner()
+            .check_deposit(NoteAmount::from(amount))
+            .await
+            .map_err(pool_err)
+    }
+
+    /// Refuses a `transact` config the pool would refuse, without building it.
+    #[wasm_bindgen(js_name = checkTransact)]
+    pub async fn check_transact(&self, config: JsValue) -> Result<(), JsError> {
+        let step = transact_from_js(config)?;
+        self.inner().check_transact(&step).await.map_err(pool_err)
+    }
+
     /// Most one spend can send after paying the pool fee on every step, in
     /// stroops (`bigint` in JS).
     #[wasm_bindgen(js_name = maxSpend)]
     pub async fn max_spend(&self) -> Result<u128, JsError> {
-        let fee = self.inner().fee().await.map_err(pool_err)?;
-        let amount = self.inner().max_spend(fee).await.map_err(pool_err)?;
+        let amount = self.inner().max_spend().await.map_err(pool_err)?;
         Ok(u128::from(amount))
     }
 
     /// Estimate how many on-chain transactions a spend of `amount` stroops
     /// would require, and the pool fees they pay.
     pub async fn estimate(&self, amount: u128) -> Result<PoolEstimate, JsError> {
-        let fee = self.inner().fee().await.map_err(pool_err)?;
         let estimate = self
             .inner()
-            .estimate(NoteAmount::from(amount), fee)
+            .estimate(NoteAmount::from(amount))
             .await
             .map_err(pool_err)?;
         Ok(PoolEstimate::from(estimate))
@@ -111,10 +133,9 @@ impl PrivatePool {
                     .map_err(|e| JsError::new(&e.to_string()))?,
             );
             let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
-            let fee = self.inner().fee().await.map_err(pool_err)?;
             let mut plan = self
                 .inner()
-                .prepare_transfer(&wallet, recipient, NoteAmount::from(amount), fee)
+                .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
                 .await
                 .map_err(pool_err)?;
             self.execute_plan(&mut plan, "transfer").await
@@ -130,10 +151,9 @@ impl PrivatePool {
     ) -> Result<PoolExecuteResult, JsError> {
         with_correlation_id(new_correlation_id(), async {
             let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
-            let fee = self.inner().fee().await.map_err(pool_err)?;
             let mut plan = self
                 .inner()
-                .prepare_transfer(&wallet, recipient, NoteAmount::from(amount), fee)
+                .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
                 .await
                 .map_err(pool_err)?;
             self.execute_plan(&mut plan, "transfer").await
@@ -150,10 +170,10 @@ impl PrivatePool {
         with_correlation_id(new_correlation_id(), async {
             let to = recipient.unwrap_or_else(|| self.user_address.clone());
             let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
-            let fee = self.inner().fee().await.map_err(pool_err)?;
             let mut plan = self
                 .inner()
-                .prepare_withdraw(&wallet, NoteAmount::from(amount), to, fee)
+                .prepare_withdraw(&wallet, NoteAmount::from(amount), to)
+                .await
                 .map_err(pool_err)?;
             self.execute_plan(&mut plan, "withdraw").await
         })

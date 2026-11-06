@@ -11,9 +11,9 @@ import { symbol, symbolCircle } from 'd3-shape';
 import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
-import { classifyTx, withdrawalsByPk } from './gvk-classify.js';
+import { chargeSpend, classifyTx, emptyPkNode, withdrawalsByPk } from './gvk-classify.js';
 import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
-import { collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId } from './gvk-notes.js';
+import { amountByPk, collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId, parseFieldAmount, unspentByPk } from './gvk-notes.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { el, formatAmount as formatBaseUnits, tokenLabel } from './ui/notes-view.js';
 
@@ -398,16 +398,6 @@ function bindResultHighlights() {
   });
 }
 
-function parseFieldAmount(hex) {
-  const s = String(hex ?? '').trim();
-  if (!s.startsWith('0x')) return 0n;
-  try {
-    return BigInt(s);
-  } catch {
-    return 0n;
-  }
-}
-
 function formatTokenAmount(amount) {
   if (state.tokenDecimals == null) return `${amount} base units`;
   return formatBaseUnits(amount, state.tokenSymbol, state.tokenDecimals);
@@ -727,22 +717,14 @@ let fullPkGraphCache = null;
 /** The unfiltered graph over every loaded row — rebuilt only when rows are appended or reset. */
 function fullPkGraph() {
   if (fullPkGraphCache?.rows !== state.rows || fullPkGraphCache.count !== state.rows.length) {
-    fullPkGraphCache = { rows: state.rows, count: state.rows.length, graph: buildPkGraph(state.rows, NO_FILTERS) };
+    // Balances come from unspent notes: the flows can't attribute a multi-key spend or a spend's own deposit.
+    const balances = unspentByPk(collectNotes(state.rows));
+    fullPkGraphCache = { rows: state.rows, count: state.rows.length, graph: { ...buildPkGraph(state.rows, NO_FILTERS), balances } };
   }
   return fullPkGraphCache.graph;
 }
 
 const NO_FILTERS = { amountMin: null, amountMax: null, ledgerFrom: null, ledgerTo: null, pk: null };
-
-function amountByPk(slots) {
-  const totals = new Map();
-  for (const slot of slots) {
-    const pk = normalizeFieldKey(slot.audited.note.pk);
-    if (!pk) continue;
-    totals.set(pk, (totals.get(pk) ?? 0n) + parseFieldAmount(slot.audited.note.amount));
-  }
-  return totals;
-}
 
 /**
  * Per input PK, the withdrawal from withdrawalsByPk, computed over the tx's
@@ -776,14 +758,7 @@ function buildPkGraph(rows, filters) {
   const ensureNode = (pk) => {
     let node = nodes.get(pk);
     if (!node) {
-      node = {
-        pk,
-        deposited: 0n, depositCount: 0,
-        received: 0n, receivedCount: 0,
-        withdrawn: 0n, withdrawCount: 0,
-        transferIn: 0n, transferInCount: 0,
-        transferOut: 0n, transferOutCount: 0,
-      };
+      node = emptyPkNode(pk);
       nodes.set(pk, node);
     }
     return node;
@@ -827,36 +802,16 @@ function buildPkGraph(rows, filters) {
     }
 
     // Senders come off the whole tx, not the amount-filtered notes.
-    const inputPks = [...new Set(
-      allInputs.map((slot) => normalizeFieldKey(slot.audited.note.pk)).filter(Boolean),
-    )];
-
-    for (const slot of outputs) {
-      const toPk = normalizeFieldKey(slot.audited.note.pk);
-      if (!toPk || inputPks.includes(toPk)) continue; // change, not a transfer
-      const amount = parseFieldAmount(slot.audited.note.amount);
-
-      for (const fromPk of inputPks) {
-        const edge = ensureEdge(fromPk, toPk);
-        edge.count += 1;
-        edge.amount += amount;
-
-        const fromNode = ensureNode(fromPk);
-        fromNode.transferOut += amount;
-        fromNode.transferOutCount += 1;
-        const toNode = ensureNode(toPk);
-        toNode.transferIn += amount;
-        toNode.transferInCount += 1;
-      }
-    }
-
+    const inputTotals = amountByPk(allInputs);
+    const received = outputs
+      .map((slot) => [normalizeFieldKey(slot.audited.note.pk), parseFieldAmount(slot.audited.note.amount)])
+      .filter(([pk]) => pk);
     // A withdraw tx can still transfer part of its input to someone else.
-    if (effectiveKind === 'withdraw') {
-      for (const [pk, amount] of withdrawnByPk(allInputs, allOutputs, filters)) {
-        const node = ensureNode(pk);
-        node.withdrawn += amount;
-        node.withdrawCount += 1;
-      }
+    const withdrawn = effectiveKind === 'withdraw' ? withdrawnByPk(allInputs, allOutputs, filters) : new Map();
+    for (const [fromPk, toPk, amount] of chargeSpend(ensureNode, inputTotals, received, withdrawn, state.poolFee)) {
+      const edge = ensureEdge(fromPk, toPk);
+      edge.count += 1;
+      edge.amount += amount;
     }
   }
 
@@ -1528,7 +1483,7 @@ function pkGraphDetailAmountRow(label, amount, count) {
   row.appendChild(el(
     'div',
     'font-mono text-slate-200',
-    `${formatTokenAmount(amount)} · ${count} note(s)`,
+    count == null ? formatTokenAmount(amount) : `${formatTokenAmount(amount)} · ${count} note(s)`,
   ));
   return row;
 }
@@ -1543,11 +1498,6 @@ function pkGraphDetailPkRow(label, pk) {
   return row;
 }
 
-/** Net of every deposit/withdraw/transfer seen for this PK across the loaded audit — i.e. now, not at any one point in its history. */
-function pkGraphNodeBalance(node) {
-  return node.deposited + node.transferIn - node.withdrawn - node.transferOut;
-}
-
 /** A real balance needs spends, which only traceable pools expose; view-only can only total what came in. */
 function pkGraphDetailBalanceRow(node) {
   const traceable = state.poolGvkMode === 'traceable';
@@ -1560,7 +1510,7 @@ function pkGraphDetailBalanceRow(node) {
   row.appendChild(el(
     'div',
     'font-mono text-sm text-white',
-    formatTokenAmount(traceable ? pkGraphNodeBalance(node) : node.received + node.deposited + node.transferIn),
+    formatTokenAmount(traceable ? (fullPkGraph().balances.get(node.pk) ?? 0n) : node.received + node.deposited + node.transferIn),
   ));
   return row;
 }
@@ -1649,6 +1599,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   if (node.withdrawCount > 0) activityBox.appendChild(pkGraphDetailAmountRow('Withdrawn', node.withdrawn, node.withdrawCount));
   if (node.transferInCount > 0) activityBox.appendChild(pkGraphDetailAmountRow('Received (transfers)', node.transferIn, node.transferInCount));
   if (node.transferOutCount > 0) activityBox.appendChild(pkGraphDetailAmountRow('Sent (transfers)', node.transferOut, node.transferOutCount));
+  if (node.feesPaid > 0n) activityBox.appendChild(pkGraphDetailAmountRow('Pool fees paid', node.feesPaid));
   if (activityBox.children.length > 0) history.appendChild(activityBox);
 
   const neighbors = pkGraphNeighborEdges(node.pk, edges);
@@ -2155,7 +2106,7 @@ function buildNoteViewCsvRows() {
   return [header, ...collectNotes(state.rows).map(noteToCsvRow)];
 }
 
-/** One row per transfer edge, plus one row per PK for its deposit/withdraw totals (which have no edge). Always the full set, ignoring active filters (see buildNotesCsvRows). */
+/** One row per transfer edge, plus one row per PK for its deposit/withdraw/fee totals (which have no edge). Always the full set, ignoring active filters (see buildNotesCsvRows). */
 function buildPkGraphCsvRows() {
   const header = ['kind', 'from_pk', 'to_pk', 'count', 'amount_stroops'];
   const { nodes, edges } = fullPkGraph();
@@ -2168,6 +2119,8 @@ function buildPkGraphCsvRows() {
     if (node.receivedCount > 0) rows.push(['received', '', node.pk, node.receivedCount, node.received.toString()]);
     if (node.depositCount > 0) rows.push(['deposit', '', node.pk, node.depositCount, node.deposited.toString()]);
     if (node.withdrawCount > 0) rows.push(['withdraw', node.pk, '', node.withdrawCount, node.withdrawn.toString()]);
+    // A spend with several input PKs charges each the full fee, as it does each transfer.
+    if (node.feesPaid > 0n) rows.push(['fee', node.pk, '', node.feeCount, node.feesPaid.toString()]);
   }
 
   return rows;

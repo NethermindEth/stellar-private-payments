@@ -4,7 +4,8 @@
 use anyhow::Result;
 use stellar_private_payments::{
     Error,
-    types::{AssetDescriptor, NoteAmount},
+    planner::Transact,
+    types::{AssetDescriptor, ExtAmount, NoteAmount},
 };
 
 use super::support::{FEE_STROOPS, assert_contract_error, deploy_default, note_states, session};
@@ -44,7 +45,7 @@ async fn withdraw_multi_tx() -> Result<()> {
 
     // Three notes take two steps, and each step pays the fee.
     let total = NoteAmount::from(3 * DEPOSIT_STROOPS - 2 * FEE_STROOPS);
-    let estimate = pool.estimate(total, pool.fee().await?).await?;
+    let estimate = pool.estimate(total).await?;
     assert_eq!(
         estimate.tx_count, 2,
         "combining 3 notes with a 2-input circuit should take 2 transactions"
@@ -183,6 +184,36 @@ async fn withdraw_malformed_address() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn a_raw_withdrawal_to_the_token_is_refused() -> Result<()> {
+    let session = session(deploy_default().await?).await?;
+    let pool = session.pool()?;
+    let config = pool.config();
+    let token_id = config
+        .contract_config
+        .pool(&config.pool_contract_id)?
+        .token_contract_id
+        .clone();
+
+    // No proof exists, so only a refusal before proving gets here.
+    let result = pool
+        .transact(Transact::new(
+            vec![],
+            [NoteAmount::ZERO; 2],
+            ExtAmount::from(-1_000_000),
+            token_id,
+            [None, None],
+            [None, None],
+        ))
+        .await;
+    assert!(
+        matches!(result, Err(Error::WithdrawalToContract)),
+        "{result:?}"
+    );
+
+    Ok(())
+}
+
 /// Once the first spend is in a ledger, the pool refuses the second with
 /// `AlreadySpentNullifier` (code 9), not just any failure up to confirm.
 #[tokio::test]
@@ -200,12 +231,15 @@ async fn withdraw_double_spend() -> Result<()> {
     );
 
     let half = NoteAmount::from(DEPOSIT_STROOPS / 2);
-    let fee = pool.fee().await?;
 
-    let mut plan_a = pool.prepare_withdraw(&wallet, half, session.wallet.address(), fee)?;
+    let mut plan_a = pool
+        .prepare_withdraw(&wallet, half, session.wallet.address())
+        .await?;
     let mut prepared_a = pool.prove_next(&mut plan_a).await?;
 
-    let mut plan_b = pool.prepare_withdraw(&wallet, half, session.wallet.address(), fee)?;
+    let mut plan_b = pool
+        .prepare_withdraw(&wallet, half, session.wallet.address())
+        .await?;
     let mut prepared_b = pool.prove_next(&mut plan_b).await?;
 
     pool.simulate(&mut prepared_a).await?;
