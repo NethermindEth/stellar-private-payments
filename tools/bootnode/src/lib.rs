@@ -136,7 +136,6 @@ pub(crate) struct AppState {
     pub(crate) ledger_tip: Arc<AtomicU32>,
     pub(crate) oldest_ledger: Arc<AtomicU32>,
     pub(crate) archive_ready: Arc<AtomicBool>,
-    pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
     pub(crate) contract_ids: Arc<Vec<String>>,
     pub(crate) min_deployment_ledger: u32,
     /// Added allowlists whose earlier events the archive lacks. `getEvents`
@@ -148,7 +147,6 @@ impl Bootnode {
     pub async fn setup_with_deployment(
         cfg: Config,
         storage: Arc<dyn Storage>,
-        prom_handle: metrics_exporter_prometheus::PrometheusHandle,
         deployment: DeploymentSpec,
     ) -> Result<Self> {
         let cfg = Arc::new(cfg);
@@ -187,7 +185,6 @@ impl Bootnode {
                 archive_ready: Arc::new(AtomicBool::new(indexer.archive_ready)),
                 cfg,
                 storage,
-                prom_handle,
                 contract_ids,
                 min_deployment_ledger,
                 unarchived: Arc::new(RwLock::new(unarchived)),

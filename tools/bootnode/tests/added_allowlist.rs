@@ -141,7 +141,7 @@ async fn setup(
     let mut cfg = test_config(port, NETWORK_TIP);
     cfg.upstream_rpc_url = upstream_url.parse().expect("URL");
     cfg.indexer_sleep_ms = 10;
-    Bootnode::setup_with_deployment(cfg, archive.clone(), prom_handle(), deployment)
+    Bootnode::setup_with_deployment(cfg, archive.clone(), deployment)
         .await
         .expect("setup")
 }
