@@ -243,4 +243,33 @@ mod tests {
             "{result:?}"
         );
     }
+
+    #[test]
+    fn a_zero_amount_is_refused() {
+        let core = core();
+        let deposit = core.prepare_deposit(NoteAmount::ZERO);
+        let transfer = core.prepare_transfer(
+            &[],
+            NotePublicKey([1; 32]),
+            EncryptionPublicKey([2; 32]),
+            NoteAmount::ZERO,
+            NoteAmount::ZERO,
+        );
+        let withdraw = core.prepare_withdraw(&[], NoteAmount::ZERO, "OWNER", NoteAmount::ZERO);
+
+        for result in [deposit, transfer, withdraw] {
+            assert!(matches!(result, Err(Error::InvalidConfig(_))), "{result:?}");
+        }
+    }
+
+    #[test]
+    fn an_empty_wallet_has_no_estimate() {
+        let err = core()
+            .estimate(&[], NoteAmount::ONE, NoteAmount::ZERO)
+            .expect_err("no notes");
+        assert!(
+            matches!(err, Error::Plan(PlanError::NoSpendableNotes)),
+            "{err:?}"
+        );
+    }
 }

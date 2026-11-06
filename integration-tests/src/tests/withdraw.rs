@@ -45,7 +45,7 @@ async fn withdraw_multi_tx() -> Result<()> {
 
     // Three notes take two steps, and each step pays the fee.
     let total = NoteAmount::from(3 * DEPOSIT_STROOPS - 2 * FEE_STROOPS);
-    let estimate = pool.estimate(total, pool.fee().await?).await?;
+    let estimate = pool.estimate(total).await?;
     assert_eq!(
         estimate.tx_count, 2,
         "combining 3 notes with a 2-input circuit should take 2 transactions"
@@ -231,12 +231,15 @@ async fn withdraw_double_spend() -> Result<()> {
     );
 
     let half = NoteAmount::from(DEPOSIT_STROOPS / 2);
-    let fee = pool.fee().await?;
 
-    let mut plan_a = pool.prepare_withdraw(&wallet, half, session.wallet.address(), fee)?;
+    let mut plan_a = pool
+        .prepare_withdraw(&wallet, half, session.wallet.address())
+        .await?;
     let mut prepared_a = pool.prove_next(&mut plan_a).await?;
 
-    let mut plan_b = pool.prepare_withdraw(&wallet, half, session.wallet.address(), fee)?;
+    let mut plan_b = pool
+        .prepare_withdraw(&wallet, half, session.wallet.address())
+        .await?;
     let mut prepared_b = pool.prove_next(&mut plan_b).await?;
 
     pool.simulate(&mut prepared_a).await?;

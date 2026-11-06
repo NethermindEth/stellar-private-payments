@@ -11,9 +11,11 @@ use super::{
     offline_pool::{BuildParams, OWNER, OfflinePool, tx_hash},
 };
 use anyhow::Result;
+use sdk_tests::pool::test_recipient;
 use serde_json::json;
 use stellar_private_payments::{
     Error,
+    planner::{PlanError, SpendSessionError},
     types::{AspMembershipSync, NoteAmount},
 };
 
@@ -236,10 +238,7 @@ async fn a_plan_failing_at_its_second_step_reports_the_first_as_completed() -> R
         .await?;
     // The three largest notes take two steps, and each step pays the fee.
     let amount = NoteAmount::from(100 - 2 * u128::from(FEE));
-    assert_eq!(
-        h.pool.estimate(amount, h.pool.fee().await?).await?.tx_count,
-        2
-    );
+    assert_eq!(h.pool.estimate(amount).await?.tx_count, 2);
     h.storage
         .script_build_transact_params([BuildParams::Real, BuildParams::Fail("step two broke")]);
 
@@ -260,6 +259,44 @@ async fn a_plan_failing_at_its_second_step_reports_the_first_as_completed() -> R
         "plan failed after 1 confirmed transaction(s): step two broke"
     );
     assert_eq!(stages(&h).await, SIMULATE_SEND_CONFIRM);
+    Ok(())
+}
+
+#[tokio::test]
+async fn spends_are_planned_at_the_pool_fee() -> Result<()> {
+    let h = OfflinePool::builder()
+        .notes(&[10, 20, 30, 40])
+        .build()
+        .await?;
+    // The four notes take three steps, and each step pays the fee.
+    let fees = 3 * u128::from(FEE);
+    let max = h.pool.max_spend().await?;
+    assert_eq!(max, NoteAmount::from(100 - fees));
+    assert_eq!(h.pool.estimate(max).await?.fees, NoteAmount::from(fees));
+
+    let wallet = h.pool.spendable_notes().await?;
+    let plan = h.pool.prepare_withdraw(&wallet, max, OWNER).await?;
+    assert_eq!((plan.tx_count(), plan.current_tx()), (3, 0));
+    let over = NoteAmount::from(101 - fees);
+    for err in [
+        h.pool
+            .prepare_withdraw(&wallet, over, OWNER)
+            .await
+            .expect_err("one unit over"),
+        h.pool
+            .prepare_transfer(&wallet, test_recipient(), over)
+            .await
+            .expect_err("one unit over"),
+    ] {
+        assert!(
+            matches!(
+                &err,
+                Error::SpendSession(SpendSessionError::Plan(PlanError::NoCombination { max_spend }))
+                    if *max_spend == max
+            ),
+            "{err:?}"
+        );
+    }
     Ok(())
 }
 

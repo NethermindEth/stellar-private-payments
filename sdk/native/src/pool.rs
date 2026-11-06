@@ -160,22 +160,23 @@ impl PrivatePool {
         }
     }
 
-    pub async fn estimate(&self, amount: NoteAmount, fee: NoteAmount) -> Result<Estimate, Error> {
+    pub async fn estimate(&self, amount: NoteAmount) -> Result<Estimate, Error> {
         let wallet = self.spendable_notes().await?;
-        self.core.estimate(&wallet, amount, fee)
+        self.core.estimate(&wallet, amount, self.fee().await?)
     }
 
     /// Returns the most one spend from the spendable notes can send after
-    /// paying `fee` on every step.
+    /// paying the pool fee on every step.
     ///
     /// # Errors
     ///
     /// Returns the sync or storage error when the spendable notes cannot be
-    /// read, and [`Error::Plan`] when their total or the fees overflow.
-    pub async fn max_spend(&self, fee: NoteAmount) -> Result<NoteAmount, Error> {
+    /// read, the errors of [`Self::fee`], and [`Error::Plan`] when the notes'
+    /// total or the fees overflow.
+    pub async fn max_spend(&self) -> Result<NoteAmount, Error> {
         Ok(crate::planner::max_spend(
             &self.spendable_notes().await?,
-            fee,
+            self.fee().await?,
         )?)
     }
 
@@ -232,10 +233,7 @@ impl PrivatePool {
         let recipient = recipient.into();
         tracing::info!(recipient = ?Sensitive(&recipient), amount = ?Sensitive(amount), "transfer started");
         let wallet = self.spendable_notes().await?;
-        let fee = self.fee().await?;
-        let mut plan = self
-            .prepare_transfer(&wallet, recipient, amount, fee)
-            .await?;
+        let mut plan = self.prepare_transfer(&wallet, recipient, amount).await?;
         self.execute(&mut plan).await
     }
 
@@ -248,8 +246,7 @@ impl PrivatePool {
         let recipient = recipient.into();
         tracing::info!(amount = ?Sensitive(amount), recipient = ?Sensitive(&recipient), "withdraw started");
         let wallet = self.spendable_notes().await?;
-        let fee = self.fee().await?;
-        let mut plan = self.prepare_withdraw(&wallet, amount, recipient, fee)?;
+        let mut plan = self.prepare_withdraw(&wallet, amount, recipient).await?;
         self.execute(&mut plan).await
     }
 
@@ -417,22 +414,26 @@ impl PrivatePool {
         wallet: &[SpendableNote],
         recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
-        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
         let (note_public_key, encryption_public_key) =
             self.resolve_transfer_recipient(recipient.into()).await?;
-        self.core
-            .prepare_transfer(wallet, note_public_key, encryption_public_key, amount, fee)
+        self.core.prepare_transfer(
+            wallet,
+            note_public_key,
+            encryption_public_key,
+            amount,
+            self.fee().await?,
+        )
     }
 
-    pub fn prepare_withdraw(
+    pub async fn prepare_withdraw(
         &self,
         wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
-        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
-        self.core.prepare_withdraw(wallet, amount, recipient, fee)
+        self.core
+            .prepare_withdraw(wallet, amount, recipient, self.fee().await?)
     }
 
     pub fn prepare_transact(&self, step: Transact) -> PreparedTransactionPlan {

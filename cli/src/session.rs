@@ -164,10 +164,7 @@ impl ClientSession {
         self.read_pools(pool_ids, "pool state", |pool| Ok((pool.pool_info()?, pool)))
             .into_iter()
             .map(|(id, read)| {
-                let limits = read.and_then(|(info, pool)| {
-                    let max_spend = pool.max_spend(info.fee)?;
-                    Ok((info, max_spend))
-                });
+                let limits = read.and_then(|(info, pool)| Ok((info, pool.max_spend()?)));
                 (id, limits)
             })
             .collect()

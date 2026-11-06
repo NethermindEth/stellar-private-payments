@@ -156,7 +156,7 @@ async fn deposit_refused_while_paused() -> Result<()> {
     let (note_public_key, encryption_public_key) = session.account.privacy_keys().await?;
     pool.transfer(
         TransferRecipient::keys(note_public_key, encryption_public_key),
-        pool.max_spend(pool.fee().await?).await?,
+        pool.max_spend().await?,
     )
     .await?;
     assert_eq!(
@@ -164,11 +164,8 @@ async fn deposit_refused_while_paused() -> Result<()> {
         NoteAmount::from(DEPOSIT_STROOPS - FEE_STROOPS)
     );
 
-    pool.withdraw(
-        pool.max_spend(pool.fee().await?).await?,
-        session.wallet.address(),
-    )
-    .await?;
+    pool.withdraw(pool.max_spend().await?, session.wallet.address())
+        .await?;
     assert_eq!(pool.balance().await?, NoteAmount::ZERO);
 
     network

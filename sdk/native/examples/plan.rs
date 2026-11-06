@@ -100,10 +100,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("(Using self-withdrawal; funds will return to the wallet's public address.)");
     }
 
-    let amount = pool.max_spend(fee)?;
+    let amount = pool.max_spend()?;
     println!();
     println!("Preparing withdrawal plan for the most one spend can send ({amount} stroops)...");
-    let mut plan = pool.prepare_withdraw(&notes, amount, &recipient, fee)?;
+    let mut plan = pool.prepare_withdraw(&notes, amount, &recipient)?;
     print_plan_cursor(&plan);
 
     println!();

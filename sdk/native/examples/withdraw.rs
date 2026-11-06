@@ -69,8 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         notes.len(),
         total
     );
-    let fee = pool.fee()?;
-    let max_spend = pool.max_spend(fee)?;
+    let max_spend = pool.max_spend()?;
     if amount > max_spend {
         println!(
             "Skipping: requested amount ({} stroops) exceeds the most one spend can send after the pool fees ({} stroops).",
@@ -90,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!("Estimating transaction count...");
-    let estimate = pool.estimate(amount, fee)?;
+    let estimate = pool.estimate(amount)?;
     println!("Expected on-chain transactions: {}", estimate.tx_count);
 
     println!();
