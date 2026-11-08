@@ -2269,8 +2269,9 @@ async function startAudit(privateKey) {
   if (!poolContractId) {
     throw new Error('Select a GVK-enabled pool');
   }
-  if (!privateKey) {
-    throw new Error('Enter the authority private key');
+  // Non-ASCII input makes the wasm glue copy the key into a buffer it frees unwiped.
+  if (!/^(0x)?[0-9a-fA-F]{64}$/.test(privateKey)) {
+    throw new Error('Enter the authority private key as 64 hex digits');
   }
 
   resetAuditState();
