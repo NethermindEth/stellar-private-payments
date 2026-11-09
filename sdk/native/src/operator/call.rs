@@ -2,7 +2,7 @@
 //!
 //! An admin call is sourced by the contract's admin account, which may need
 //! several signers. Each signer signs the same envelope, so it stays valid for
-//! a day and carries the fee for the rent that accrues while they sign.
+//! a day.
 
 use anyhow::{Context, anyhow};
 use stellar_xdr::{self as xdr, Limits, ReadXdr, WriteXdr};
@@ -17,12 +17,6 @@ use crate::{
 
 /// Seconds an admin call stays valid.
 const VALIDITY_SECS: u64 = 86_400;
-
-/// Refundable fee added to every admin call, in stroops. `accept_admin` and
-/// `update_admin` extend an admin entry to 30 days from the ledger they land
-/// on, so each ledger spent signing adds rent the simulation left out: about
-/// 14,000 stroops for a day on testnet in October 2026.
-const ADMIN_RENT_MARGIN: u32 = 100_000;
 
 /// Ledgers an entry an admin call reads must outlive its build: a day of
 /// five-second ledgers, plus an hour.
@@ -154,9 +148,8 @@ pub(crate) async fn build_call(
 
     let simulation = rpc.simulate_transaction(&raw).await?;
     let prepared = PreparedSorobanTx::from_simulation(&raw, &simulation)?;
-    let mut envelope = xdr::TransactionEnvelope::from_xdr_base64(&prepared.tx_xdr, Limits::none())
+    let envelope = xdr::TransactionEnvelope::from_xdr_base64(&prepared.tx_xdr, Limits::none())
         .context("decode assembled envelope")?;
-    add_rent_margin(&mut envelope)?;
     let call = describe(&envelope)?;
     refuse_short_lived_entries(rpc, network_passphrase, &envelope).await?;
 
@@ -261,26 +254,6 @@ pub(super) fn unix_now() -> Result<u64, Error> {
         .duration_since(web_time::UNIX_EPOCH)
         .context("system clock is before the Unix epoch")?
         .as_secs())
-}
-
-/// Adds [`ADMIN_RENT_MARGIN`] to the envelope's refundable fee and its fee.
-fn add_rent_margin(envelope: &mut xdr::TransactionEnvelope) -> Result<(), Error> {
-    let xdr::TransactionEnvelope::Tx(envelope) = envelope else {
-        return Err(anyhow!("expected a v1 envelope").into());
-    };
-    let xdr::TransactionExt::V1(data) = &mut envelope.tx.ext else {
-        return Err(anyhow!("the assembled envelope has no Soroban data").into());
-    };
-    data.resource_fee = data
-        .resource_fee
-        .checked_add(i64::from(ADMIN_RENT_MARGIN))
-        .ok_or_else(|| anyhow!("resource fee overflows"))?;
-    envelope.tx.fee = envelope
-        .tx
-        .fee
-        .checked_add(ADMIN_RENT_MARGIN)
-        .ok_or_else(|| anyhow!("fee overflows"))?;
-    Ok(())
 }
 
 /// Persistent entries the envelope reads and does not restore itself. An
@@ -403,8 +376,15 @@ fn extend_command(
     };
     Ok(format!(
         "stellar contract extend {target} --ledgers-to-extend {ledgers} --source-account ACCOUNT \
-         --rpc-url {rpc_url} --network-passphrase '{network_passphrase}'"
+         --rpc-url {} --network-passphrase {}",
+        shell_quote(rpc_url),
+        shell_quote(network_passphrase)
     ))
+}
+
+/// Quotes `value` as one POSIX shell word.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
 }
 
 #[cfg(test)]
@@ -631,20 +611,6 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn rent_margin_raises_both_fees() {
-        let mut envelope = envelope();
-        add_rent_margin(&mut envelope).expect("add margin");
-        let xdr::TransactionEnvelope::Tx(v1) = &envelope else {
-            unreachable!()
-        };
-        assert_eq!(v1.tx.fee, 1_000 + ADMIN_RENT_MARGIN);
-        let xdr::TransactionExt::V1(data) = &v1.tx.ext else {
-            unreachable!()
-        };
-        assert_eq!(data.resource_fee, 500 + i64::from(ADMIN_RENT_MARGIN));
-    }
-
-    #[test]
     fn live_footprint_keys_skip_restored_and_temporary_entries() {
         let persistent = data_key(1, xdr::ContractDataDurability::Persistent);
         let restored = data_key(2, xdr::ContractDataDurability::Persistent);
@@ -676,7 +642,7 @@ pub(super) mod tests {
             command,
             format!(
                 "stellar contract extend --id {} --ledgers-to-extend 99 --source-account ACCOUNT \
-                 --rpc-url https://rpc.test --network-passphrase 'net'",
+                 --rpc-url 'https://rpc.test' --network-passphrase 'net'",
                 stellar_strkey::Contract([1; 32])
             )
         );
@@ -685,6 +651,21 @@ pub(super) mod tests {
         });
         let command = extend_command(&code, 99, "https://rpc.test", "net").expect("command");
         assert!(command.contains(&format!("--wasm-hash {}", "04".repeat(32))));
+    }
+
+    #[test]
+    fn extend_commands_quote_the_network() {
+        let code = xdr::LedgerKey::ContractCode(xdr::LedgerKeyContractCode {
+            hash: xdr::Hash([4; 32]),
+        });
+        let command =
+            extend_command(&code, 99, "https://rpc.test/?key=a&b=c", "it's").expect("command");
+        assert!(
+            command.ends_with(
+                r"--rpc-url 'https://rpc.test/?key=a&b=c' --network-passphrase 'it'\''s'"
+            ),
+            "{command}"
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -842,7 +823,7 @@ pub(super) mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[tokio::test]
-    async fn build_call_bounds_pads_and_describes_the_call() {
+    async fn build_call_bounds_and_describes_the_call() {
         let server = chain::serve(&[]).await;
         let before = unix_now().expect("now");
         let (_, result) = chain::build(&server).await;
@@ -857,14 +838,14 @@ pub(super) mod tests {
         assert_eq!(call.sequence, 42);
         assert!((before + VALIDITY_SECS..=after + VALIDITY_SECS).contains(&call.valid_until));
         // The simulation asks a resource fee of 500 for an empty footprint.
-        assert_eq!(call.fee, BASE_FEE + 500 + ADMIN_RENT_MARGIN);
+        assert_eq!(call.fee, BASE_FEE + 500);
         let xdr::TransactionEnvelope::Tx(v1) = &envelope else {
             unreachable!()
         };
         let xdr::TransactionExt::V1(data) = &v1.tx.ext else {
             panic!("expected Soroban data")
         };
-        assert_eq!(data.resource_fee, 500 + i64::from(ADMIN_RENT_MARGIN));
+        assert_eq!(data.resource_fee, 500);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -93,6 +93,11 @@ impl BlocklistOperator {
     }
 }
 
+/// Blocking [`crate::operator::pool_lists`].
+pub fn pool_lists(rpc_url: &str, pools: &[String]) -> Result<Vec<PoolLists>, Error> {
+    block_on(crate::operator::pool_lists(rpc_url, pools))
+}
+
 impl PoolAdmin {
     pub fn lists(&self) -> Result<PoolLists, Error> {
         block_on(self.inner.lists())

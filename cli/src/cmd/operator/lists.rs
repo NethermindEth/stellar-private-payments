@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result, bail};
 use stellar_private_payments::{
-    blocking::PoolAdmin,
+    blocking::pool_lists,
     operator::{PoolLists, allowlist_ids},
 };
 
@@ -93,19 +93,15 @@ pub fn resolve_tree(
 
 /// The lists of every enabled pool of the deployment config.
 fn enabled_pool_lists(config: &CliConfig, rpc_url: &str) -> Result<Vec<(String, PoolLists)>> {
-    config
+    let pools: Vec<String> = config
         .deployment
         .pools
         .iter()
         .filter(|pool| pool.enabled)
-        .map(|pool| {
-            let id = &pool.pool_contract_id;
-            let lists = PoolAdmin::open(rpc_url, config.deployment.clone(), id)
-                .and_then(|admin| admin.lists())
-                .with_context(|| format!("read the trees pool {id} uses"))?;
-            Ok((id.clone(), lists))
-        })
-        .collect()
+        .map(|pool| pool.pool_contract_id.clone())
+        .collect();
+    let lists = pool_lists(rpc_url, &pools).context("read the trees the enabled pools use")?;
+    Ok(pools.into_iter().zip(lists).collect())
 }
 
 fn target_tree(

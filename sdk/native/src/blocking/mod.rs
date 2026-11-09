@@ -17,6 +17,6 @@ pub use account::Account;
 pub use client::Client;
 pub use disclosure::verify_disclosure_receipt;
 pub use operator::{
-    AllowlistOperator, BlocklistOperator, Envelopes, GvkAudit, GvkAuthority, PoolAdmin,
+    AllowlistOperator, BlocklistOperator, Envelopes, GvkAudit, GvkAuthority, PoolAdmin, pool_lists,
 };
 pub use pool::PrivatePool;

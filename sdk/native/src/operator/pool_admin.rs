@@ -5,7 +5,7 @@ use stellar_xdr as xdr;
 
 use crate::{
     Error,
-    chain::{ContractDataBulkRequest, scval_to_address_string, scval_to_policy_flags},
+    chain::{ContractDataBulkRequest, RpcClient, scval_to_address_string, scval_to_policy_flags},
     types::PolicyFlags,
 };
 
@@ -45,6 +45,27 @@ impl PoolLists {
     }
 }
 
+/// The lists of each of `pools`, in order, read in one request.
+pub async fn pool_lists(rpc_url: &str, pools: &[String]) -> Result<Vec<PoolLists>, Error> {
+    read_lists(&RpcClient::new(rpc_url)?, pools).await
+}
+
+async fn read_lists(rpc: &RpcClient, pools: &[String]) -> Result<Vec<PoolLists>, Error> {
+    let requests: Vec<_> = pools
+        .iter()
+        .map(|pool| ContractDataBulkRequest {
+            contract_id: pool,
+            enum_keys: Vec::new(),
+        })
+        .collect();
+    let (state, _) = rpc.get_contract_data_bulk(&requests).await?;
+    let empty = HashMap::new();
+    pools
+        .iter()
+        .map(|pool| PoolLists::from_instance(pool, state.get(pool).unwrap_or(&empty)))
+        .collect()
+}
+
 contract_handle! {
     /// Session for the admin of one pool.
     ///
@@ -56,18 +77,10 @@ impl PoolAdmin {
     /// The trees the pool reads, which a re-point changes and the deployment
     /// config does not follow.
     pub async fn lists(&self) -> Result<PoolLists, Error> {
-        let (state, _) = self
-            .rpc
-            .get_contract_data_bulk(&[ContractDataBulkRequest {
-                contract_id: &self.contract_id,
-                enum_keys: Vec::new(),
-            }])
-            .await?;
-        let empty = HashMap::new();
-        PoolLists::from_instance(
-            &self.contract_id,
-            state.get(&self.contract_id).unwrap_or(&empty),
-        )
+        read_lists(&self.rpc, std::slice::from_ref(&self.contract_id))
+            .await?
+            .pop()
+            .ok_or_else(|| anyhow!("no lists read for pool {}", self.contract_id).into())
     }
 
     /// Points the pool at membership tree `tree`, sourced by the pool admin.
