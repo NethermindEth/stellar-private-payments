@@ -64,6 +64,16 @@ macro_rules! contract_handle {
                     .await
             }
 
+            /// Pending admin of the contract; see [`Self::admin`].
+            pub async fn pending_admin(&self) -> Result<Option<String>, crate::Error> {
+                crate::operator::read_pending_admin(
+                    &self.rpc,
+                    &self.contract_config,
+                    &self.contract_id,
+                )
+                .await
+            }
+
             /// Proposes `new_admin` (`G…` or `C…`) as the contract's admin,
             /// sourced by its current admin. The new admin takes over once it
             /// calls [`Self::accept_admin`]. Builders refuse calls for a
@@ -176,25 +186,52 @@ async fn read_admin(
     config: &ContractConfig,
     contract_id: &str,
 ) -> Result<AdminState, Error> {
-    let source = &config.deployer;
-    let read = |method: &'static str| async move {
-        rpc.read_contract(contract_id, source, method, Vec::new())
-            .await
-            .map_err(|e| match e {
-                RpcError::Simulation(reason) => {
-                    RpcError::Simulation(format!("{method} of {contract_id}: {reason}"))
-                }
-                other => other,
-            })
-    };
-    let (admin, pending) = futures::try_join!(read("get_admin"), read("get_pending_admin"))?;
+    let (admin, pending_admin) = futures::try_join!(
+        read_current_admin(rpc, config, contract_id),
+        read_pending_admin(rpc, config, contract_id)
+    )?;
     Ok(AdminState {
-        admin: scval_to_address_string(&admin)?,
-        pending_admin: match pending {
-            xdr::ScVal::Void => None,
-            address => Some(scval_to_address_string(&address)?),
-        },
+        admin,
+        pending_admin,
     })
+}
+
+async fn read_current_admin(
+    rpc: &RpcClient,
+    config: &ContractConfig,
+    contract_id: &str,
+) -> Result<String, Error> {
+    let admin = read_getter(rpc, config, contract_id, "get_admin").await?;
+    Ok(scval_to_address_string(&admin)?)
+}
+
+async fn read_pending_admin(
+    rpc: &RpcClient,
+    config: &ContractConfig,
+    contract_id: &str,
+) -> Result<Option<String>, Error> {
+    match read_getter(rpc, config, contract_id, "get_pending_admin").await? {
+        xdr::ScVal::Void => Ok(None),
+        address => Ok(Some(scval_to_address_string(&address)?)),
+    }
+}
+
+/// Reads `getter` from `contract_id` by simulation, naming both in a
+/// simulation error.
+async fn read_getter(
+    rpc: &RpcClient,
+    config: &ContractConfig,
+    contract_id: &str,
+    getter: &str,
+) -> Result<xdr::ScVal, Error> {
+    rpc.read_contract(contract_id, &config.deployer, getter, Vec::new())
+        .await
+        .map_err(|e| match e {
+            RpcError::Simulation(reason) => {
+                RpcError::Simulation(format!("{getter} of {contract_id}: {reason}")).into()
+            }
+            other => other.into(),
+        })
 }
 
 /// Builds the call of `method` on `contract_id`, sourced by its current admin.
@@ -205,7 +242,7 @@ async fn admin_call(
     method: &str,
     args: Vec<xdr::ScVal>,
 ) -> Result<UnsignedOperatorCall, Error> {
-    let admin = read_admin(rpc, config, contract_id).await?.admin;
+    let admin = read_current_admin(rpc, config, contract_id).await?;
     call::build_call(
         rpc,
         network_passphrase(config),
@@ -232,9 +269,8 @@ async fn accept_admin(
     config: &ContractConfig,
     contract_id: &str,
 ) -> Result<UnsignedOperatorCall, Error> {
-    let pending = read_admin(rpc, config, contract_id)
+    let pending = read_pending_admin(rpc, config, contract_id)
         .await?
-        .pending_admin
         .ok_or_else(|| Error::Refused(format!("{contract_id} has no pending admin transfer")))?;
     call::build_call(
         rpc,
@@ -442,6 +478,7 @@ mod tests {
             let named = format!("get_pending_admin of {CONTRACT}");
             assert!(error(pool.admin().await).contains(&named));
             assert!(error(pool.accept_admin().await).contains(&named));
+            assert!(!error(pool.pause_deposits().await).contains(&named));
         }
 
         #[tokio::test]
@@ -450,6 +487,8 @@ mod tests {
             let named = format!("get_admin of {CONTRACT}");
             assert!(error(pool.admin().await).contains(&named));
             assert!(error(pool.pause_deposits().await).contains(&named));
+            assert!(refusal(pool.accept_admin().await).contains("has no pending admin transfer"));
+            assert_eq!(pool.pending_admin().await.expect("pending admin"), None);
         }
 
         #[tokio::test]

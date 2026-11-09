@@ -50,6 +50,10 @@ macro_rules! blocking_contract_handle {
                 block_on(self.inner.admin())
             }
 
+            pub fn pending_admin(&self) -> Result<Option<String>, Error> {
+                block_on(self.inner.pending_admin())
+            }
+
             pub fn propose_admin(&self, new_admin: &str) -> Result<UnsignedOperatorCall, Error> {
                 block_on(self.inner.propose_admin(new_admin))
             }

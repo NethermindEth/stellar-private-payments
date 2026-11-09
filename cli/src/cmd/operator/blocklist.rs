@@ -135,13 +135,16 @@ fn show(config: &CliConfig, tree: Option<&str>, json: bool) -> Result<()> {
         .into_iter()
         .map(|contract_id| {
             let read = BlocklistOperator::open(&rpc_url, config.deployment.clone(), &contract_id)
-                .and_then(|operator| Ok((operator.state()?, operator.admin()?)));
+                .and_then(|operator| Ok((operator.state()?, operator.pending_admin()?)));
             match read {
-                Ok((state, admin)) => TreeRow {
+                Ok((state, pending_admin)) => TreeRow {
                     contract_id,
                     root: Some(state.root.to_string()),
                     is_empty: Some(state.is_empty),
-                    admin: Some(admin.into()),
+                    admin: Some(AdminRow {
+                        admin: state.admin,
+                        pending_admin,
+                    }),
                     error: None,
                 },
                 Err(e) => TreeRow {
