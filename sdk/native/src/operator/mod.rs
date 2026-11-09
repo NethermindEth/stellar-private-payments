@@ -394,6 +394,11 @@ mod tests {
                 .contains("not a Stellar address")
         );
         assert!(refusal(pool.propose_admin("").await).contains("not a Stellar address"));
+        assert!(
+            refusal(pool.claim_fees("not-an-address", 1).await).contains("not a Stellar address")
+        );
+        let payee = "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE";
+        assert!(refusal(pool.claim_fees(payee, -1).await).contains("negative"));
     }
 
     #[test]

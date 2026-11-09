@@ -16,7 +16,7 @@ use stellar_private_payments::{
     chain::{RpcClient, StateFetcher},
     disclosure::verify_disclosure_receipt,
     planner::PlanError,
-    types::{ContractConfig, DisclosureReceipt, Field, NoteOwnerAddress, NotePublicKey},
+    types::{ContractConfig, DisclosureReceipt, Field, NoteOwnerAddress},
 };
 use wasm_bindgen::prelude::*;
 

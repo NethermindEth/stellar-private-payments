@@ -87,7 +87,7 @@ const { envelopeXdr, call } = await tree.insertLeaf(leaf);
 
 `BlocklistOperator` builds `insertKeys(noteKeys)` and `deleteKey(noteKey)`, and
 `PoolAdmin` builds `pauseDeposits()`, `unpauseDeposits()`,
-`repointAllowlist(tree)`, and `repointBlocklist(tree)`. All three build
+`claimFees(to, amount)`, `repointAllowlist(tree)`, and `repointBlocklist(tree)`. All three build
 `proposeAdmin(newAdmin)`, `cancelAdminTransfer()`, and `acceptAdmin()`, and
 report `listed`: whether the deployment config names the contract. A builder
 that refuses a call over entries about to archive throws an `Error` whose

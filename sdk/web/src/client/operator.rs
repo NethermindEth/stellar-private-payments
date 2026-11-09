@@ -295,6 +295,22 @@ impl PoolAdmin {
             .map_err(operator_err)?
             .into())
     }
+
+    /// Pay `amount` of the collected fees, in the token's base units, to
+    /// `to`, sourced by the pool admin.
+    #[wasm_bindgen(js_name = claimFees)]
+    pub async fn claim_fees(
+        &self,
+        to: String,
+        amount: i128,
+    ) -> Result<UnsignedOperatorCall, JsValue> {
+        Ok(self
+            .inner
+            .claim_fees(&to, amount)
+            .await
+            .map_err(operator_err)?
+            .into())
+    }
 }
 
 /// Session for the holder of a Global View Key private key.

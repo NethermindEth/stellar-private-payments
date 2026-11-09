@@ -122,6 +122,10 @@ impl PoolAdmin {
     pub fn unpause_deposits(&self) -> Result<UnsignedOperatorCall, Error> {
         block_on(self.inner.unpause_deposits())
     }
+
+    pub fn claim_fees(&self, to: &str, amount: i128) -> Result<UnsignedOperatorCall, Error> {
+        block_on(self.inner.claim_fees(to, amount))
+    }
 }
 
 /// Blocking wrapper around [`crate::operator::Envelopes`].

@@ -106,6 +106,23 @@ impl PoolAdmin {
     pub async fn unpause_deposits(&self) -> Result<UnsignedOperatorCall, Error> {
         self.admin_call("unpause_deposits", Vec::new()).await
     }
+
+    /// Pays `amount` of the collected fees, in the token's base units, to
+    /// `to`, sourced by the pool admin. The pool refuses an amount above the
+    /// fees collected and a `to` that is the pool or its token.
+    pub async fn claim_fees(&self, to: &str, amount: i128) -> Result<UnsignedOperatorCall, Error> {
+        let to = address_arg(to)?;
+        if amount < 0 {
+            return Err(Error::Refused(format!("claim amount {amount} is negative")));
+        }
+        let bytes = amount.to_be_bytes();
+        let (hi, lo) = bytes.split_at(8);
+        let amount = xdr::ScVal::I128(xdr::Int128Parts {
+            hi: i64::from_be_bytes(hi.try_into().expect("8 bytes")),
+            lo: u64::from_be_bytes(lo.try_into().expect("8 bytes")),
+        });
+        self.admin_call("claim_fees", vec![to, amount]).await
+    }
 }
 
 #[cfg(test)]

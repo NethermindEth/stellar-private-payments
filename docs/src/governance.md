@@ -136,7 +136,7 @@ Every admin call is a transaction whose source is the contract's admin, so the a
 signers sign the transaction itself. The admin page builds it and carries it between signers:
 
 1. Connect Freighter with any account on the network and build the call: list writes on the
-   Allowlist and Blocklist tabs, pauses and re-points, and fee claims on the Pools tab, and admin
+   Allowlist and Blocklist tabs, pauses, re-points, and fee claims on the Pools tab, and admin
    transfers on the Admins tab. The page reads the contract's admin from its `Admin` entry, builds
    the call with that account as the source, valid for 24 hours, and loads it into the Admin
    Transaction card.

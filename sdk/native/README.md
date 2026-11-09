@@ -114,7 +114,7 @@ to one contract:
 | --- | --- | --- | --- |
 | Allowlist ASP | `AllowlistOperator` | `state`, `admin` | `insert_leaf` |
 | Blocklist ASP | `BlocklistOperator` | `state`, `admin` | `insert_keys`, `delete_key` |
-| Pool admin | `PoolAdmin` | `admin`, `lists` | `pause_deposits`, `unpause_deposits`, `repoint_allowlist`, `repoint_blocklist` |
+| Pool admin | `PoolAdmin` | `admin`, `lists` | `pause_deposits`, `unpause_deposits`, `claim_fees`, `repoint_allowlist`, `repoint_blocklist` |
 | GVK holder | `GvkAuthority` | `audit` | |
 
 The three contract handles also build `propose_admin`, `cancel_admin_transfer`,

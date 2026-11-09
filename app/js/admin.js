@@ -7,8 +7,8 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { App, Utils } from './ui/core.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
-import { NoAnswer, adminTxFromHash, adminTxLink, buildAdminCall, claimLine, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
-import { blocklistInsertCall, blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
+import { NoAnswer, adminTxFromHash, adminTxLink, claimLine, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
+import { blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, entriesLine, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance, replacesLine, unusedListWarning, usesList } from './tree-check.js';
 import { addSignature, authorizationPreimage, buildPauseAuthorization, countedEntry, decodeAuthorization, depositsPaused, describeAuthorization, encodeAuthorization, ledgerDate, mergeSignatures, nonceSpent, pauseFileProblem, pauseFileState, pauseFileWeight, pauseTransaction, uncountedSigners, verifySignatures, walletSignature } from './pause-authorization.js';
 
@@ -892,14 +892,13 @@ async function poolRow(entry, lists) {
       feesEl.replaceChildren(...[`${amount(fees)} collected`, `${amount(stored.get('Fee'))} per transaction`]
         .map((text) => Object.assign(document.createElement('div'), { textContent: text })));
       claim.disabled = fees === 0n;
-      claim.addEventListener('click', () => buildRowCall(claim, 'pool', { source: admin, contractId, method: 'claim_fees', args: { to: admin, amount: fees } }));
+      claim.addEventListener('click', () => buildRowCall(claim, 'pool', contractId, 'claim_fees', (pool) => pool.claimFees(admin, fees)));
     }
     if (!pool.deposits_paused) {
       depositsEl.textContent = 'cannot be paused: the pool has no deposits_paused entry point';
       row.querySelectorAll('.pause-deposits-btn, .unpause-deposits-btn').forEach((btn) => btn.remove());
       return row;
     }
-    const { result } = await pool.deposits_paused();
     const paused = (await pool.deposits_paused()).result.unwrap();
     depositsEl.textContent = paused ? 'paused' : 'open';
     // A pause on a paused pool changes nothing but still costs a signed transaction.
@@ -928,9 +927,9 @@ async function buildRowCall(button, kind, contractId, method, build) {
     setStatus(`${callName(method)}: building the call...`, 'info');
     await prepareAdminCall(kind, contractId, build);
   } catch (err) {
-    setStatus(`${callName(call.method)}: couldn't build the call`, 'error');
-    showToast(`${callName(call.method)} failed: ${explainFailure(err, kind)}`, 'error');
-    if (call.method === 'claim_fees') {
+    setStatus(`${callName(method)}: couldn't build the call`, 'error');
+    showToast(`${callName(method)} failed: ${explainFailure(err, kind)}`, 'error');
+    if (method === 'claim_fees') {
       refreshPools();
       // The card may hold a claim the same change spent.
       if (adminTxXdrInput.value.trim()) renderAdminTx(state.adminTxKind);
