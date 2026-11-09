@@ -34,25 +34,10 @@ impl ClientSession {
         network: &StellarNetwork,
         readonly: bool,
     ) -> Result<Self> {
-        let storage_path = config.db_path().to_string_lossy().into_owned();
-        let storage = LocalStorage::open_with_key(&storage_path, config.database_key()?)
-            .map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
-        let bootnode_setting = storage
-            .storage()
-            .get_bootnode_setting()
-            .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
-        let bootnode_url = (bootnode_setting.enabled && !bootnode_setting.url.trim().is_empty())
-            .then_some(bootnode_setting.url);
-
         let client = if readonly {
-            Client::init_readonly(
-                network.rpc_url.clone(),
-                storage,
-                config.deployment.clone(),
-                bootnode_url,
-            )
-            .map_err(|e| anyhow::anyhow!("init client: {e}"))?
+            readonly_client(config, network)?
         } else {
+            let (storage, bootnode_url) = open_storage(config)?;
             let artifacts = load_transact_artifacts(
                 &config.circuits_dir_path(),
                 &config.circuit_keys_dir_path(),
@@ -226,6 +211,31 @@ fn client_with_prover(
     network: &StellarNetwork,
     prover: ProverHandle,
 ) -> Result<Client> {
+    let (storage, bootnode_url) = open_storage(config)?;
+    Client::init(
+        network.rpc_url.clone(),
+        storage,
+        prover,
+        config.deployment.clone(),
+        bootnode_url,
+    )
+    .map_err(|e| anyhow::anyhow!("init client: {e}"))
+}
+
+/// A client with no prover, for reads of local storage.
+pub fn readonly_client(config: &CliConfig, network: &StellarNetwork) -> Result<Client> {
+    let (storage, bootnode_url) = open_storage(config)?;
+    Client::init_readonly(
+        network.rpc_url.clone(),
+        storage,
+        config.deployment.clone(),
+        bootnode_url,
+    )
+    .map_err(|e| anyhow::anyhow!("init client: {e}"))
+}
+
+/// Unlocks local storage and reads its bootnode URL, when one is enabled.
+fn open_storage(config: &CliConfig) -> Result<(LocalStorage, Option<String>)> {
     let storage_path = config.db_path().to_string_lossy().into_owned();
     let storage = LocalStorage::open_with_key(&storage_path, config.database_key()?)
         .map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
@@ -235,14 +245,7 @@ fn client_with_prover(
         .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
     let bootnode_url = (bootnode_setting.enabled && !bootnode_setting.url.trim().is_empty())
         .then_some(bootnode_setting.url);
-    Client::init(
-        network.rpc_url.clone(),
-        storage,
-        prover,
-        config.deployment.clone(),
-        bootnode_url,
-    )
-    .map_err(|e| anyhow::anyhow!("init client: {e}"))
+    Ok((storage, bootnode_url))
 }
 
 /// A native prover with all registered selective-disclosure circuits.

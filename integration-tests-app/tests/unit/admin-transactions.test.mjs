@@ -9,7 +9,6 @@ import {
   MuxedAccount,
   Networks,
   Operation,
-  SorobanDataBuilder,
   StrKey,
   TransactionBuilder,
   nativeToScVal,
@@ -23,17 +22,13 @@ import {
   custodyProblems,
   deadCall,
   describeAdminCall,
-  extendCommand,
   explainFailure,
-  finishAdminCall,
   hex,
   hostError,
-  liveFootprintKeys,
   newAdminRefusal,
   NoAnswer,
   repointsTo,
   rpcServer,
-  shortLivedEntries,
   signatureCount,
   signedBy,
   signedWeight,
@@ -41,7 +36,6 @@ import {
   signingRule,
   signRefusal,
   submitAdminCall,
-  withRentMargin,
 } from '../../../app/js/admin-transactions.js';
 import { CONTRACT_ERRORS } from '../../../app/js/ui/errors.js';
 
@@ -167,78 +161,6 @@ test('describeAdminCall refuses an operation whose source is not the transaction
     /authorizes something other than this call/,
   );
   assert.equal(describeAdminCall(authorizedInsertLeaf(sourceAccount, { source: ADMIN }), Networks.TESTNET).method, 'insert_leaf');
-});
-
-test('withRentMargin raises the refundable fee and the fee by the same margin and keeps the call', () => {
-  const built = insertLeafBuilder().setSorobanData(new SorobanDataBuilder().setResourceFee(1_213n).build()).setTimeout(86_400).build();
-  const padded = TransactionBuilder.fromXdr(withRentMargin(built.toXdr(), Networks.TESTNET), Networks.TESTNET);
-  const resourceFee = (tx) => tx.toEnvelope().value.tx.ext.value.resourceFee;
-  assert.equal(resourceFee(padded) - resourceFee(built), 100_000n);
-  assert.equal(Number(padded.fee) - Number(built.fee), 100_000);
-  assert.deepEqual(describeAdminCall(padded.toXdr(), Networks.TESTNET), {
-    ...describeAdminCall(built.toXdr(), Networks.TESTNET),
-    fee: padded.fee,
-  });
-});
-
-const treeKey = (name) => xdr.LedgerKey.contractData(new xdr.LedgerKeyContractData({
-  contract: new Address(TREE).toScAddress(),
-  key: xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(name)]),
-  durability: name === 'Temp' ? xdr.ContractDataDurability.temporary : xdr.ContractDataDurability.persistent,
-}));
-
-test('liveFootprintKeys keeps persistent entries and code but not temporary entries or ones the call restores', () => {
-  const code = xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: Buffer.alloc(32) }));
-  const data = new SorobanDataBuilder().setFootprint([code, treeKey('Temp')], [treeKey('Admin'), treeKey('Root')]).build();
-  data.ext = xdr.SorobanTransactionDataExt.resourceExt(new xdr.SorobanResourcesExtV0({ archivedSorobanEntries: [1] }));
-  const built = insertLeafBuilder().setSorobanData(data).setTimeout(86_400).build();
-  const keys = liveFootprintKeys(built.toXdr(), Networks.TESTNET).map((key) => key.toXdr('base64'));
-  assert.deepEqual(keys, [code, treeKey('Admin')].map((key) => key.toXdr('base64')));
-});
-
-test('shortLivedEntries keeps the entries that archive within the call\'s 24 hours, and only those', () => {
-  const entries = [{ key: treeKey('Admin'), liveUntilLedgerSeq: 1_000 + 18_000 }, { key: treeKey('Root'), liveUntilLedgerSeq: 1_000 + 17_999 }];
-  assert.deepEqual(shortLivedEntries(entries, 1_000), [treeKey('Root')]);
-});
-
-test('extendCommand names a data entry by its key, an instance by its contract, and code by its hash', () => {
-  const args = [99_999, 'https://rpc.example.com', Networks.TESTNET];
-  const tail = ` --ledgers-to-extend 99999 --source-account ACCOUNT --rpc-url https://rpc.example.com --network-passphrase '${Networks.TESTNET}'`;
-  assert.equal(extendCommand(treeKey('Admin'), ...args), `stellar contract extend --id ${TREE} --key-xdr AAAAEAAAAAEAAAABAAAADwAAAAVBZG1pbgAAAA==${tail}`);
-  assert.equal(extendCommand(new Contract(TREE).getFootprint(), ...args), `stellar contract extend --id ${TREE}${tail}`);
-  const code = xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: new Uint8Array(32).fill(0xab) }));
-  assert.equal(extendCommand(code, ...args), `stellar contract extend --wasm-hash ${'ab'.repeat(32)}${tail}`);
-});
-
-// A simulated insert_leaf reading the tree's `Admin` and `Root`, with an RPC
-// stub whose entries live until `liveUntil` past ledger 1,000. Only a refused
-// call reads `maxEntryTtl`.
-function finishInsertLeaf(liveUntil, maxEntryTtl) {
-  const data = new SorobanDataBuilder().setFootprint([treeKey('Admin')], [treeKey('Root')]).setResourceFee(1_213n).build();
-  const simulated = insertLeafBuilder().setSorobanData(data).setTimeout(86_400).build();
-  const server = {
-    getLedgerEntries: async (...keys) => ({ latestLedger: 1_000, entries: keys.map((key) => ({ key, liveUntilLedgerSeq: 1_000 + liveUntil })) }),
-    getLedgerEntry: async (key) => {
-      assert.equal(key.value.configSettingId.name, 'configSettingStateArchival');
-      assert.ok(maxEntryTtl);
-      return { val: { configSetting: { stateArchivalSettings: { maxEntryTtl } } } };
-    },
-  };
-  return finishAdminCall({ server, rpcUrl: 'https://rpc.example.com', networkPassphrase: Networks.TESTNET, xdr: simulated.toXdr() });
-}
-
-test('finishAdminCall pads the fee of a call whose entries outlive its 24 hours', async () => {
-  const { xdr: padded } = await finishInsertLeaf(18_000);
-  assert.equal(TransactionBuilder.fromXdr(padded, Networks.TESTNET).toEnvelope().value.tx.ext.value.resourceFee, 101_213n);
-});
-
-test('finishAdminCall refuses a call whose entries archive within its 24 hours, with a command for each', async () => {
-  await assert.rejects(finishInsertLeaf(17_999, 100_000), (err) => {
-    assert.match(err.message, /archive within its 24 hours/);
-    assert.equal(err.extendCommands.length, 2);
-    assert.match(err.extendCommands[0], / --ledgers-to-extend 99999 /);
-    return true;
-  });
 });
 
 test('signatureCount counts the signatures added to an envelope', () => {

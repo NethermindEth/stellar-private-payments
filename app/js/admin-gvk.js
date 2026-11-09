@@ -12,7 +12,7 @@ import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
 import { chargeSpend, classifyTx, emptyPkNode, withdrawalsByPk } from './gvk-classify.js';
-import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
+import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, readTokenDecimals, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
 import { amountByPk, collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId, parseFieldAmount, unspentByPk } from './gvk-notes.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { el, formatAmount as formatBaseUnits, tokenLabel } from './ui/notes-view.js';
@@ -2285,6 +2285,11 @@ function resetAuditState() {
   fullPkGraphCache = null;
 }
 
+async function readPoolFee(poolContractId) {
+  const { pools: [pool] } = await client().poolContractsData(poolContractId);
+  return BigInt(pool.fee);
+}
+
 async function startAudit({ reset }) {
   const poolContractId = poolSelectEl?.value?.trim();
   const privateKey = privateKeyEl?.value?.trim();
@@ -2302,19 +2307,20 @@ async function startAudit({ reset }) {
   }
 
   if (!state.audit) {
-    const wallet = getWalletAccount();
-    if (!wallet) {
-      throw new Error('Connect a wallet before starting a Global View audit');
+    const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
+    const [decimals, fee] = await Promise.all([
+      readDisplayDecimals({ tokenDecimals: () => readTokenDecimals(getCurrentRpcUrl(), poolEntry.tokenContractId) }),
+      readPoolFee(poolContractId),
+    ]);
+    const authority = client().gvkAuthority(privateKey);
+    try {
+      state.audit = await authority.audit(poolContractId);
+    } finally {
+      authority.free();
     }
-    await client().openAccount(wallet);
-    const pool = await client().account().pool({ poolContract: poolContractId });
-    const decimals = await readDisplayDecimals(pool);
-    const fee = await pool.fee();
-    state.audit = await pool.audit(privateKey);
     state.tokenDecimals = decimals;
     state.poolFee = fee;
     state.auditedPoolContractId = poolContractId;
-    const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
     state.tokenSymbol = tokenLabel(poolEntry);
     setFilterControlsDisabled(false);
     state.poolGvkMode = poolEntry?.gvkMode ?? null;
@@ -2323,11 +2329,8 @@ async function startAudit({ reset }) {
   await fetchBatch(BATCH_SIZE);
 }
 
-let getWalletAccount = () => null;
-
-export async function initGvkAuditPanel({ ensureCryptoReady, showToast, getWalletAccount: getWallet }) {
+export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
   if (!poolSelectEl) return;
-  if (getWallet) getWalletAccount = getWallet;
 
   viewTxBtnEl?.addEventListener('click', () => setView('tx'));
   viewNoteBtnEl?.addEventListener('click', () => setView('note'));

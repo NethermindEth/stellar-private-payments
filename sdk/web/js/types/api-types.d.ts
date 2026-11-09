@@ -6,10 +6,14 @@
  */
 import type {
   Account as WasmAccount,
+  AllowlistOperator,
+  BlocklistOperator,
   ContractConfig,
   ContractsStateData,
   DisclosureVerificationReport,
+  GvkAuthority,
   OperationalFeedItem,
+  PoolAdmin,
   ProverBridge,
   RecipientLookup,
 } from './crates/stellar_private_payments_web.js';
@@ -200,8 +204,15 @@ export interface Client {
   contractConfig(): ContractConfig;
   account(options: AccountOptions, signer: WalletSigner): Promise<Account>;
   recipientLookup(address: string): Promise<RecipientLookup>;
-  aspState(): Promise<ContractsStateData>;
+  allowlistIds(): string[];
+  blocklistIds(): string[];
+  poolIds(): string[];
+  allowlistOperator(contractId: string): AllowlistOperator;
+  blocklistOperator(contractId: string): BlocklistOperator;
+  poolAdmin(contractId: string): PoolAdmin;
+  gvkAuthority(globalViewPrivateKeyHex: string): GvkAuthority;
   allContractsData(): Promise<ContractsStateData>;
+  poolContractsData(poolContractId: string): Promise<ContractsStateData>;
   verifySelectiveDisclosure(
     receiptJson: string,
     expectedVkHash: string,
@@ -219,11 +230,6 @@ export declare function bootnodeRequired(
   storage: Storage,
   options: BootnodeRequiredOptions,
 ): Promise<boolean>;
-
-export declare function deriveAspUserLeaf(
-  notePublicKey: string,
-  membershipBlinding: string,
-): string;
 
 export declare function verifySelectiveDisclosure(
   rpcUrl: string,

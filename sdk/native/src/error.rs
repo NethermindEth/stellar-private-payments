@@ -7,12 +7,17 @@ use crate::{
 use crate::types::TransactionResult;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("not implemented")]
     NotImplemented,
 
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
+
+    /// A request the SDK refuses before it reaches the network.
+    #[error("{0}")]
+    Refused(String),
 
     #[error(transparent)]
     Rpc(#[from] crate::chain::RpcError),
@@ -116,6 +121,14 @@ pub enum Error {
     /// `source`, which would print every cause twice.
     #[error("{0:#}")]
     Other(anyhow::Error),
+
+    /// An admin call reads entries that archive before its signers can be
+    /// expected to send it. Each command extends one of them, paid by
+    /// `ACCOUNT`.
+    #[error(
+        "entries this call reads archive before it expires, so it would fail once sent; extend them, then build the call again"
+    )]
+    EntriesArchiveSoon { extend_commands: Vec<String> },
 }
 
 #[derive(Debug, thiserror::Error)]

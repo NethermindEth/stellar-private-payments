@@ -32,7 +32,7 @@ in your own onboarding. For allowlist enrollment, see [Run an ASP](run-an-asp.md
 
 A GVK pool encrypts each note to the GVK public key fixed at construction. The GVK holder decrypts
 them on the admin page's Global View tab, with any connected wallet, and can export the result as
-CSV. In view-only mode the holder sees each note's owner's note public key, amount, and blinding
+CSV, or with `spp gvk audit --pool POOL --key-file KEY_FILE`, which prints one JSON object per transaction with `--json`. In view-only mode the holder sees each note's owner's note public key, amount, and blinding
 when it is created. In traceable mode the holder also sees which note each spend consumed, which
 links a user's whole history.
 

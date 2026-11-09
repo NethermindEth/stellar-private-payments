@@ -2,8 +2,10 @@
 //! [`Client`](NativeClient).
 
 mod account;
+mod envelope;
 mod execute;
 mod gvk;
+mod operator;
 mod pool;
 
 use std::{rc::Rc, str::FromStr};
@@ -12,10 +14,9 @@ use js_sys::{BigInt, Reflect};
 use stellar_private_payments::{
     Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error,
     chain::{RpcClient, StateFetcher},
-    crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
     disclosure::verify_disclosure_receipt,
     planner::PlanError,
-    types::{ContractConfig, DisclosureReceipt, Field, NoteOwnerAddress, NotePublicKey},
+    types::{ContractConfig, DisclosureReceipt, Field, NoteOwnerAddress},
 };
 use wasm_bindgen::prelude::*;
 
@@ -31,7 +32,9 @@ use crate::{
 };
 
 pub use account::Account;
+pub use envelope::{OperatorCall, UnsignedOperatorCall};
 pub use gvk::GvkAudit;
+pub use operator::{AdminState, AllowlistOperator, BlocklistOperator, GvkAuthority, PoolAdmin};
 pub use pool::PrivatePool;
 
 pub(crate) fn pool_err(error: Error) -> JsError {
@@ -232,15 +235,55 @@ impl Client {
         Ok(RecipientLookup::from(lookup))
     }
 
-    /// On-chain ASP membership and non-membership state.
-    #[wasm_bindgen(js_name = aspState)]
-    pub async fn asp_state(&self) -> Result<ContractsStateData, JsError> {
-        let fetcher = self.state_fetcher()?;
-        let data = fetcher
-            .asp_state()
-            .await
+    /// Membership trees of the deployment, `asp_membership` first.
+    #[wasm_bindgen(js_name = allowlistIds)]
+    pub fn allowlist_ids(&self) -> Vec<String> {
+        self.inner.allowlist_ids()
+    }
+
+    /// Non-membership trees of the deployment.
+    #[wasm_bindgen(js_name = blocklistIds)]
+    pub fn blocklist_ids(&self) -> Vec<String> {
+        self.inner.blocklist_ids()
+    }
+
+    /// Pools of the deployment, enabled or not, in config order.
+    #[wasm_bindgen(js_name = poolIds)]
+    pub fn pool_ids(&self) -> Vec<String> {
+        self.inner.pool_ids()
+    }
+
+    /// Open a session for the admin of `contractId`, listed in `allowlistIds()`
+    /// or not.
+    #[wasm_bindgen(js_name = allowlistOperator)]
+    pub fn allowlist_operator(&self, contract_id: String) -> AllowlistOperator {
+        self.inner.allowlist_operator(&contract_id).into()
+    }
+
+    /// Open a session for the admin of `contractId`, listed in `blocklistIds()`
+    /// or not.
+    #[wasm_bindgen(js_name = blocklistOperator)]
+    pub fn blocklist_operator(&self, contract_id: String) -> BlocklistOperator {
+        self.inner.blocklist_operator(&contract_id).into()
+    }
+
+    /// Open a session for the admin of `contractId`, listed in `poolIds()` or
+    /// not.
+    #[wasm_bindgen(js_name = poolAdmin)]
+    pub fn pool_admin(&self, contract_id: String) -> PoolAdmin {
+        self.inner.pool_admin(&contract_id).into()
+    }
+
+    /// Open a session for a Global View Key private key, a `0x`-prefixed
+    /// field hex string.
+    #[wasm_bindgen(js_name = gvkAuthority)]
+    pub fn gvk_authority(
+        &self,
+        global_view_private_key_hex: String,
+    ) -> Result<GvkAuthority, JsError> {
+        let key = Field::from_str(global_view_private_key_hex.trim())
             .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(ContractsStateData::from(data))
+        Ok(self.inner.gvk_authority(key).map_err(pool_err)?.into())
     }
 
     /// On-chain state for all enabled pools plus shared ASP contracts.
@@ -249,6 +292,21 @@ impl Client {
         let fetcher = self.state_fetcher()?;
         let data = fetcher
             .all_contracts_data()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(ContractsStateData::from(data))
+    }
+
+    /// On-chain state of one enabled pool and of the trees it uses. A pool
+    /// that fails to read fails only its own call.
+    #[wasm_bindgen(js_name = poolContractsData)]
+    pub async fn pool_contracts_data(
+        &self,
+        pool_contract_id: String,
+    ) -> Result<ContractsStateData, JsError> {
+        let fetcher = self.state_fetcher()?;
+        let data = fetcher
+            .contracts_data_for_pool(&pool_contract_id)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(ContractsStateData::from(data))
@@ -285,21 +343,6 @@ impl Drop for Client {
             stop.request();
         }
     }
-}
-
-/// Derive the ASP membership tree leaf from explicit public inputs.
-#[wasm_bindgen(js_name = deriveAspUserLeaf)]
-pub fn derive_asp_user_leaf(
-    note_public_key: String,
-    membership_blinding: String,
-) -> Result<String, JsError> {
-    crate::wasm_start();
-
-    let note = NotePublicKey::parse(&note_public_key).map_err(|e| JsError::new(&e.to_string()))?;
-    let blinding =
-        Field::from_str(&membership_blinding).map_err(|e| JsError::new(&e.to_string()))?;
-    let leaf = derive_asp_user_leaf_native(&note, &blinding).map_err(pool_err)?;
-    Ok(leaf.to_string())
 }
 
 /// Verify a selective-disclosure receipt with no wallet, no local storage,

@@ -10,7 +10,7 @@ mod session;
 mod signer;
 mod stellar_cli;
 
-use std::path::PathBuf;
+use std::{path::PathBuf, process::ExitCode};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -197,6 +197,31 @@ enum Commands {
         #[command(subcommand)]
         command: DisclosureCommands,
     },
+    /// Read and update the membership trees, as their admin (ASP)
+    Allowlist {
+        #[command(subcommand)]
+        command: cmd::operator::allowlist::AllowlistCommands,
+    },
+    /// Read and update the non-membership trees, as their admin (ASP)
+    Blocklist {
+        #[command(subcommand)]
+        command: cmd::operator::blocklist::BlocklistCommands,
+    },
+    /// Read and update the pools, as their admin
+    PoolAdmin {
+        #[command(subcommand)]
+        command: cmd::operator::pool_admin::PoolAdminCommands,
+    },
+    /// Sign, inspect and send admin call envelopes written with --out
+    Envelope {
+        #[command(subcommand)]
+        command: cmd::operator::envelope::EnvelopeCommands,
+    },
+    /// Audit pool-gvk pools with a Global View Key
+    Gvk {
+        #[command(subcommand)]
+        command: cmd::operator::gvk::GvkCommands,
+    },
     /// Show the operating disclaimer and acceptance status
     Disclaimer,
     /// Show the license / distribution notice
@@ -267,7 +292,36 @@ enum ConfigCommands {
     },
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("Error: {err:?}");
+            if let Some(commands) = extend_commands(&err) {
+                eprintln!(
+                    "\nExtend commands, with ACCOUNT a funded `stellar keys` identity that pays \
+                     for them:"
+                );
+                for command in commands {
+                    eprintln!("  {command}");
+                }
+            }
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// The commands that extend the entries an admin call was refused for.
+fn extend_commands(err: &anyhow::Error) -> Option<&[String]> {
+    err.chain().find_map(|cause| match cause.downcast_ref() {
+        Some(stellar_private_payments::Error::EntriesArchiveSoon { extend_commands }) => {
+            Some(extend_commands.as_slice())
+        }
+        _ => None,
+    })
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
     logging::init(cli.verbose, cli.json);
     let json = cli.json;
@@ -406,6 +460,11 @@ fn main() -> Result<()> {
                 json,
             ),
         },
+        Commands::Allowlist { command } => cmd::operator::allowlist::run(&config, command, json),
+        Commands::Blocklist { command } => cmd::operator::blocklist::run(&config, command, json),
+        Commands::PoolAdmin { command } => cmd::operator::pool_admin::run(&config, command, json),
+        Commands::Envelope { command } => cmd::operator::envelope::run(&config, command, json),
+        Commands::Gvk { command } => cmd::operator::gvk::run(&config, command, json),
         Commands::Disclaimer => cmd::disclaimer::run(&config, json),
         Commands::License => cmd::license::run(&config, json),
     }
@@ -414,6 +473,91 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn operator_groups_parse_their_reads() {
+        for args in [
+            vec!["spp", "allowlist", "show"],
+            vec!["spp", "allowlist", "show", "--tree", "C1"],
+            vec![
+                "spp",
+                "allowlist",
+                "leaf",
+                "--note-key",
+                "0x01",
+                "--asp-secret-file",
+                "-",
+            ],
+            vec!["spp", "blocklist", "show", "--tree", "C2"],
+            vec!["spp", "pool-admin", "show", "--pool", "C3"],
+            vec![
+                "spp",
+                "gvk",
+                "audit",
+                "--pool",
+                "C3",
+                "--key-file",
+                "key.json",
+            ],
+        ] {
+            Cli::try_parse_from(&args).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+        }
+    }
+
+    #[test]
+    fn operator_groups_parse_their_writes() {
+        for args in [
+            "spp allowlist add --leaf 0x01 --out call.xdr",
+            "spp allowlist admin --tree C1 propose --new-admin G1",
+            "spp blocklist add 0x01 0x02 --tree C2",
+            "spp blocklist add 0x01 --tree C2 --yes",
+            "spp blocklist remove 0x01",
+            "spp blocklist admin accept --out call.xdr",
+            "spp envelope describe call.xdr",
+            "spp envelope sign call.xdr --as signer",
+            "spp envelope sign call.xdr --yes",
+            "spp envelope submit call.xdr",
+            "spp pool-admin repoint --pool C3 --allowlist C1",
+            "spp pool-admin repoint --pool C3 --blocklist C2 --out call.xdr",
+            "spp pool-admin repoint --pool C3 --allowlist C1 --yes",
+            "spp pool-admin pause --pool C3",
+            "spp pool-admin unpause --pool C3 --out call.xdr",
+            "spp pool-admin admin --pool C3 cancel",
+        ] {
+            Cli::try_parse_from(args.split(' ')).unwrap_or_else(|e| panic!("{args}: {e}"));
+        }
+        assert!(Cli::try_parse_from(["spp", "blocklist", "add"]).is_err());
+        for args in [
+            "spp pool-admin repoint --pool C3",
+            "spp pool-admin repoint --pool C3 --allowlist C1 --blocklist C2",
+            "spp pool-admin pause",
+        ] {
+            assert!(
+                Cli::try_parse_from(args.split(' ')).is_err(),
+                "{args} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn extend_commands_are_found_under_context() {
+        let refused = anyhow::Error::from(stellar_private_payments::Error::EntriesArchiveSoon {
+            extend_commands: vec!["stellar contract extend --id C1".to_string()],
+        })
+        .context("build the call");
+        assert_eq!(
+            extend_commands(&refused),
+            Some(["stellar contract extend --id C1".to_string()].as_slice())
+        );
+        assert_eq!(extend_commands(&anyhow::anyhow!("other")), None);
+    }
+
+    #[test]
+    fn gvk_audit_requires_a_key_file() {
+        let err = Cli::try_parse_from(["spp", "gvk", "audit", "--pool", "C3"])
+            .expect_err("an audit without a key must be rejected");
+        assert!(err.to_string().contains("--key-file"), "{err}");
+    }
 
     #[test]
     fn disclosure_verify_requires_pool() {

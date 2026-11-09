@@ -17,7 +17,9 @@ import init, {
   DisclosureRequest,
   Storage,
   bootnodeRequired as sdkBootnodeRequired,
-  deriveAspUserLeaf as sdkDeriveAspUserLeaf,
+  AllowlistOperator,
+  BlocklistOperator,
+  PoolAdmin,
   verifySelectiveDisclosure as sdkVerifySelectiveDisclosure,
   configureTelemetry,
   dump_recent_logs,
@@ -441,7 +443,20 @@ export function getCurrentRpcUrl() {
  */
 export async function deriveAspUserLeaf(notePublicKey, membershipBlinding) {
     await ensureWasmInit();
-    return sdkDeriveAspUserLeaf(notePublicKey, membershipBlinding);
+    return AllowlistOperator.deriveUserLeaf(notePublicKey, membershipBlinding);
+}
+
+const OPERATORS = { 'asp-membership': AllowlistOperator, 'asp-non-membership': BlocklistOperator, pool: PoolAdmin };
+
+/**
+ * Open an operator session for one contract, with no local storage.
+ * @param {'asp-membership'|'asp-non-membership'|'pool'} kind
+ * @param {string} rpcUrl
+ * @param {string} contractId listed in the deployment config or not
+ */
+export async function openOperator(kind, rpcUrl, contractId) {
+    await ensureWasmInit();
+    return OPERATORS[kind].open(rpcUrl, await loadDeploymentConfig(), contractId);
 }
 
 /**

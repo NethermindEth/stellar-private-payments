@@ -10,6 +10,8 @@ Detailed API documentation generated from source code via `rustdoc`.
 
 - [stellar-private-payments](api/stellar_private_payments/index.html)
 - [stellar-private-payments-web](api/stellar_private_payments_web/index.html)
+- [operator](api/stellar_private_payments/operator/index.html): the admin handles, one per pool or
+  tree, and admin call envelopes
 
 ## Contracts
 

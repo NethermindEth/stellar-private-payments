@@ -18,7 +18,8 @@ pub mod workers;
 
 pub use bootnode::bootnode_required_js as bootnode_required;
 pub use client::{
-    Account, Client, GvkAudit, PrivatePool, derive_asp_user_leaf,
+    Account, AdminState, AllowlistOperator, BlocklistOperator, Client, GvkAudit, GvkAuthority,
+    OperatorCall, PoolAdmin, PrivatePool, UnsignedOperatorCall,
     verify_selective_disclosure_standalone,
 };
 pub use models::PoolExecuteResult;

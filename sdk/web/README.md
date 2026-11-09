@@ -68,6 +68,44 @@ artifact base URL, and expected fingerprints at runtime; no network-specific
 package build is required. Each prover worker uses one bundle. To change bundles,
 create a new client/prover instead of reconfiguring an active worker.
 
+## Operator API
+
+Admins reach their contracts through one handle per contract, as in the
+[Rust SDK](../native/README.md#operator-api). None needs a `Storage` or a
+`Client`:
+
+```js
+import init, { AllowlistOperator, BlocklistOperator, PoolAdmin } from 'stellar-private-payments';
+
+await init();
+const tree = AllowlistOperator.open(rpcUrl, contractConfig, contractConfig.asp_membership);
+const { admin, pendingAdmin } = await tree.admin();
+const leaf = AllowlistOperator.deriveUserLeaf(notePublicKey, aspSecret);
+const { envelopeXdr, call } = await tree.insertLeaf(leaf);
+// Each signer of call.source adds a signature to envelopeXdr, then anyone sends it.
+```
+
+`BlocklistOperator` builds `insertKeys(noteKeys)` and `deleteKey(noteKey)`, and
+`PoolAdmin` builds `pauseDeposits()`, `unpauseDeposits()`,
+`claimFees(to, amount)`, `repointAllowlist(tree)`, and `repointBlocklist(tree)`. All three build
+`proposeAdmin(newAdmin)`, `cancelAdminTransfer()`, and `acceptAdmin()`, and
+report `listed`: whether the deployment config names the contract. A builder
+that refuses a call over entries about to archive throws an `Error` whose
+`extendCommands` holds the `stellar contract extend` commands that fix it.
+
+A `Client` opens the same handles with `allowlistOperator(id)`,
+`blocklistOperator(id)`, and `poolAdmin(id)`, lists the deployment's contracts
+with `allowlistIds()`, `blocklistIds()`, and `poolIds()`, and opens a GVK audit
+with `gvkAuthority(keyHex).audit(poolContractId)`.
+
+Migrating:
+
+| Removed | Use |
+| --- | --- |
+| `deriveAspUserLeaf(noteKey, secret)` | `AllowlistOperator.deriveUserLeaf(noteKey, secret)` |
+| `client.aspState()` | `client.allowlistOperator(id).state()` and `client.blocklistOperator(id).state()` |
+| `pool.audit(keyHex)` | `client.gvkAuthority(keyHex).audit(poolContractId)` |
+
 ## API reference
 
 Method names mirror the [Rust SDK](../native/README.md). Full signatures live in
