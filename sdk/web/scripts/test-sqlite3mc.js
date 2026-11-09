@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { closeSync, openSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import net from "node:net";
 import { dirname, extname, join, normalize, resolve } from "node:path";
@@ -28,6 +28,8 @@ const web = resolve(scripts, "..");
 const artifacts = resolve(args.artifacts);
 const profile = join(artifacts, "profile");
 await mkdir(artifacts, { recursive: true });
+// The CI cache can restore a profile from an earlier run; the test needs a fresh one.
+await rm(profile, { recursive: true, force: true });
 await mkdir(profile);
 
 const contentTypes = new Map([[".html", "text/html"], [".js", "text/javascript"], [".mjs", "text/javascript"], [".wasm", "application/wasm"], [".css", "text/css"], [".json", "application/json"]]);

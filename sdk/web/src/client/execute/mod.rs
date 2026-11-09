@@ -12,7 +12,7 @@ use wasm_bindgen::JsError;
 
 use crate::models::{ExecuteOutcome, PoolExecuteResult};
 
-use super::pool::PrivatePool;
+use super::{pool::PrivatePool, pool_err, refusal};
 
 pub(crate) use progress::emit;
 
@@ -25,8 +25,7 @@ impl PrivatePool {
         plan: &mut PreparedTransactionPlan,
         flow: &'static str,
     ) -> Result<PoolExecuteResult, JsError> {
-        let outcome = self.execute_plan_inner(plan, flow).await;
-        Ok(PoolExecuteResult::from_outcome(outcome))
+        execute_result(self.execute_plan_inner(plan, flow).await)
     }
 
     async fn execute_plan_inner(
@@ -125,6 +124,17 @@ impl PrivatePool {
         }
 
         ExecuteOutcome::Complete(completed.into_iter().map(|tx| tx.tx_hash).collect())
+    }
+}
+
+/// Throws a refusal made before any step confirmed, coded by [`pool_err`] as
+/// `checkDeposit` codes it, and resolves every other outcome. A failure after a
+/// confirmed step is wrapped in [`Error::PlanExecution`], which [`refusal`]
+/// skips, so its result keeps the step's hash.
+pub(super) fn execute_result(outcome: ExecuteOutcome) -> Result<PoolExecuteResult, JsError> {
+    match outcome {
+        ExecuteOutcome::Failed(error) if refusal(&error).is_some() => Err(pool_err(error)),
+        outcome => Ok(PoolExecuteResult::from_outcome(outcome)),
     }
 }
 

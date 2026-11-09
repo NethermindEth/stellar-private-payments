@@ -16,12 +16,12 @@ pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Resu
     let fee = pool_fee(&pool, decimals)?;
     let result = pool
         .deposit(amount)
-        .map_err(|e| map_pool_err(config, &pool, decimals, Some(&fee), e, json))?;
+        .map_err(|e| map_pool_err(config, &pool, decimals, &fee, false, e, json))?;
     print_tx_results(
         config,
         "Deposit submitted",
         std::slice::from_ref(&result),
-        Some(&fee),
+        &fee,
         json,
     )
 }

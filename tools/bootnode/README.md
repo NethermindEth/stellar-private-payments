@@ -77,3 +77,12 @@ with a delay increasing from one second to a maximum of 30 seconds. Each request
 has a 30-second timeout. Startup continues when the RPC recovers; a confirmed
 passphrase mismatch stops startup immediately. Retry failures are logged, and
 Ctrl-C cancels the wait. Cached history is not served during this initial check.
+
+## Metrics
+
+Prometheus metrics are off by default. To serve them at `/metrics` on a second
+listener, set `--metrics-bind` (or `BOOTNODE_METRICS_BIND`) to its address. The
+listener uses plain HTTP with no authentication, and the metrics count and time
+client requests. Bind it where only your scraper can reach it: `127.0.0.1:9000`
+on a host, or `0.0.0.0:9000` in a container that neither publishes the port nor
+uses host networking.

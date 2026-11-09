@@ -10,8 +10,8 @@
 //! To produce a plan with more than one transaction, this example deposits
 //! four separate notes and then withdraws the most one spend can send from
 //! them: a withdrawal that spends several notes may need to merge them across
-//! multiple on-chain transactions before the final payout, and each of those
-//! transactions pays the pool fee.
+//! multiple on-chain transactions before the final payout, each paying the
+//! pool fee.
 //!
 //! This example builds real zero-knowledge proofs and submits transactions to
 //! the Stellar testnet, so it is slower than the read-only examples. Make
@@ -100,10 +100,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("(Using self-withdrawal; funds will return to the wallet's public address.)");
     }
 
-    let amount = pool.max_spend(fee)?;
+    let amount = pool.max_spend()?;
     println!();
     println!("Preparing withdrawal plan for the most one spend can send ({amount} stroops)...");
-    let mut plan = pool.prepare_withdraw(&notes, amount, &recipient, fee)?;
+    let mut plan = pool.prepare_withdraw(&notes, amount, &recipient)?;
     print_plan_cursor(&plan);
 
     println!();

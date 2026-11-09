@@ -1,12 +1,12 @@
-//! `overview` — dashboard-style view of pools, balances, contracts, network,
-//! and this account's registration status.
+//! `overview` — dashboard-style view of pools, balances, fees and limits,
+//! contracts, network, and this account's registration status.
 
 use std::collections::HashSet;
 
 use anyhow::Result;
 use serde::Serialize;
 use stellar_private_payments::types::{
-    AssetDescriptor, GvkMode, POLICY_FLAGS_IN_SUFFIX_ORDER, PolicyFlags,
+    AssetDescriptor, GvkMode, NoteAmount, POLICY_FLAGS_IN_SUFFIX_ORDER, PolicyFlags, PoolInfo,
 };
 
 use crate::{
@@ -34,6 +34,20 @@ struct PoolRow {
     balance: String,
     balance_base_units: String,
     decimals: Option<u32>,
+    #[serde(flatten)]
+    limits: Option<PoolLimits>,
+}
+
+/// A pool's fee and smallest deposit, and the most one spend from this
+/// account's notes can send after fees, in the token's units and in base units.
+#[derive(Serialize)]
+struct PoolLimits {
+    pool_fee: String,
+    pool_fee_base_units: NoteAmount,
+    smallest_deposit: String,
+    smallest_deposit_base_units: NoteAmount,
+    max_to_send: String,
+    max_to_send_base_units: NoteAmount,
 }
 
 #[derive(Serialize)]
@@ -97,13 +111,14 @@ pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
 
     match session.account().portfolio() {
         Ok(portfolio) => {
-            let precision = session.token_decimals(
-                portfolio
-                    .iter()
-                    .map(|balance| balance.pool_contract_id.as_str())
-                    .filter(|id| allowed.contains(id)),
-            );
-            (pools, errors) = portfolio_rows(&portfolio, &entries, &explorer, &precision);
+            let ids: Vec<_> = portfolio
+                .iter()
+                .map(|balance| balance.pool_contract_id.as_str())
+                .filter(|id| allowed.contains(id))
+                .collect();
+            let precision = session.token_decimals(ids.iter().copied());
+            let limits = session.pool_limits(ids);
+            (pools, errors) = portfolio_rows(&portfolio, &entries, &explorer, &precision, &limits);
         }
         Err(e) => {
             log::warn!("portfolio: {e:#}");
@@ -173,6 +188,11 @@ fn print_human(o: &Overview, alias: &str) {
             controls_label(pool.policy_flags, pool.gvk_mode),
         );
         output::print_kv("  balance", &pool.balance);
+        if let Some(limits) = &pool.limits {
+            output::print_kv("  pool_fee", &limits.pool_fee);
+            output::print_kv("  smallest_deposit", &limits.smallest_deposit);
+            output::print_kv("  max_to_send", &limits.max_to_send);
+        }
         println!();
     }
 
@@ -258,6 +278,7 @@ fn portfolio_rows(
     entries: &[&stellar_private_payments::types::PoolConfigEntry],
     explorer: &Explorer,
     precision: &std::collections::HashMap<String, Result<u32>>,
+    limits: &std::collections::HashMap<String, Result<(PoolInfo, NoteAmount)>>,
 ) -> (Vec<PoolRow>, Vec<PoolErrorRow>) {
     let mut pools = Vec::new();
     let mut errors = Vec::new();
@@ -279,6 +300,30 @@ fn portfolio_rows(
             }
             None => None,
         };
+        let symbol = asset_symbol(&entry.asset);
+        let amount = |base_units: NoteAmount| {
+            output::format_token_amount(u128::from(base_units), &symbol, decimals)
+        };
+        let limits = match limits.get(&entry.pool_contract_id) {
+            Some(Ok((info, max_to_send))) => Some(PoolLimits {
+                pool_fee: amount(info.fee),
+                pool_fee_base_units: info.fee,
+                smallest_deposit: amount(info.minimum_deposit_amount),
+                smallest_deposit_base_units: info.minimum_deposit_amount,
+                max_to_send: amount(*max_to_send),
+                max_to_send_base_units: *max_to_send,
+            }),
+            Some(Err(error)) => {
+                errors.push(PoolErrorRow {
+                    pool_contract_id: entry.pool_contract_id.clone(),
+                    error: format!(
+                        "pool fee, smallest deposit and max to send unavailable: {error}"
+                    ),
+                });
+                None
+            }
+            None => None,
+        };
         pools.push(PoolRow {
             pool_contract_id: balance.pool_contract_id.clone(),
             pool_link: explorer.contract(&balance.pool_contract_id),
@@ -289,11 +334,8 @@ fn portfolio_rows(
             gvk_mode: entry.gvk_mode,
             balance_base_units: balance.amount.to_string(),
             decimals,
-            balance: output::format_token_amount(
-                u128::from(balance.amount),
-                &asset_symbol(&entry.asset),
-                decimals,
-            ),
+            balance: amount(balance.amount),
+            limits,
         });
     }
     for entry in entries {
@@ -314,7 +356,7 @@ fn portfolio_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stellar_private_payments::types::{NoteAmount, PoolConfigEntry, PortfolioBalance};
+    use stellar_private_payments::types::{ExtAmount, PoolConfigEntry, PortfolioBalance};
 
     fn pool_entry(id: &str, policy_flags: PolicyFlags, gvk_mode: GvkMode) -> PoolConfigEntry {
         PoolConfigEntry {
@@ -339,25 +381,59 @@ mod tests {
         }
     }
 
-    #[test]
-    fn metadata_failure_keeps_balance_and_reports_pool_error() {
-        let entry = serde_json::from_value(serde_json::json!({
+    fn entry() -> stellar_private_payments::types::PoolConfigEntry {
+        serde_json::from_value(serde_json::json!({
             "poolContractId": "pool", "tokenContractId": "token", "enabled": true,
             "deploymentLedger": 0, "policyFlags": [], "asset": {"kind": "native"}
         }))
-        .expect("pool");
-        let balances = [PortfolioBalance {
+        .expect("pool")
+    }
+
+    fn balances() -> [PortfolioBalance; 1] {
+        [PortfolioBalance {
             pool_contract_id: "pool".into(),
             token_contract_id: "token".into(),
             token_label: "XLM".into(),
             amount: NoteAmount::from(123u128),
             note_count: 1,
-        }];
+        }]
+    }
+
+    /// A pool charging a fee of 1000 with a smallest deposit of 10000.
+    fn pool_info() -> PoolInfo {
+        PoolInfo {
+            ledger: 0,
+            contract_id: "pool".into(),
+            contract_type: String::new(),
+            admin: String::new(),
+            token: "token".into(),
+            verifier: String::new(),
+            asp_membership: String::new(),
+            asp_non_membership: String::new(),
+            merkle_levels: 0,
+            merkle_current_root_index: None,
+            merkle_next_index: "0".into(),
+            maximum_deposit_amount: ExtAmount::from(1_000_000_000i128),
+            deposits_paused: false,
+            fee: NoteAmount::from(1_000u128),
+            minimum_deposit_amount: NoteAmount::from(10_000u128),
+            merkle_root: None,
+            merkle_capacity: 0,
+            total_commitments: "0".into(),
+            policy_flags: PolicyFlags::EMPTY,
+            admin_view_key: None,
+            gvk_mode: None,
+        }
+    }
+
+    #[test]
+    fn metadata_failure_keeps_balance_and_reports_pool_error() {
         let (rows, errors) = portfolio_rows(
-            &balances,
-            &[&entry],
+            &balances(),
+            &[&entry()],
             &Explorer::new("https://example.test"),
             &[("pool".into(), Err(anyhow::anyhow!("offline")))].into(),
+            &Default::default(),
         );
         assert_eq!(rows.len(), 1);
         let row = serde_json::to_value(&rows[0]).expect("JSON");
@@ -370,9 +446,58 @@ mod tests {
         assert_eq!(errors[0].pool_contract_id, "pool");
         assert_eq!(errors[0].error, "offline");
         assert!(
-            portfolio_rows(&balances, &[], &Explorer::new(""), &Default::default())
-                .0
-                .is_empty()
+            portfolio_rows(
+                &balances(),
+                &[],
+                &Explorer::new(""),
+                &Default::default(),
+                &Default::default()
+            )
+            .0
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_pool_row_names_its_fee_smallest_deposit_and_max_to_send_in_token_units() {
+        let (rows, errors) = portfolio_rows(
+            &balances(),
+            &[&entry()],
+            &Explorer::new("https://example.test"),
+            &[("pool".into(), Ok(7))].into(),
+            &[(
+                "pool".into(),
+                Ok((pool_info(), NoteAmount::from(99_000u128))),
+            )]
+            .into(),
+        );
+        assert!(errors.is_empty());
+        let row = serde_json::to_value(&rows[0]).expect("JSON");
+        assert_eq!(row["pool_fee"], "0.0001 XLM");
+        assert_eq!(row["pool_fee_base_units"], "1000");
+        assert_eq!(row["smallest_deposit"], "0.001 XLM");
+        assert_eq!(row["smallest_deposit_base_units"], "10000");
+        assert_eq!(row["max_to_send"], "0.0099 XLM");
+        assert_eq!(row["max_to_send_base_units"], "99000");
+    }
+
+    #[test]
+    fn a_limits_failure_keeps_the_balance_and_reports_a_pool_error() {
+        let (rows, errors) = portfolio_rows(
+            &balances(),
+            &[&entry()],
+            &Explorer::new("https://example.test"),
+            &[("pool".into(), Ok(7))].into(),
+            &[("pool".into(), Err(anyhow::anyhow!("offline")))].into(),
+        );
+        assert_eq!(rows.len(), 1);
+        let row = serde_json::to_value(&rows[0]).expect("JSON");
+        assert_eq!(row["balance"], "0.0000123 XLM");
+        assert!(row.get("pool_fee").is_none());
+        assert_eq!(errors.len(), 1);
+        assert_eq!(
+            errors[0].error,
+            "pool fee, smallest deposit and max to send unavailable: offline"
         );
     }
 
@@ -388,6 +513,7 @@ mod tests {
             &[balance("traceable"), balance("view-only")],
             &[&traceable, &view_only],
             &Explorer::new("https://example.test"),
+            &Default::default(),
             &Default::default(),
         );
         assert!(errors.is_empty());

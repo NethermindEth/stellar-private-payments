@@ -13,13 +13,6 @@ test('a deposit refused by a paused pool says deposits are paused', () => {
   );
 });
 
-test('a deposit the SDK refuses before proving says deposits are paused', () => {
-  assert.equal(
-    getFriendlyErrorMessage(new Error('deposits into pool CPOOL are paused'), 'Deposit'),
-    'Deposits into this pool are paused. Withdrawals and transfers still work.',
-  );
-});
-
 test('an unknown root still says the pool state changed', () => {
   assert.equal(
     getFriendlyErrorMessage(new Error(REFUSED_DEPOSIT.replace('#18', '#8')), 'Withdraw'),

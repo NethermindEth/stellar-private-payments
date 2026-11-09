@@ -11,9 +11,9 @@ import { symbol, symbolCircle } from 'd3-shape';
 import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
-import { classifyTx, withdrawalsByPk } from './gvk-classify.js';
+import { chargeSpend, classifyTx, emptyPkNode, withdrawalsByPk } from './gvk-classify.js';
 import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, readTokenDecimals, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
-import { collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId } from './gvk-notes.js';
+import { amountByPk, collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId, parseFieldAmount, unspentByPk } from './gvk-notes.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { el, formatAmount as formatBaseUnits, tokenLabel } from './ui/notes-view.js';
 

@@ -15,8 +15,8 @@ impl PoolEstimate {
     }
 
     #[wasm_bindgen(getter)]
-    pub fn fees(&self) -> String {
-        self.inner.fees.to_string()
+    pub fn fees(&self) -> u128 {
+        u128::from(self.inner.fees)
     }
 }
 
