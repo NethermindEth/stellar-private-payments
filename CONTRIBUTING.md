@@ -198,15 +198,15 @@ This patch remains for **circuits / ceremony** builds that still use ark-circom 
 The native SDK (`stellar-private-payments`) no longer depends on Wasmer; witness generation uses
 committed `circom-witness-rs` graphs (see `make circuits GRAPHS=1`).
 
-The workspace also aliases `rusqlite` and `rusqlite_migration` to the published
-[`spp-rusqlite`](https://crates.io/crates/spp-rusqlite) (`0.40.2`) and
-[`spp-rusqlite-migration`](https://crates.io/crates/spp-rusqlite-migration) (`2.6.0`) crates.
-`spp-rusqlite` is published from upstream `rusqlite` `main` at commit `b6476751` (which includes
-[`rusqlite` PR #1906](https://github.com/rusqlite/rusqlite/pull/1906) for `sqlite-wasm-rs 0.6`
-`sqlite3mc` support plus post-`0.40.2` changes on `main`) so `stellar-private-payments` can publish
-to crates.io before upstream cuts a release. Because `cargo audit` and `cargo deny` match RustSec
-advisories by crate name, check `rusqlite` and `rusqlite_migration` advisories manually until
-upstream releases include that change and the aliases are dropped.
+The SDK aliases `rusqlite_migration` to the published
+[`spp-rusqlite-migration`](https://crates.io/crates/spp-rusqlite-migration) (`2.7.0`) crate.
+It is published from upstream `rusqlite_migration` `master` at commit `d92f64e1` with the
+`rusqlite` dependency raised to `0.41`
+([`rusqlite_migration` PR #370](https://github.com/cljoly/rusqlite_migration/pull/370)), because
+upstream `2.6.0` requires `rusqlite ^0.40`, which links the `libsqlite3-sys` versions affected by
+RUSTSEC-2026-0459. Because `cargo audit` and `cargo deny` match RustSec advisories by crate name,
+check `rusqlite_migration` advisories manually until an upstream release supports `rusqlite 0.41`
+and the alias is dropped.
 
 ### Running WASM tests
 
