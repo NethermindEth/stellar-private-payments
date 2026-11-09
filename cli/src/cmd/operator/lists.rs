@@ -43,9 +43,11 @@ impl ListKind {
 /// What a list command does with the tree it resolves.
 #[derive(Debug, Clone, Copy)]
 pub enum ListAccess {
-    /// Changes the tree's entries; asks first when no enabled pool uses it.
+    /// Changes the tree's entries; asks first when no enabled pool uses it,
+    /// or when the pools can't be read.
     Write { yes: bool },
-    /// Transfers the tree's admin, which any tree may need.
+    /// Transfers the tree's admin, which any tree may need. An explicit tree
+    /// skips reading the pools.
     Admin,
 }
 
@@ -65,9 +67,22 @@ pub fn resolve_tree(
     explicit: Option<&str>,
     access: ListAccess,
 ) -> Result<String> {
-    let pools = enabled_pool_lists(config, rpc_url)?;
-    let target = target_tree(kind, &pools, explicit)?;
     let name = kind.name();
+    let pools = match (explicit, access) {
+        (Some(tree), ListAccess::Admin) => return Ok(tree.to_string()),
+        (Some(tree), ListAccess::Write { yes }) => match enabled_pool_lists(config, rpc_url) {
+            Ok(pools) => pools,
+            Err(err) => {
+                confirm(
+                    &format!("can't tell which enabled pools use {name} {tree}: {err:#}"),
+                    yes,
+                )?;
+                return Ok(tree.to_string());
+            }
+        },
+        (None, _) => enabled_pool_lists(config, rpc_url)?,
+    };
+    let target = target_tree(kind, &pools, explicit)?;
     if explicit.is_none() {
         eprintln!(
             "{name} {}, used by {}",
@@ -159,9 +174,65 @@ fn unused_warning(kind: ListKind, tree: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use stellar_private_payments::types::{PolicyFlag, PolicyFlags};
 
     use super::*;
+    use crate::config::CliConfigOverrides;
+
+    /// Refuses connections, so reading the pools fails.
+    const UNREACHABLE_RPC: &str = "http://127.0.0.1:9";
+    const TREE: &str = "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE";
+
+    fn config() -> CliConfig {
+        CliConfig::load(
+            None,
+            None,
+            CliConfigOverrides {
+                deployment_path: Some(
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../deployments/testnet"),
+                ),
+                data_dir: Some(std::env::temp_dir().join("spp-list-tests")),
+                ..Default::default()
+            },
+        )
+        .expect("the test deployment should load")
+    }
+
+    #[test]
+    fn an_explicit_tree_does_not_need_the_pools() {
+        let config = config();
+        assert!(config.deployment.pools.iter().any(|pool| pool.enabled));
+        let admin = resolve_tree(
+            &config,
+            UNREACHABLE_RPC,
+            ListKind::Blocklist,
+            Some(TREE),
+            ListAccess::Admin,
+        );
+        assert_eq!(admin.expect("admin"), TREE);
+        let write = resolve_tree(
+            &config,
+            UNREACHABLE_RPC,
+            ListKind::Allowlist,
+            Some(TREE),
+            ListAccess::Write { yes: true },
+        );
+        assert_eq!(write.expect("write with --yes"), TREE);
+    }
+
+    #[test]
+    fn the_default_tree_needs_the_pools() {
+        let read = resolve_tree(
+            &config(),
+            UNREACHABLE_RPC,
+            ListKind::Blocklist,
+            None,
+            ListAccess::Admin,
+        );
+        assert!(read.is_err());
+    }
 
     fn pool(id: &str, allowlist: &str, blocklist: &str, flags: PolicyFlags) -> (String, PoolLists) {
         (

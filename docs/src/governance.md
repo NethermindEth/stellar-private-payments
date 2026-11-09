@@ -490,7 +490,8 @@ which start as the manifest's. After a re-point, enter the new tree's address th
 to it. The page asks before a write to a list no pool on the Pools tab uses, and that tab marks a
 list a pool's policy leaves out as not used. `spp allowlist` and `spp blocklist` read the enabled
 pools instead: without `--tree`, they act on the tree those pools use, and they ask before a write
-to a tree none of them uses.
+to a tree none of them uses, or that they can't check because a pool can't be read. An admin
+transfer with `--tree` doesn't read the pools.
 
 Without a file of expected entries, the panel reads storage, which has no age limit: a blocklist's
 keys, or an allowlist's entry count. That is the way back to an allowlist older than the RPC's event
