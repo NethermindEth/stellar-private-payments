@@ -255,15 +255,6 @@ impl StateFetcher {
         Ok(data)
     }
 
-    pub async fn asp_state(&self) -> Result<ContractsStateData> {
-        self.contracts_data(
-            &[],
-            &self.config.asp_membership,
-            &self.config.asp_non_membership,
-        )
-        .await
-    }
-
     async fn contracts_data(
         &self,
         enabled_pools: &[&crate::types::PoolConfigEntry],

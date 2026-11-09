@@ -295,15 +295,9 @@ pub(crate) mod test_support {
     }
 
     /// A client whose RPC refuses connections, so a test fails if it reaches
-    /// the network.
-    pub fn client() -> Client {
-        static RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let db = std::env::temp_dir().join(format!(
-            "spp-operator-{}-{}.sqlite",
-            std::process::id(),
-            RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        let _ = std::fs::remove_file(&db);
+    /// the network. Its storage lives in `dir`.
+    pub fn client(dir: &tempfile::TempDir) -> Client {
+        let db = dir.path().join("wallet.sqlite");
         let storage =
             crate::state::test_local_storage(db.to_string_lossy().as_ref()).expect("open storage");
         Client::init_readonly(
@@ -331,7 +325,8 @@ mod tests {
 
     #[test]
     fn ids_list_each_kind_of_administered_contract() {
-        let client = client();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let client = client(&dir);
         assert_eq!(
             client.allowlist_ids(),
             vec![MEMBERSHIP.to_string(), ADDED_MEMBERSHIP.to_string()]
@@ -342,7 +337,8 @@ mod tests {
 
     #[test]
     fn each_handle_opens_on_its_own_contract() {
-        let client = client();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let client = client(&dir);
         for id in [MEMBERSHIP, ADDED_MEMBERSHIP] {
             let operator = client.allowlist_operator(id);
             assert_eq!(operator.contract_id(), id);
@@ -355,7 +351,8 @@ mod tests {
 
     #[tokio::test]
     async fn builders_refuse_an_address_argument_before_reading_the_chain() {
-        let pool = client().pool_admin(POOL);
+        let dir = tempfile::tempdir().expect("temp dir");
+        let pool = client(&dir).pool_admin(POOL);
         assert!(
             refusal(pool.repoint_allowlist("not-an-address").await)
                 .contains("not a Stellar address")
@@ -365,7 +362,8 @@ mod tests {
 
     #[test]
     fn handles_open_on_contracts_outside_the_config() {
-        let client = client();
+        let dir = tempfile::tempdir().expect("temp dir");
+        let client = client(&dir);
         let tree = client.allowlist_operator("new-tree");
         assert_eq!(tree.contract_id(), "new-tree");
         assert!(!tree.is_listed());

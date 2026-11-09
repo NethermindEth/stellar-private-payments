@@ -69,13 +69,16 @@ mod tests {
     use super::*;
     use crate::operator::test_support::{MEMBERSHIP, POOL, client};
 
-    fn authority() -> GvkAuthority {
-        client().gvk_authority(Field::ZERO).expect("open authority")
+    fn authority(dir: &tempfile::TempDir) -> GvkAuthority {
+        client(dir)
+            .gvk_authority(Field::ZERO)
+            .expect("open authority")
     }
 
     #[tokio::test]
     async fn audit_refuses_a_pool_without_gvk_before_syncing() {
-        let error = authority()
+        let dir = tempfile::tempdir().expect("temp dir");
+        let error = authority(&dir)
             .audit(POOL)
             .await
             .err()
@@ -88,7 +91,8 @@ mod tests {
 
     #[tokio::test]
     async fn audit_refuses_a_contract_that_is_not_a_pool() {
-        let error = authority()
+        let dir = tempfile::tempdir().expect("temp dir");
+        let error = authority(&dir)
             .audit(MEMBERSHIP)
             .await
             .err()
