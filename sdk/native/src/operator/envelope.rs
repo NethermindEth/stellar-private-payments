@@ -6,7 +6,7 @@ use stellar_xdr::{self as xdr, Limits, ReadXdr};
 
 use crate::{
     Error,
-    chain::{RpcClient, TxConfirmStatus, confirm_tx, network_id, submit_tx},
+    chain::{RpcClient, RpcError, TxConfirmStatus, confirm_tx, network_id, submit_tx},
 };
 
 use super::call::{OperatorCall, describe, unix_now};
@@ -154,7 +154,14 @@ impl Envelopes {
     pub async fn submit(&self, signed_envelope_xdr: &str) -> Result<String, Error> {
         let envelope = decode(signed_envelope_xdr)?;
         describe(&envelope)?;
-        Ok(submit_tx(&self.rpc, &envelope).await?)
+        match submit_tx(&self.rpc, &envelope).await {
+            Ok(hash) => Ok(hash),
+            Err(error) => match error.downcast::<RpcError>() {
+                Ok(RpcError::NotQueued(hash)) => Ok(hash),
+                Ok(other) => Err(other.into()),
+                Err(error) => Err(error.into()),
+            },
+        }
     }
 
     /// Polls a submitted call once.
@@ -421,6 +428,38 @@ mod tests {
             .await
             .expect("state");
         assert!(matches!(state, CallState::Landed { .. }), "{state:?}");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn submit_follows_a_copy_already_queued() {
+        use serde_json::json;
+        use stellar_xdr::WriteXdr;
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+        let envelope_xdr = super::super::call::tests::envelope()
+            .to_xdr_base64(Limits::none())
+            .expect("envelope");
+        for (status, queued) in [("TRY_AGAIN_LATER", true), ("ERROR", false)] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": { "hash": "ab", "status": status, "latestLedger": 1 },
+                })))
+                .mount(&server)
+                .await;
+            let sent = Envelopes::open(&server.uri(), PASSPHRASE)
+                .expect("envelopes")
+                .submit(&envelope_xdr)
+                .await;
+            if queued {
+                assert_eq!(sent.expect(status), "ab");
+            } else {
+                assert!(sent.is_err(), "{status}");
+            }
+        }
     }
 
     #[test]
