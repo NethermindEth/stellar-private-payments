@@ -6,7 +6,7 @@ use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use circuits::test::utils::{
     circom_tester::{Inputs, SignalKey},
-    general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
+    general::{poseidon2_hash2, scalar_to_bigint},
     keypair::derive_public_key,
     merkle_tree::PrefixTree,
     sparse_merkle_tree::prepare_smt_proof_with_overrides,
@@ -110,6 +110,11 @@ pub fn committed_graph_path(stem: &str) -> std::path::PathBuf {
         .join(format!("{stem}.graph.bin"))
 }
 
+/// Path of the R1CS for a circuit, from `make circuits` or a circuits release.
+pub fn r1cs_path(stem: &str) -> std::path::PathBuf {
+    workspace_root().join(format!("target/circuits-artifacts/{stem}.r1cs"))
+}
+
 /// Path of the locally generated Groth16 proving key for a circuit.
 ///
 /// `tools/circuit-compiler` writes these into `testdata/`, together with the
@@ -151,7 +156,7 @@ pub fn prove_with_graph(stem: &str, inputs: &Inputs) -> Result<ProofResult> {
     let calculator = WitnessCalculator::from_graph(&graph_bytes)?;
     let witness_bytes = calculator.compute_witness(&inputs.to_witness_json()?)?;
 
-    let (_wasm, r1cs_path) = load_artifacts(stem)?;
+    let r1cs_path = r1cs_path(stem);
     let r1cs_bytes = std::fs::read(&r1cs_path)
         .with_context(|| format!("failed to read R1CS {}", r1cs_path.display()))?;
     let pk_path = proving_key_path(stem);

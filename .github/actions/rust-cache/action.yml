@@ -1,0 +1,28 @@
+name: Rust cache
+description: >
+  Swatinem/rust-cache at the version every workflow uses. Saves only from
+  main unless save-if says otherwise.
+
+inputs:
+  key:
+    description: Extra cache key, for jobs that would otherwise share one.
+    default: ""
+  workspaces:
+    description: Cargo workspaces and their target directories.
+    default: ""
+  cache-targets:
+    description: Whether to cache the target directories.
+    default: ""
+  save-if:
+    description: Whether to save the cache. Defaults to saving only from main.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        key: ${{ inputs.key }}
+        workspaces: ${{ inputs.workspaces }}
+        cache-targets: ${{ inputs.cache-targets }}
+        save-if: ${{ inputs.save-if || github.ref == 'refs/heads/main' }}

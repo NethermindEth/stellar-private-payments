@@ -16,7 +16,8 @@
 //! ```text
 //! Freighter Wallet (Ed25519)
 //!        │
-//!        └── signMessage("Privacy Pool Key Derivation [v2] (<kdf_domain>)")
+//!        └── signMessage("Privacy Pool Key Derivation [v3] (<kdf_domain>)
+//!                         WARNING: signing this gives full control of …")
 //!                   │
 //!                   ├── SHA-256("privacy-pool/note-key/v2" || <sig>)
 //!                   │          └── BN254 Note Private Key → Poseidon2 → Note Public Key
@@ -54,10 +55,21 @@ use zeroize::{Zeroize, Zeroizing};
 
 /// Message signed to derive both privacy keypairs.
 ///
+/// The signature is the user's whole privacy secret, and the keys derived from
+/// it can't be rotated, so the second line warns the user to sign it only in
+/// the app or CLI.
+///
 /// `kdf_domain` is trimmed, so stray whitespace does not derive other keys.
 pub fn key_derivation_message(kdf_domain: &str) -> String {
-    format!("Privacy Pool Key Derivation [v2] ({})", kdf_domain.trim())
+    format!(
+        "Privacy Pool Key Derivation [v3] ({})\n{KEY_DERIVATION_WARNING}",
+        kdf_domain.trim()
+    )
 }
+
+/// Second line of [`key_derivation_message`].
+const KEY_DERIVATION_WARNING: &str = "WARNING: signing this gives full control of your private \
+                                      funds. Only sign in the Stellar Private Payments app or CLI.";
 
 /// Prefix a SEP-53 wallet puts in front of a message before hashing it.
 const SEP53_MESSAGE_PREFIX: &str = "Stellar Signed Message:\n";
@@ -560,7 +572,8 @@ mod owner_signature_tests {
     fn key_derivation_message_is_fixed() {
         assert_eq!(
             key_derivation_message("tests"),
-            "Privacy Pool Key Derivation [v2] (tests)"
+            "Privacy Pool Key Derivation [v3] (tests)\nWARNING: signing this gives full control \
+             of your private funds. Only sign in the Stellar Private Payments app or CLI."
         );
     }
 

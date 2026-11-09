@@ -185,7 +185,8 @@ pub struct PublicKeyEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserNoteSummary {
-    /// Pool commitment (hex).
+    /// Pool commitment (hex). Copies of a commitment share it; the pool and
+    /// `leaf_index` tell them apart.
     pub id: Field,
     /// Pool contract id that owns the commitment.
     pub pool_contract_id: String,

@@ -166,6 +166,7 @@ export function createNoteRow(note, opts = {}) {
     }`,
   );
   if (note.id) row.dataset.noteId = note.id;
+  if (note.poolContractId) row.dataset.poolId = note.poolContractId;
   if (testId) row.dataset.testid = testId;
   row.dataset.noteState = note.spent ? 'spent' : 'unspent';
 
