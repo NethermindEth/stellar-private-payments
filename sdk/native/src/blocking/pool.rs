@@ -10,7 +10,10 @@ use crate::{
     error::Error,
     plan::PreparedTransactionPlan,
     pool::PrivatePool as AsyncPrivatePool,
-    types::{Estimate, PrivatePoolConfig, SignedTransaction, TransactionResult, TransferRecipient},
+    types::{
+        Estimate, PoolInfo, PrivatePoolConfig, SignedTransaction, TransactionResult,
+        TransferRecipient,
+    },
 };
 
 use super::runtime::block_on;
@@ -44,19 +47,47 @@ impl PrivatePool {
         block_on(self.inner.fee())
     }
 
+    /// Reads this pool's on-chain state, its fee and deposit limits included.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`crate::PrivatePool::pool_info`].
+    pub fn pool_info(&self) -> Result<PoolInfo, Error> {
+        block_on(self.inner.pool_info())
+    }
+
+    /// Refuses a deposit of `amount` that the pool would refuse, without
+    /// building it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`crate::PrivatePool::check_deposit`].
+    pub fn check_deposit(&self, amount: NoteAmount) -> Result<(), Error> {
+        block_on(self.inner.check_deposit(amount))
+    }
+
+    /// Refuses a transaction that the pool would refuse, without building it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`crate::PrivatePool::check_transact`].
+    pub fn check_transact(&self, step: &crate::planner::Transact) -> Result<(), Error> {
+        block_on(self.inner.check_transact(step))
+    }
+
     #[tracing::instrument(name = "blocking_estimate", level = "info", skip_all, fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount)))]
-    pub fn estimate(&self, amount: NoteAmount, fee: NoteAmount) -> Result<Estimate, Error> {
-        block_on(self.inner.estimate(amount, fee))
+    pub fn estimate(&self, amount: NoteAmount) -> Result<Estimate, Error> {
+        block_on(self.inner.estimate(amount))
     }
 
     /// Returns the most one spend from the spendable notes can send after
-    /// paying `fee` on every step.
+    /// paying the pool fee on every step.
     ///
     /// # Errors
     ///
     /// Returns the errors of [`crate::PrivatePool::max_spend`].
-    pub fn max_spend(&self, fee: NoteAmount) -> Result<NoteAmount, Error> {
-        block_on(self.inner.max_spend(fee))
+    pub fn max_spend(&self) -> Result<NoteAmount, Error> {
+        block_on(self.inner.max_spend())
     }
 
     #[tracing::instrument(name = "blocking_deposit", level = "info", skip_all, fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(&amount)))]
@@ -96,9 +127,8 @@ impl PrivatePool {
         wallet: &[SpendableNote],
         recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
-        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
-        block_on(self.inner.prepare_transfer(wallet, recipient, amount, fee))
+        block_on(self.inner.prepare_transfer(wallet, recipient, amount))
     }
 
     pub fn prepare_withdraw(
@@ -106,9 +136,8 @@ impl PrivatePool {
         wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
-        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
-        self.inner.prepare_withdraw(wallet, amount, recipient, fee)
+        block_on(self.inner.prepare_withdraw(wallet, amount, recipient))
     }
 
     pub fn prepare_transact(&self, step: crate::planner::Transact) -> PreparedTransactionPlan {

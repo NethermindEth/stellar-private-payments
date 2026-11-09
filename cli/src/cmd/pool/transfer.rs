@@ -25,6 +25,6 @@ pub fn transfer(
     let fee = pool_fee(&pool, decimals)?;
     let results = pool
         .transfer(recipient, amount)
-        .map_err(|e| map_pool_err(config, &pool, decimals, Some(&fee), e, json))?;
-    print_tx_results(config, "Transfer submitted", &results, Some(&fee), json)
+        .map_err(|e| map_pool_err(config, &pool, decimals, &fee, false, e, json))?;
+    print_tx_results(config, "Transfer submitted", &results, &fee, json)
 }

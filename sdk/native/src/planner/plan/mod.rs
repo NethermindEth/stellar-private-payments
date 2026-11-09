@@ -125,29 +125,23 @@ pub(crate) fn plan(
     );
 
     let (indices, change) = match combo {
-        CombinationResult::Impossible => {
-            tracing::warn!("transaction planning rejected: no combination possible");
-            return Err(PlanError::NoCombination);
-        }
         CombinationResult::OneExact(i) => (vec![i], None),
         CombinationResult::TwoExact(i, j) => (vec![i, j], None),
         CombinationResult::OneOvershoot(i, excess) => (vec![i], Some(excess)),
         CombinationResult::TwoOvershoot(i, j, excess) => (vec![i, j], Some(excess)),
         CombinationResult::ExactK(indices) => (indices, None),
-        CombinationResult::Overshoot(indices, excess) => (indices, Some(excess)),
+        CombinationResult::Overshoot(indices, excess) if indices.len() <= TRANSACTION_LIMIT => {
+            (indices, Some(excess))
+        }
+        // Only the greedy fallback passes the limit, after the largest notes up
+        // to it fell short, so the amount is above `max_spend`.
+        CombinationResult::Overshoot(..) | CombinationResult::Impossible => {
+            tracing::warn!("transaction planning rejected: no combination within the note limit");
+            return Err(PlanError::NoCombination {
+                max_spend: max_spend(notes, fee)?,
+            });
+        }
     };
-
-    if indices.len() > TRANSACTION_LIMIT {
-        tracing::warn!(
-            selected = indices.len(),
-            max_notes = TRANSACTION_LIMIT,
-            "transaction planning rejected: too many notes selected"
-        );
-        return Err(PlanError::TooManyNotes {
-            selected: indices.len(),
-            max_notes: TRANSACTION_LIMIT,
-        });
-    }
 
     for &index in &indices {
         if index >= notes.len() {
@@ -460,7 +454,7 @@ mod tests {
         let notes = vec![note(1), note(2), note(3)];
         let err = plan(goal_amount(100), NoteAmount::ZERO, &notes)
             .expect_err("goal above wallet sum should not plan");
-        assert!(matches!(err, PlanError::NoCombination));
+        assert!(matches!(err, PlanError::NoCombination { .. }));
     }
 
     #[test]
@@ -769,15 +763,13 @@ mod tests {
                 plan(max, fee, &notes).expect("max_spend should plan");
             }
             let one_more = max.checked_add(NoteAmount::ONE).expect("test amount");
-            assert!(
-                matches!(
-                    plan(one_more, fee, &notes),
-                    Err(PlanError::NoCombination
-                        | PlanError::TooManyNotes { .. }
-                        | PlanError::NoSpendableNotes)
-                ),
-                "{amounts:?} at fee {fee} plans above max_spend"
-            );
+            match plan(one_more, fee, &notes) {
+                Err(PlanError::NoCombination { max_spend }) => {
+                    assert_eq!(max_spend, max, "{amounts:?} at fee {fee}");
+                }
+                Err(PlanError::NoSpendableNotes) if amounts.is_empty() => {}
+                other => panic!("{amounts:?} at fee {fee} plans above max_spend: {other:?}"),
+            }
         }
     }
 }

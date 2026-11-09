@@ -236,10 +236,7 @@ async fn allowlist_repoint() -> Result<()> {
         .await?;
 
     let unnamed = pool
-        .withdraw(
-            pool.max_spend(pool.fee().await?).await?,
-            session.wallet.address(),
-        )
+        .withdraw(pool.max_spend().await?, session.wallet.address())
         .await;
     assert!(
         unnamed
@@ -278,10 +275,7 @@ async fn allowlist_repoint() -> Result<()> {
         )?
         .pool(pool_contract_id)?;
     named_pool
-        .withdraw(
-            named_pool.max_spend(named_pool.fee().await?).await?,
-            session.wallet.address(),
-        )
+        .withdraw(named_pool.max_spend().await?, session.wallet.address())
         .await?;
     assert_eq!(named_pool.balance().await?, 0.into());
 
@@ -334,11 +328,8 @@ async fn blocklist_repoint() -> Result<()> {
 
     // The manifest still names the blocklist that lists the user, but the pool
     // reads the new one, which does not.
-    pool.withdraw(
-        pool.max_spend(pool.fee().await?).await?,
-        session.wallet.address(),
-    )
-    .await?;
+    pool.withdraw(pool.max_spend().await?, session.wallet.address())
+        .await?;
     assert_eq!(pool.balance().await?, 0.into());
 
     network

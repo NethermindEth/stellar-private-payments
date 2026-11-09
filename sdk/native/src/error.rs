@@ -1,7 +1,7 @@
 use crate::{
     chain::IndexerError,
     planner::{PlanError, SpendSessionError},
-    types::{AspMembershipSync, NoteAmount, Sensitive},
+    types::{AspMembershipSync, ExtAmount, NoteAmount, Sensitive},
 };
 
 use crate::types::TransactionResult;
@@ -79,8 +79,36 @@ pub enum Error {
 
     /// A deposit leaves less than the pool's minimum in notes once the fee is
     /// paid.
-    #[error("deposit is below the pool minimum of {minimum} base units after the fee")]
+    #[error("deposit is below the pool minimum of {minimum} base units after the pool fee")]
     DepositBelowMinimum { minimum: NoteAmount },
+
+    /// A deposit sends more than the pool's maximum, which counts the pool
+    /// fee. `largest_deposit` is the most a deposit can put in notes: the
+    /// maximum less the fee.
+    #[error("deposit sends more than the pool maximum of {maximum} base units, pool fee included")]
+    DepositAboveMaximum {
+        maximum: ExtAmount,
+        largest_deposit: NoteAmount,
+    },
+
+    /// A transaction whose inputs and deposit do not pay its outputs,
+    /// withdrawal and fee. `gap` is negative when more goes out than comes in.
+    // Names no amount: the gap can reveal a note's value.
+    #[error(
+        "transaction does not balance: {}",
+        if .gap < &ExtAmount::ZERO {
+            "the private outputs, withdrawal and pool fee exceed the input notes and deposit"
+        } else {
+            "the input notes and deposit exceed the private outputs, withdrawal and pool fee"
+        }
+    )]
+    NotBalanced { gap: ExtAmount },
+
+    /// A withdrawal paid to a contract of this deployment.
+    #[error(
+        "cannot withdraw to a contract of this deployment, such as a pool or its token contract, because nobody could move the tokens out again; withdraw to an address outside this deployment"
+    )]
+    WithdrawalToContract,
 
     /// An untyped failure.
     ///
@@ -102,6 +130,36 @@ pub enum RetentionGap {
     /// The bootnode cannot answer now; retry later.
     #[error("configured bootnode cannot serve the event history yet: {0}")]
     BootnodeNotReady(String),
+}
+
+impl Error {
+    /// Returns the error that stopped a plan, past the steps it confirmed, or
+    /// this error when it is not a plan failure.
+    pub fn root_cause(&self) -> &Error {
+        match self {
+            Error::PlanExecution(plan) => plan.cause(),
+            other => other,
+        }
+    }
+
+    /// Returns the planner's error, bare or through a spend session. Call it on
+    /// [`Self::root_cause`] to read past the steps a plan confirmed.
+    pub fn plan_error(&self) -> Option<&PlanError> {
+        match self {
+            Error::Plan(error) | Error::SpendSession(SpendSessionError::Plan(error)) => Some(error),
+            _ => None,
+        }
+    }
+
+    /// Returns the most the notes can send, when planning a spend failed for
+    /// want of funds. Call it on [`Self::root_cause`] to read past the steps a
+    /// plan confirmed.
+    pub fn max_spend(&self) -> Option<NoteAmount> {
+        match self.plan_error()? {
+            PlanError::NoCombination { max_spend } => Some(*max_spend),
+            _ => None,
+        }
+    }
 }
 
 /// Multi-tx plan stopped after one or more steps had already confirmed

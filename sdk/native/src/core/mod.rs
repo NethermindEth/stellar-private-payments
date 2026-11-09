@@ -2,9 +2,8 @@
 
 use crate::{
     planner::{SpendSession, SpendTarget, SpendableNote, Transact},
-    types::{
-        EncryptionPublicKey, Estimate, ExtAmount, NoteAmount, NotePublicKey, PrivatePoolConfig,
-    },
+    transact::deposit_ext_amount,
+    types::{EncryptionPublicKey, Estimate, NoteAmount, NotePublicKey, PrivatePoolConfig},
 };
 
 use crate::{error::Error, plan::PreparedTransactionPlan};
@@ -67,14 +66,32 @@ impl PoolCore {
         if amount.is_zero() {
             return Err(Error::InvalidConfig("amount must be > 0".into()));
         }
+        let recipient = recipient.into();
+        self.check_withdrawal_recipient(&recipient)?;
         let session = SpendSession::setup(
             wallet.to_vec(),
             amount,
             fee,
             self.config.pool_contract_id.clone(),
-            SpendTarget::withdraw(recipient.into()),
+            SpendTarget::withdraw(recipient),
         )?;
         Ok(PreparedTransactionPlan::from_session(session)?)
+    }
+
+    /// Refuses a withdrawal to a contract of this deployment.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::WithdrawalToContract`] for such a `recipient`.
+    pub fn check_withdrawal_recipient(&self, recipient: &str) -> Result<(), Error> {
+        if self
+            .config
+            .contract_config
+            .is_deployment_contract(recipient)
+        {
+            return Err(Error::WithdrawalToContract);
+        }
+        Ok(())
     }
 
     pub fn estimate(
@@ -97,14 +114,11 @@ impl PoolCore {
         amount: NoteAmount,
         fee: NoteAmount,
     ) -> Result<Transact, Error> {
-        let ext_amount = amount
-            .checked_add(fee)
-            .and_then(|sent| ExtAmount::try_from(sent).ok())
-            .ok_or_else(|| {
-                Error::Other(anyhow::anyhow!(
-                    "deposit amount plus fee exceeds ext_amount range"
-                ))
-            })?;
+        let ext_amount = deposit_ext_amount(amount, fee).ok_or_else(|| {
+            Error::Other(anyhow::anyhow!(
+                "deposit amount plus fee exceeds ext_amount range"
+            ))
+        })?;
 
         Ok(Transact::new(
             Vec::new(),
@@ -120,7 +134,13 @@ impl PoolCore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ContractConfig, NoteOwnerAddress, SignerAddress};
+    use crate::{
+        planner::{PlanError, SpendSessionError},
+        types::{
+            AssetDescriptor, ContractConfig, ExtAmount, GvkMode, NoteOwnerAddress, PoolConfigEntry,
+            SignerAddress,
+        },
+    };
 
     /// The deposit step converts its amount to an `ext_amount` before anything
     /// is proved, and `i128::MAX` is the largest amount that converts.
@@ -148,18 +168,33 @@ mod tests {
         assert!(matches!(step(1 << 127), Err(Error::Other(_))));
     }
 
-    #[test]
-    fn a_deposit_sends_the_amount_plus_the_fee() {
-        let core = PoolCore {
+    // Every id but the pool's and its token's is empty.
+    fn core() -> PoolCore {
+        PoolCore {
             config: PrivatePoolConfig {
-                contract_config: ContractConfig::default(),
+                contract_config: ContractConfig {
+                    pools: vec![PoolConfigEntry {
+                        pool_contract_id: "POOL".into(),
+                        token_contract_id: "TOKEN".into(),
+                        deployment_ledger: 0,
+                        enabled: true,
+                        asset: AssetDescriptor::Native,
+                        policy_flags: Default::default(),
+                        gvk_mode: GvkMode::Off,
+                        gvk_authority_pub_key: None,
+                    }],
+                    ..ContractConfig::default()
+                },
                 pool_contract_id: "POOL".into(),
                 user_address: NoteOwnerAddress::new("OWNER"),
                 signer_address: SignerAddress::new("SIGNER"),
             },
-        };
+        }
+    }
 
-        let step = core
+    #[test]
+    fn a_deposit_sends_the_amount_plus_the_fee() {
+        let step = core()
             .deposit_transact_step(
                 NotePublicKey([1; 32]),
                 EncryptionPublicKey([2; 32]),
@@ -172,6 +207,69 @@ mod tests {
         assert_eq!(
             step.output_amounts,
             [NoteAmount::from(10), NoteAmount::ZERO]
+        );
+    }
+
+    #[test]
+    fn a_withdrawal_to_a_deployment_contract_is_refused_before_planning() {
+        let core = core();
+        let withdraw = |recipient: &str| {
+            core.prepare_withdraw(&[], NoteAmount::from(10), recipient, NoteAmount::from(3))
+        };
+
+        let result = withdraw("POOL");
+        assert!(
+            matches!(result, Err(Error::WithdrawalToContract)),
+            "{result:?}"
+        );
+        let result = withdraw("");
+        assert!(
+            matches!(
+                result,
+                Err(Error::SpendSession(
+                    SpendSessionError::MissingWithdrawRecipient
+                ))
+            ),
+            "{result:?}"
+        );
+        let result = withdraw("GRECIPIENT");
+        assert!(
+            matches!(
+                result,
+                Err(Error::SpendSession(SpendSessionError::Plan(
+                    PlanError::NoSpendableNotes
+                )))
+            ),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn a_zero_amount_is_refused() {
+        let core = core();
+        let deposit = core.prepare_deposit(NoteAmount::ZERO);
+        let transfer = core.prepare_transfer(
+            &[],
+            NotePublicKey([1; 32]),
+            EncryptionPublicKey([2; 32]),
+            NoteAmount::ZERO,
+            NoteAmount::ZERO,
+        );
+        let withdraw = core.prepare_withdraw(&[], NoteAmount::ZERO, "OWNER", NoteAmount::ZERO);
+
+        for result in [deposit, transfer, withdraw] {
+            assert!(matches!(result, Err(Error::InvalidConfig(_))), "{result:?}");
+        }
+    }
+
+    #[test]
+    fn an_empty_wallet_has_no_estimate() {
+        let err = core()
+            .estimate(&[], NoteAmount::ONE, NoteAmount::ZERO)
+            .expect_err("no notes");
+        assert!(
+            matches!(err, Error::Plan(PlanError::NoSpendableNotes)),
+            "{err:?}"
         );
     }
 }
