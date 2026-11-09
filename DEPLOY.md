@@ -267,8 +267,7 @@ Stellar CLI and Rust toolchain. That code matches no release, and the manifest
 records none. On mainnet, which `deploy.sh` detects by the network
 passphrase, it refuses such a run unless `--allow-unverified` is passed. On
 every mainnet run, with or without a release, it also refuses `--vk-json` and
-`--vk-file`, a `circuit_keys` directory or key file that is a link, and
-verifiers built for another network.
+`--vk-file`, and verifiers built for another network.
 
 A release holds verifiers only for the key files committed when it was made.
 Before a network with keys of its own, such as mainnet, can deploy from a

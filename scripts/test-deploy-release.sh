@@ -156,24 +156,11 @@ fresh
 expect 1 'mainnet requires --yes' --skip-init
 expect 1 'mainnet deploys only the contracts of a release; pass --release-dir' --skip-init --yes
 
-linked='must be a real directory on mainnet, not a link and not inside a linked directory'
-mkdir "$dry"
-ln -s ../testnet/circuit_keys "$dry/circuit_keys"
-expect 1 "$linked" --yes --allow-unverified --release-dir "$rel"
-expect 1 "$linked" --yes --allow-unverified --skip-init
-rm -r "$dry"
-ln -s testnet "$dry"
-expect 1 "$linked" --yes --allow-unverified --release-dir "$rel"
-rm "$dry"
-
 mkdir -p "$dry/circuit_keys"
 cp "$keys"/*_vk.json "$dry/circuit_keys/"
 expect 1 'mainnet refuses --vk-json and --vk-file' --yes --allow-unverified \
   --vk-file "$keys/policy_tx_2_2_AB_vk.json"
 expect 1 "$B was built for network testnet, and mainnet deploys only verifiers built for $NET" \
-  --yes --allow-unverified --release-dir "$rel"
-ln -sf "$keys/policy_tx_2_2_B_vk.json" "$dry/circuit_keys/"
-expect 1 "$dry/circuit_keys/policy_tx_2_2_B_vk.json must be a file on mainnet, not a link" \
   --yes --allow-unverified --release-dir "$rel"
 
 echo 'deploy.sh release refusals passed'

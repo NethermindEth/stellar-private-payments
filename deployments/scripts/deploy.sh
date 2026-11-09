@@ -545,14 +545,6 @@ if [[ "$IS_MAINNET" == "true" ]]; then
   [[ -z "$VK_JSON$VK_FILE" ]] \
     || die "mainnet refuses --vk-json and --vk-file; commit the key file under" \
       "deployments/$NETWORK/circuit_keys instead"
-  # A link would let another network's key file stand in for this network's.
-  keys_dir="deployments/$NETWORK/circuit_keys"
-  [[ "$(cd "$ROOT_DIR/$keys_dir" && pwd -P)" == "$(cd "$ROOT_DIR" && pwd -P)/$keys_dir" ]] \
-    || die "$ROOT_DIR/$keys_dir must be a real directory on mainnet, not a link and not inside a" \
-      "linked directory; copy this network's key files into a real directory there"
-  for vk in "$ROOT_DIR/$keys_dir"/*_vk.json; do
-    [[ ! -L "$vk" ]] || die "$vk must be a file on mainnet, not a link"
-  done
 fi
 
 if [[ -n "$TOKEN" && ${#POOL_SPECS[@]} -gt 0 ]]; then
