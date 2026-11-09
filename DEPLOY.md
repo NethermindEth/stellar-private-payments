@@ -242,7 +242,8 @@ Before any transaction, `deploy.sh` checks the release:
 3. It picks each verifier by the SHA-256 of this network's key file, and
    checks the build options each Wasm records in its meta, the contract
    metadata `stellar contract info meta` prints: the package it was built
-   from and, for a verifier, the feature that embeds its key.
+   from and, for a verifier, the feature that embeds its key. On mainnet, it
+   stops when a verifier was built for another network.
 
 It then deploys the files it picked, and records the release and each
 contract's Wasm hash in the manifest under `contracts_release`.
@@ -265,9 +266,7 @@ names with `--release-repo`.
 Without `--release-dir`, `deploy.sh` builds the contracts with your own
 Stellar CLI and Rust toolchain. That code matches no release, and the manifest
 records none. On mainnet, which `deploy.sh` detects by the network
-passphrase, it refuses such a run unless `--allow-unverified` is passed. On
-every mainnet run, with or without a release, it also refuses `--vk-json` and
-`--vk-file`, and verifiers built for another network.
+passphrase, it refuses such a run unless `--allow-unverified` is passed.
 
 A release holds verifiers only for the key files committed when it was made.
 Before a network with keys of its own, such as mainnet, can deploy from a

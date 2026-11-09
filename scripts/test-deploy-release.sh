@@ -62,7 +62,7 @@ fresh() {
   edit --arg repo "$REPO" '.repo = $repo'
 }
 # Runs deploy.sh on $NET with one blocklist pool and arguments $3..., and fails unless it exits
-# $1 with $2 in its last line on stderr, the line die prints, and writes no manifest.
+# $1 with $2 in its last line on stderr and writes no manifest.
 expect() {
   local status=0 code="$1" message="$2"
   shift 2
@@ -158,8 +158,10 @@ expect 1 'mainnet deploys only the contracts of a release; pass --release-dir' -
 
 mkdir -p "$dry/circuit_keys"
 cp "$keys"/*_vk.json "$dry/circuit_keys/"
-expect 1 'mainnet refuses --vk-json and --vk-file' --yes --allow-unverified \
+# --allow-unverified lets mainnet build the contracts locally, --vk-file included.
+expect 99 'unexpected stellar contract build' --yes --allow-unverified \
   --vk-file "$keys/policy_tx_2_2_AB_vk.json"
+grep -qF 'because of --allow-unverified' "$fixture/err"
 expect 1 "$B was built for network testnet, and mainnet deploys only verifiers built for $NET" \
   --yes --allow-unverified --release-dir "$rel"
 

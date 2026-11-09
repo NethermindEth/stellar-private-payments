@@ -130,8 +130,8 @@ Notes:
   - The registry's verifier is built from, or with --release-dir picked by the hash of,
     deployments/<network>/circuit_keys/keyOwnership_vk.json.
   - Per-pool policyFlags / gvkMode are written to deployments/<network>/deployments.json.
-  - Provide --vk-file/--vk-json only for ceremony allowlist-blocklist (AB) keys, and never on
-    mainnet; other VKs are taken from deployments/<network>/circuit_keys/ automatically.
+  - Provide --vk-file/--vk-json only for ceremony allowlist-blocklist (AB) keys; other VKs
+    are taken from deployments/<network>/circuit_keys/ automatically.
   - If neither --token nor --pool is provided, one native XLM pool is deployed by default.
 USAGE
   exit 2
@@ -542,9 +542,6 @@ if [[ "$IS_MAINNET" == "true" ]]; then
     warn "building the contracts locally instead of deploying a release," \
       "because of --allow-unverified"
   fi
-  [[ -z "$VK_JSON$VK_FILE" ]] \
-    || die "mainnet refuses --vk-json and --vk-file; commit the key file under" \
-      "deployments/$NETWORK/circuit_keys instead"
 fi
 
 if [[ -n "$TOKEN" && ${#POOL_SPECS[@]} -gt 0 ]]; then
