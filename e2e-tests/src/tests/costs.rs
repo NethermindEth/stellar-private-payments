@@ -199,19 +199,19 @@ fn nullifiers(env: &Env, seed: u32) -> Vec<U256> {
 
 /// A pool wired to the accepting verifier, a Stellar asset token, and the two
 /// association set providers, all with the deployment scripts' tree depths.
-struct PoolFixture {
-    env: Env,
+pub(super) struct PoolFixture {
+    pub(super) env: Env,
     admin: Address,
     token: Address,
     verifier: Address,
     asp_membership: Address,
     asp_non_membership: Address,
-    pool: Address,
-    sender: Address,
+    pub(super) pool: Address,
+    pub(super) sender: Address,
 }
 
 impl PoolFixture {
-    fn new(policy_flags: u32) -> Self {
+    pub(super) fn new(policy_flags: u32) -> Self {
         let env = mainnet_env();
         let admin = Address::generate(&env);
         let sender = Address::generate(&env);
@@ -261,7 +261,7 @@ impl PoolFixture {
         }
     }
 
-    fn client(&self) -> PoolContractClient<'_> {
+    pub(super) fn client(&self) -> PoolContractClient<'_> {
         PoolContractClient::new(&self.env, &self.pool)
     }
 
@@ -272,7 +272,7 @@ impl PoolFixture {
         )
     }
 
-    fn proof(&self, root: U256, seed: u32, ext_amount: i32) -> (pool::Proof, ExtData) {
+    pub(super) fn proof(&self, root: U256, seed: u32, ext_amount: i32) -> (pool::Proof, ExtData) {
         let ext = ext_data(&self.env, &self.sender, ext_amount);
         let (membership_root, non_membership_root) = self.roots();
         let proof = pool::Proof {

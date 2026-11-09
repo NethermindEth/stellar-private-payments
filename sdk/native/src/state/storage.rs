@@ -1,10 +1,13 @@
 use super::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
-use crate::types::{
-    AspMembershipSync, BootnodeSetting, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey,
-    EncryptionPublicKey, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting, LeafAddedEvent,
-    NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey,
-    OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent, RecipientLookup,
-    UserNoteSummary, UserOperation,
+use crate::{
+    chain::EventChain,
+    types::{
+        AspMembershipSync, BootnodeSetting, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey,
+        EncryptionPublicKey, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting, LeafAddedEvent,
+        NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey,
+        NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent,
+        RecipientLookup, UserNoteSummary, UserOperation,
+    },
 };
 use anyhow::{Context, Result, anyhow, ensure};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params, params_from_iter};
@@ -28,8 +31,13 @@ const MIGRATION_ARRAY: &[M] = &[
     M::up(include_str!("schema_v5_leaves_per_tree.sql")),
     M::up(include_str!("schema_v6_repeated_commitments.sql")).foreign_key_check(),
     M::up(include_str!("schema_v7_note_per_leaf.sql")).foreign_key_check(),
+    M::up(include_str!("schema_v8_event_chain.sql")),
 ];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
+/// `user_version` once `schema_v8_event_chain.sql` is applied.
+const EVENT_CHAIN_VERSION: i64 = 8;
+/// Raw events one pass of [`Storage::fold_event_chain`] loads at a time.
+const FOLD_BATCH: i64 = 512;
 
 // Note `n` has a saved nullifier in the pool of event `r`, reconciled or not.
 const SAVED_NULLIFIER: &str = "EXISTS (SELECT 1 FROM pool_nullifiers pnl
@@ -169,13 +177,22 @@ impl Storage {
     pub(super) fn connect_with_connection(mut conn: Connection) -> Result<Self> {
         // Table rebuilds in migrations must not cascade into dependent tables.
         conn.pragma_update(None, "foreign_keys", "OFF")?;
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         MIGRATIONS.to_latest(&mut conn)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        Ok(Self { conn })
+        let mut storage = Self { conn };
+        // Events saved before the chain columns existed are folded once.
+        if version < EVENT_CHAIN_VERSION {
+            storage.fold_every_event_chain()?;
+        }
+        Ok(storage)
     }
 
+    /// Saves raw events, skipping any already saved, and extends the event
+    /// chain of each contract that gained one.
     pub fn save_events_batch(&mut self, data: &crate::types::ContractsEventData) -> Result<()> {
         let tx = self.conn.transaction()?;
+        let mut extended = HashSet::new();
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO raw_contract_events (id, ledger, contract_id, topics, value)
@@ -185,14 +202,20 @@ impl Storage {
 
             for event in &data.events {
                 let event_contract_id = Self::get_or_create_contract_id(&tx, &event.contract_id)?;
-                stmt.execute(params![
+                let inserted = stmt.execute(params![
                     event.id,
                     event.ledger,
                     event_contract_id,
                     event.topics.join(","),
                     event.value
                 ])?;
+                if inserted > 0 {
+                    extended.insert(event_contract_id);
+                }
             }
+        }
+        for contract_id in extended {
+            Self::fold_event_chain(&tx, contract_id)?;
         }
         tx.commit()?;
         tracing::debug!(
@@ -202,6 +225,157 @@ impl Storage {
             data.latest_ledger
         );
         Ok(())
+    }
+
+    /// Folds every contract's unfolded raw events into its event chain.
+    fn fold_every_event_chain(&mut self) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        let contract_ids = {
+            let mut stmt = tx.prepare(
+                "SELECT DISTINCT contract_id FROM raw_contract_events WHERE chain_count IS NULL",
+            )?;
+            stmt.query_map([], |row| row.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        for contract_id in contract_ids {
+            Self::fold_event_chain(&tx, contract_id)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Folds `contract_id`'s unfolded raw events into its event chain, in
+    /// emission order: by ledger, then by event id.
+    ///
+    /// An event saved after a later one was folded un-folds every event after
+    /// it, so the chain is refolded in emission order. An event that does not
+    /// fold stops the chain before it, with a warning: the chain then falls
+    /// short of the contract's, which a comparison with the contract reports.
+    fn fold_event_chain(tx: &rusqlite::Transaction, contract_id: i64) -> Result<()> {
+        let Some((ledger, id)) = tx
+            .query_row(
+                "SELECT ledger, id FROM raw_contract_events
+                 WHERE contract_id = ?1 AND chain_count IS NULL
+                 ORDER BY ledger, id
+                 LIMIT 1",
+                params![contract_id],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+        else {
+            return Ok(());
+        };
+        tx.execute(
+            "UPDATE raw_contract_events SET chain_count = NULL, chain_hash = NULL
+             WHERE contract_id = ?1 AND (ledger, id) > (?2, ?3)",
+            params![contract_id, ledger, id],
+        )?;
+        let mut chain = tx
+            .query_row(
+                "SELECT chain_count, chain_hash FROM raw_contract_events
+                 WHERE contract_id = ?1 AND chain_count IS NOT NULL
+                 ORDER BY chain_count DESC
+                 LIMIT 1",
+                params![contract_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .map(event_chain_from_row)
+            .transpose()?
+            .unwrap_or(EventChain::EMPTY);
+
+        let mut select = tx.prepare(
+            "SELECT id, topics, value FROM raw_contract_events
+             WHERE contract_id = ?1 AND chain_count IS NULL
+             ORDER BY ledger, id
+             LIMIT ?2",
+        )?;
+        let mut update = tx.prepare(
+            "UPDATE raw_contract_events SET chain_count = ?2, chain_hash = ?3 WHERE id = ?1",
+        )?;
+        loop {
+            let pending = select
+                .query_map(params![contract_id, FOLD_BATCH], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            if pending.is_empty() {
+                return Ok(());
+            }
+            for (id, topics, value) in pending {
+                let topics: Vec<&str> = if topics.is_empty() {
+                    Vec::new()
+                } else {
+                    topics.split(',').collect()
+                };
+                chain = match chain.extend(&topics, &value) {
+                    Ok(next) => next,
+                    Err(e) => {
+                        tracing::warn!(
+                            "[STORAGE] event {id} does not fold into its contract's event chain, \
+                             which stops at {} events: {e:#}",
+                            chain.count
+                        );
+                        return Ok(());
+                    }
+                };
+                update.execute(params![
+                    id,
+                    i64::try_from(chain.count).context("the event count overflows")?,
+                    chain.hash.as_slice()
+                ])?;
+            }
+        }
+    }
+
+    /// The event chain over the events saved for `contract_address`, as far
+    /// as they fold; [`EventChain::EMPTY`] when none are saved.
+    pub fn event_chain(&self, contract_address: &str) -> Result<EventChain> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT r.chain_count, r.chain_hash FROM raw_contract_events r
+                 JOIN contracts c ON c.contract_id = r.contract_id
+                 WHERE c.address = ?1 AND r.chain_count IS NOT NULL
+                 ORDER BY r.chain_count DESC
+                 LIMIT 1",
+                params![contract_address],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .map(event_chain_from_row)
+            .transpose()?
+            .unwrap_or(EventChain::EMPTY))
+    }
+
+    /// The hash of `contract_address`'s event chain after its first `count`
+    /// events, or `None` when fewer of them are saved and folded.
+    pub fn event_chain_hash_at(
+        &self,
+        contract_address: &str,
+        count: u64,
+    ) -> Result<Option<[u8; 32]>> {
+        if count == 0 {
+            return Ok(Some(EventChain::EMPTY.hash));
+        }
+        self.conn
+            .query_row(
+                "SELECT r.chain_count, r.chain_hash FROM raw_contract_events r
+                 JOIN contracts c ON c.contract_id = r.contract_id
+                 WHERE c.address = ?1 AND r.chain_count = ?2",
+                params![
+                    contract_address,
+                    i64::try_from(count).context("the event count overflows")?
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .map(|row| event_chain_from_row(row).map(|chain| chain.hash))
+            .transpose()
     }
 
     pub fn save_sync_progress(
@@ -1969,6 +2143,16 @@ pub(super) fn check_integrity(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// An [`EventChain`] from a raw event's `chain_count` and `chain_hash`.
+fn event_chain_from_row((count, hash): (i64, Vec<u8>)) -> Result<EventChain> {
+    Ok(EventChain {
+        count: u64::try_from(count).context("a negative event count")?,
+        hash: hash
+            .try_into()
+            .map_err(|hash: Vec<u8>| anyhow!("an event chain hash of {} bytes", hash.len()))?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -3270,16 +3454,19 @@ mod tests {
         let mut conn = Connection::open_in_memory()?;
         MIGRATIONS.to_version(&mut conn, 5)?;
         let mut v5 = Storage { conn };
-        v5.save_events_batch(&ContractsEventData {
-            events: vec![
-                test_events::commitment_event("evt-0", 1, test_events::commitment_entries(0)?)?,
-                test_events::commitment_event("evt-1", 1, test_events::commitment_entries(1)?)?,
-                test_events::commitment_event("evt-2", 2, test_events::commitment_entries(2)?)?,
-                dummy_event("evt-3"),
-            ],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
+        save_raw_events(
+            &v5.conn,
+            &ContractsEventData {
+                events: vec![
+                    test_events::commitment_event("evt-0", 1, test_events::commitment_entries(0)?)?,
+                    test_events::commitment_event("evt-1", 1, test_events::commitment_entries(1)?)?,
+                    test_events::commitment_event("evt-2", 2, test_events::commitment_entries(2)?)?,
+                    dummy_event("evt-3"),
+                ],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            },
+        )?;
         // The unique constraint dropped `evt-1`, which repeats `c`, and the
         // processor marked it anyway. The rows carry ids 7, 3, and 5, so a
         // rebuild that renumbers them breaks the spent note's links to `evt-2`
@@ -3349,19 +3536,22 @@ mod tests {
         let mut conn = Connection::open_in_memory()?;
         MIGRATIONS.to_version(&mut conn, 5)?;
         let mut v5 = Storage { conn };
-        v5.save_events_batch(&ContractsEventData {
-            events: vec![
-                spent("evt-0")?,
-                in_pool2(spent("evt-1")?),
-                in_pool2(test_events::commitment_event(
-                    "evt-2",
-                    2,
-                    test_events::commitment_entries(0)?,
-                )?),
-            ],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
+        save_raw_events(
+            &v5.conn,
+            &ContractsEventData {
+                events: vec![
+                    spent("evt-0")?,
+                    in_pool2(spent("evt-1")?),
+                    in_pool2(test_events::commitment_event(
+                        "evt-2",
+                        2,
+                        test_events::commitment_entries(0)?,
+                    )?),
+                ],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            },
+        )?;
         // The unique key dropped `evt-1`, which repeats `n` in a second pool,
         // and the processor marked it anyway.
         v5.conn.execute(
@@ -3438,17 +3628,21 @@ mod tests {
             .iter()
             .map(|leaf| format!("{pool}-{leaf}"))
             .collect();
-        storage.save_events_batch(&ContractsEventData {
-            events: ids
-                .iter()
-                .map(|id| ContractEvent {
-                    contract_id: pool.to_string(),
-                    ..dummy_event(id)
-                })
-                .collect(),
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
+        // Raw rows, as the v6 tests need them before the event chain existed.
+        save_raw_events(
+            &storage.conn,
+            &ContractsEventData {
+                events: ids
+                    .iter()
+                    .map(|id| ContractEvent {
+                        contract_id: pool.to_string(),
+                        ..dummy_event(id)
+                    })
+                    .collect(),
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            },
+        )?;
         storage.save_commitment_events_batch(
             &ids.iter()
                 .zip(leaf_indices)
@@ -3545,11 +3739,14 @@ mod tests {
         let mut v6 = Storage { conn };
         save_copies(&mut v6, "CPOOL", &[0, 1])?;
         save_copies(&mut v6, "CPOOL2", &[0])?;
-        v6.save_events_batch(&ContractsEventData {
-            events: vec![dummy_event("evt-null")],
-            cursor: "cur".to_string(),
-            latest_ledger: 1,
-        })?;
+        save_raw_events(
+            &v6.conn,
+            &ContractsEventData {
+                events: vec![dummy_event("evt-null")],
+                cursor: "cur".to_string(),
+                latest_ledger: 1,
+            },
+        )?;
         v6.conn.execute_batch(
             "INSERT INTO pool_nullifiers (id, nullifier, event_id)
                  VALUES (9, zeroblob(32), 'evt-null');
@@ -3895,8 +4092,8 @@ mod tests {
     fn opening_a_v4_database_files_leaves_under_their_tree() -> Result<()> {
         let mut conn = Connection::open_in_memory()?;
         MIGRATIONS.to_version(&mut conn, 4)?;
-        let mut v4 = Storage { conn };
-        v4.save_events_batch(&two_allowlist_events())?;
+        let v4 = Storage { conn };
+        save_raw_events(&v4.conn, &two_allowlist_events())?;
         v4.conn.execute(
             "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
                 VALUES (0, ?1, ?1, 'evt-a'), (1, ?2, ?2, 'evt-b')",
@@ -3930,7 +4127,7 @@ mod tests {
         let mut conn = Connection::open_in_memory()?;
         MIGRATIONS.to_version(&mut conn, 4)?;
         let mut v4 = Storage { conn };
-        v4.save_events_batch(&two_allowlist_events())?;
+        save_raw_events(&v4.conn, &two_allowlist_events())?;
         v4.conn.execute(
             "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
                 VALUES (0, ?1, ?1, 'evt-a'), (0, ?2, ?2, 'evt-b')
@@ -3950,6 +4147,184 @@ mod tests {
             .map(|e| e.id)
             .collect();
         assert_eq!(ids, vec!["evt-b".to_string()]);
+        Ok(())
+    }
+
+    /// A pool-shaped event of `contract` at `ledger`, with topics and value in
+    /// the base64 XDR an RPC serves.
+    fn chain_event(id: &str, ledger: u32, contract: &str, n: u64) -> Result<ContractEvent> {
+        Ok(ContractEvent {
+            ledger,
+            contract_id: contract.to_string(),
+            ..test_events::raw_event(
+                id,
+                &[
+                    test_events::symbol("new_nullifier_event")?,
+                    test_events::u256(n),
+                ],
+                Vec::new(),
+            )?
+        })
+    }
+
+    fn batch(events: Vec<ContractEvent>) -> ContractsEventData {
+        ContractsEventData {
+            events,
+            cursor: "cursor".to_string(),
+            latest_ledger: 10,
+        }
+    }
+
+    /// `events` folded in the order given.
+    fn folded(events: &[&ContractEvent]) -> Result<EventChain> {
+        events.iter().try_fold(EventChain::EMPTY, |chain, event| {
+            chain.extend(&event.topics, &event.value)
+        })
+    }
+
+    #[test]
+    fn saved_events_extend_each_contracts_event_chain() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let pool = [
+            chain_event("p1", 1, "CPOOL", 1)?,
+            chain_event("p2", 1, "CPOOL", 2)?,
+            chain_event("p3", 2, "CPOOL", 3)?,
+        ];
+        let registry = chain_event("r1", 1, "CREGISTRY", 4)?;
+        let [p1, p2, p3] = &pool;
+
+        storage.save_events_batch(&batch(vec![
+            p1.clone(),
+            registry.clone(),
+            p2.clone(),
+            p3.clone(),
+        ]))?;
+
+        assert_eq!(storage.event_chain("CPOOL")?, folded(&[p1, p2, p3])?);
+        assert_eq!(storage.event_chain("CREGISTRY")?, folded(&[&registry])?);
+        assert_eq!(storage.event_chain("CUNKNOWN")?, EventChain::EMPTY);
+        assert_eq!(
+            storage.event_chain_hash_at("CPOOL", 0)?,
+            Some(EventChain::EMPTY.hash)
+        );
+        assert_eq!(
+            storage.event_chain_hash_at("CPOOL", 1)?,
+            Some(folded(&[p1])?.hash)
+        );
+        assert_eq!(
+            storage.event_chain_hash_at("CPOOL", 2)?,
+            Some(folded(&[p1, p2])?.hash)
+        );
+        assert_eq!(storage.event_chain_hash_at("CPOOL", 4)?, None);
+        Ok(())
+    }
+
+    #[test]
+    fn resaving_events_does_not_extend_the_chain_again() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let events = vec![
+            chain_event("p1", 1, "CPOOL", 1)?,
+            chain_event("p2", 2, "CPOOL", 2)?,
+        ];
+
+        storage.save_events_batch(&batch(events.clone()))?;
+        storage.save_events_batch(&batch(events.clone()))?;
+
+        assert_eq!(
+            storage.event_chain("CPOOL")?,
+            folded(&events.iter().collect::<Vec<_>>())?
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_event_saved_late_is_folded_in_emission_order() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let first = chain_event("p1", 1, "CPOOL", 1)?;
+        let second = chain_event("p2", 2, "CPOOL", 2)?;
+        let third = chain_event("p3", 3, "CPOOL", 3)?;
+
+        storage.save_events_batch(&batch(vec![first.clone(), third.clone()]))?;
+        storage.save_events_batch(&batch(vec![second.clone()]))?;
+
+        assert_eq!(
+            storage.event_chain("CPOOL")?,
+            folded(&[&first, &second, &third])?
+        );
+        assert_eq!(
+            storage.event_chain_hash_at("CPOOL", 2)?,
+            Some(folded(&[&first, &second])?.hash)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_event_that_does_not_fold_stops_its_contracts_chain() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let first = chain_event("p1", 1, "CPOOL", 1)?;
+        let garbled = ContractEvent {
+            topics: vec!["commitment".to_string()],
+            ..chain_event("p2", 2, "CPOOL", 2)?
+        };
+        let registry = chain_event("r1", 2, "CREGISTRY", 4)?;
+
+        storage.save_events_batch(&batch(vec![
+            first.clone(),
+            garbled,
+            chain_event("p3", 3, "CPOOL", 3)?,
+            registry.clone(),
+        ]))?;
+
+        assert_eq!(storage.event_chain("CPOOL")?, folded(&[&first])?);
+        assert_eq!(storage.event_chain("CREGISTRY")?, folded(&[&registry])?);
+        Ok(())
+    }
+
+    #[test]
+    fn events_saved_before_the_event_chain_are_folded_on_open() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 7)?;
+        let events = [
+            chain_event("p2", 2, "CPOOL", 2)?,
+            chain_event("p1", 1, "CPOOL", 1)?,
+        ];
+        conn.execute("INSERT INTO contracts (address) VALUES ('CPOOL')", [])?;
+        for event in &events {
+            conn.execute(
+                "INSERT INTO raw_contract_events (id, ledger, contract_id, topics, value)
+                 VALUES (?1, ?2, 1, ?3, ?4)",
+                params![event.id, event.ledger, event.topics.join(","), event.value],
+            )?;
+        }
+
+        let storage = Storage::connect_with_connection(conn)?;
+
+        let [second, first] = &events;
+        assert_eq!(storage.event_chain("CPOOL")?, folded(&[first, second])?);
+        Ok(())
+    }
+
+    /// Saves raw events into a database at a schema older than the event
+    /// chain, as `save_events_batch` saved them then.
+    fn save_raw_events(conn: &Connection, data: &ContractsEventData) -> Result<()> {
+        for event in &data.events {
+            conn.execute(
+                "INSERT INTO contracts (address) VALUES (?1) ON CONFLICT(address) DO NOTHING",
+                params![event.contract_id],
+            )?;
+            conn.execute(
+                "INSERT INTO raw_contract_events (id, ledger, contract_id, topics, value)
+                 SELECT ?1, ?2, contract_id, ?3, ?4 FROM contracts WHERE address = ?5
+                 ON CONFLICT(id) DO NOTHING",
+                params![
+                    event.id,
+                    event.ledger,
+                    event.topics.join(","),
+                    event.value,
+                    event.contract_id
+                ],
+            )?;
+        }
         Ok(())
     }
 
