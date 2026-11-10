@@ -1,6 +1,6 @@
 use super::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
 use crate::{
-    chain::EventChain,
+    chain::{EventChain, EventChainCheck},
     types::{
         AspMembershipSync, BootnodeSetting, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey,
         EncryptionPublicKey, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting, LeafAddedEvent,
@@ -352,6 +352,32 @@ impl Storage {
             .map(event_chain_from_row)
             .transpose()?
             .unwrap_or(EventChain::EMPTY))
+    }
+
+    /// Compares the event chain over the events saved for `contract_address`
+    /// with the chain the contract `published`.
+    pub fn check_event_chain(
+        &self,
+        contract_address: &str,
+        published: &EventChain,
+    ) -> Result<EventChainCheck> {
+        Ok(self.event_chain(contract_address)?.check(published))
+    }
+
+    /// Forgets everything synced from `contract_address`: its events, what was
+    /// derived from them, the notes they made, and its indexing progress. The
+    /// next sync fetches its events again from its deployment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an ASP membership contract with saved leaves,
+    /// whose leaves do not cascade.
+    pub fn forget_contract_history(&mut self, contract_address: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM contracts WHERE address = ?1",
+            params![contract_address],
+        )?;
+        Ok(())
     }
 
     pub fn save_sync_progress(
@@ -4322,6 +4348,28 @@ mod tests {
         conn.execute_batch("DROP TRIGGER interrupt_fold")?;
         let storage = Storage::connect_with_connection(conn)?;
         assert_eq!(storage.event_chain("CPOOL")?, folded(&[&event])?);
+        Ok(())
+    }
+
+    #[test]
+    fn forgetting_a_contracts_history_keeps_the_others() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let registry = chain_event("r1", 1, "CREGISTRY", 4)?;
+        storage.save_events_batch(&batch(vec![
+            chain_event("p1", 1, "CPOOL", 1)?,
+            registry.clone(),
+        ]))?;
+
+        storage.forget_contract_history("CPOOL")?;
+
+        assert_eq!(storage.event_chain("CPOOL")?, EventChain::EMPTY);
+        assert_eq!(storage.event_chain("CREGISTRY")?, folded(&[&registry])?);
+        let pool_events: i64 = storage.conn.query_row(
+            "SELECT COUNT(*) FROM raw_contract_events WHERE id = 'p1'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(pool_events, 0);
         Ok(())
     }
 
