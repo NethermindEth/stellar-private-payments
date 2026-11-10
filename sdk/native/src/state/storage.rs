@@ -11,9 +11,9 @@ use crate::{
 };
 use anyhow::{Context, Result, anyhow, ensure};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params, params_from_iter};
-use rusqlite_migration::{M, Migrations};
+use rusqlite_migration::{HookError, HookResult, M, Migrations};
 use serde::{Serialize, de::DeserializeOwned};
-use std::{collections::HashSet, path::Path};
+use std::{collections::HashSet, path::Path, sync::LazyLock};
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 #[cfg(feature = "unencrypted-storage")]
@@ -23,21 +23,31 @@ pub const APP_SETTING_GVK_AUTHORITY: &str = "gvk_authority";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
-const MIGRATION_ARRAY: &[M] = &[
-    M::up(include_str!("schema.sql")),
-    M::up(include_str!("schema_v2_gvk_ciphertext.sql")),
-    M::up(include_str!("schema_v3_account_kdf_domain.sql")).foreign_key_check(),
-    M::up(include_str!("schema_v4_processed_events.sql")),
-    M::up(include_str!("schema_v5_leaves_per_tree.sql")),
-    M::up(include_str!("schema_v6_repeated_commitments.sql")).foreign_key_check(),
-    M::up(include_str!("schema_v7_note_per_leaf.sql")).foreign_key_check(),
-    M::up(include_str!("schema_v8_event_chain.sql")),
-];
-const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
-/// `user_version` once `schema_v8_event_chain.sql` is applied.
-const EVENT_CHAIN_VERSION: i64 = 8;
+static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
+    Migrations::new(vec![
+        M::up(include_str!("schema.sql")),
+        M::up(include_str!("schema_v2_gvk_ciphertext.sql")),
+        M::up(include_str!("schema_v3_account_kdf_domain.sql")).foreign_key_check(),
+        M::up(include_str!("schema_v4_processed_events.sql")),
+        M::up(include_str!("schema_v5_leaves_per_tree.sql")),
+        M::up(include_str!("schema_v6_repeated_commitments.sql")).foreign_key_check(),
+        M::up(include_str!("schema_v7_note_per_leaf.sql")).foreign_key_check(),
+        // Folding in the migration's transaction records v8 only with the
+        // events saved before it folded.
+        M::up_with_hook(
+            include_str!("schema_v8_event_chain.sql"),
+            fold_saved_event_chains,
+        ),
+    ])
+});
 /// Raw events one pass of [`Storage::fold_event_chain`] loads at a time.
 const FOLD_BATCH: i64 = 512;
+
+/// Folds the raw events saved before schema v8 into their contracts' event
+/// chains, as the v8 migration's hook.
+fn fold_saved_event_chains(tx: &rusqlite::Transaction) -> HookResult {
+    Storage::fold_every_event_chain(tx).map_err(|e| HookError::Hook(format!("{e:#}")))
+}
 
 // Note `n` has a saved nullifier in the pool of event `r`, reconciled or not.
 const SAVED_NULLIFIER: &str = "EXISTS (SELECT 1 FROM pool_nullifiers pnl
@@ -177,15 +187,9 @@ impl Storage {
     pub(super) fn connect_with_connection(mut conn: Connection) -> Result<Self> {
         // Table rebuilds in migrations must not cascade into dependent tables.
         conn.pragma_update(None, "foreign_keys", "OFF")?;
-        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         MIGRATIONS.to_latest(&mut conn)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        let mut storage = Self { conn };
-        // Events saved before the chain columns existed are folded once.
-        if version < EVENT_CHAIN_VERSION {
-            storage.fold_every_event_chain()?;
-        }
-        Ok(storage)
+        Ok(Self { conn })
     }
 
     /// Saves raw events, skipping any already saved, and extends the event
@@ -228,8 +232,7 @@ impl Storage {
     }
 
     /// Folds every contract's unfolded raw events into its event chain.
-    fn fold_every_event_chain(&mut self) -> Result<()> {
-        let tx = self.conn.transaction()?;
+    fn fold_every_event_chain(tx: &rusqlite::Transaction) -> Result<()> {
         let contract_ids = {
             let mut stmt = tx.prepare(
                 "SELECT DISTINCT contract_id FROM raw_contract_events WHERE chain_count IS NULL",
@@ -238,9 +241,8 @@ impl Storage {
                 .collect::<Result<Vec<_>, _>>()?
         };
         for contract_id in contract_ids {
-            Self::fold_event_chain(&tx, contract_id)?;
+            Self::fold_event_chain(tx, contract_id)?;
         }
-        tx.commit()?;
         Ok(())
     }
 
@@ -4301,6 +4303,27 @@ mod tests {
 
         let [second, first] = &events;
         assert_eq!(storage.event_chain("CPOOL")?, folded(&[first, second])?);
+        Ok(())
+    }
+
+    #[test]
+    fn a_failed_fold_leaves_the_schema_to_migrate_again() -> Result<()> {
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 7)?;
+        let event = chain_event("p1", 1, "CPOOL", 1)?;
+        save_raw_events(&conn, &batch(vec![event.clone()]))?;
+        conn.execute_batch(
+            "CREATE TEMP TRIGGER interrupt_fold BEFORE UPDATE ON raw_contract_events
+             BEGIN SELECT RAISE(ABORT, 'interrupted'); END;",
+        )?;
+
+        assert!(MIGRATIONS.to_latest(&mut conn).is_err());
+        let version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        assert_eq!(version, 7);
+
+        conn.execute_batch("DROP TRIGGER interrupt_fold")?;
+        let storage = Storage::connect_with_connection(conn)?;
+        assert_eq!(storage.event_chain("CPOOL")?, folded(&[&event])?);
         Ok(())
     }
 
