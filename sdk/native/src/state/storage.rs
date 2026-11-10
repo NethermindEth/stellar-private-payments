@@ -354,32 +354,6 @@ impl Storage {
             .unwrap_or(EventChain::EMPTY))
     }
 
-    /// The hash of `contract_address`'s event chain after its first `count`
-    /// events, or `None` when fewer of them are saved and folded.
-    pub fn event_chain_hash_at(
-        &self,
-        contract_address: &str,
-        count: u64,
-    ) -> Result<Option<[u8; 32]>> {
-        if count == 0 {
-            return Ok(Some(EventChain::EMPTY.hash));
-        }
-        self.conn
-            .query_row(
-                "SELECT r.chain_count, r.chain_hash FROM raw_contract_events r
-                 JOIN contracts c ON c.contract_id = r.contract_id
-                 WHERE c.address = ?1 AND r.chain_count = ?2",
-                params![
-                    contract_address,
-                    i64::try_from(count).context("the event count overflows")?
-                ],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?
-            .map(|row| event_chain_from_row(row).map(|chain| chain.hash))
-            .transpose()
-    }
-
     pub fn save_sync_progress(
         &mut self,
         metadata: &[crate::types::SyncMetadata],
@@ -4178,6 +4152,30 @@ mod tests {
     }
 
     /// `events` folded in the order given.
+    /// The hash of `contract_address`'s saved event chain after its first
+    /// `count` events, or `None` when fewer of them are saved and folded.
+    fn chain_hash_at(
+        storage: &Storage,
+        contract_address: &str,
+        count: i64,
+    ) -> Result<Option<[u8; 32]>> {
+        if count == 0 {
+            return Ok(Some(EventChain::EMPTY.hash));
+        }
+        storage
+            .conn
+            .query_row(
+                "SELECT r.chain_count, r.chain_hash FROM raw_contract_events r
+                 JOIN contracts c ON c.contract_id = r.contract_id
+                 WHERE c.address = ?1 AND r.chain_count = ?2",
+                params![contract_address, count],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .map(|row| event_chain_from_row(row).map(|chain| chain.hash))
+            .transpose()
+    }
+
     fn folded(events: &[&ContractEvent]) -> Result<EventChain> {
         events.iter().try_fold(EventChain::EMPTY, |chain, event| {
             chain.extend(&event.topics, &event.value)
@@ -4206,18 +4204,18 @@ mod tests {
         assert_eq!(storage.event_chain("CREGISTRY")?, folded(&[&registry])?);
         assert_eq!(storage.event_chain("CUNKNOWN")?, EventChain::EMPTY);
         assert_eq!(
-            storage.event_chain_hash_at("CPOOL", 0)?,
+            chain_hash_at(&storage, "CPOOL", 0)?,
             Some(EventChain::EMPTY.hash)
         );
         assert_eq!(
-            storage.event_chain_hash_at("CPOOL", 1)?,
+            chain_hash_at(&storage, "CPOOL", 1)?,
             Some(folded(&[p1])?.hash)
         );
         assert_eq!(
-            storage.event_chain_hash_at("CPOOL", 2)?,
+            chain_hash_at(&storage, "CPOOL", 2)?,
             Some(folded(&[p1, p2])?.hash)
         );
-        assert_eq!(storage.event_chain_hash_at("CPOOL", 4)?, None);
+        assert_eq!(chain_hash_at(&storage, "CPOOL", 4)?, None);
         Ok(())
     }
 
@@ -4254,7 +4252,7 @@ mod tests {
             folded(&[&first, &second, &third])?
         );
         assert_eq!(
-            storage.event_chain_hash_at("CPOOL", 2)?,
+            chain_hash_at(&storage, "CPOOL", 2)?,
             Some(folded(&[&first, &second])?.hash)
         );
         Ok(())
