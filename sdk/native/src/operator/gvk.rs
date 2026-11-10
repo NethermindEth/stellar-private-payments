@@ -1,3 +1,5 @@
+use zeroize::Zeroizing;
+
 use crate::{
     Error, StorageHandle,
     chain::RpcClient,
@@ -14,7 +16,7 @@ pub struct GvkAuthority {
     storage: StorageHandle,
     sync: SyncHandle,
     contract_config: ContractConfig,
-    global_view_private_key: Field,
+    global_view_private_key: Zeroizing<Field>,
 }
 
 impl GvkAuthority {
@@ -30,7 +32,7 @@ impl GvkAuthority {
             storage,
             sync,
             contract_config,
-            global_view_private_key,
+            global_view_private_key: Zeroizing::new(global_view_private_key),
         }
     }
 
@@ -59,7 +61,7 @@ impl GvkAuthority {
         Ok(GvkAudit::new(
             self.storage.fork()?,
             pool_contract_id,
-            self.global_view_private_key,
+            *self.global_view_private_key,
         ))
     }
 }

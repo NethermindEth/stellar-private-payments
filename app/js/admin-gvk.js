@@ -12,6 +12,7 @@ import { rpcServer } from './admin-transactions.js';
 import { readDisplayDecimals } from './token-metadata.js';
 import { parseAmountRange } from './amount-filter.js';
 import { chargeSpend, classifyTx, emptyPkNode, withdrawalsByPk } from './gvk-classify.js';
+import { queueCursorOp, releaseCursor } from './gvk-cursor.js';
 import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, readTokenDecimals, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
 import { amountByPk, collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId, parseFieldAmount, unspentByPk } from './gvk-notes.js';
 import { friendlyErrorMessage } from './facade-errors.js';
@@ -21,7 +22,6 @@ const BATCH_SIZE = 20;
 
 const poolSelectEl = document.getElementById('gvkPoolSelect');
 const privateKeyEl = document.getElementById('gvkPrivateKey');
-const keyHintEl = document.getElementById('gvkKeyHint');
 const auditBtnEl = document.getElementById('gvkAuditBtn');
 const loadMoreBtnEl = document.getElementById('gvkLoadMoreBtn');
 const viewTxBtnEl = document.getElementById('gvkViewTxBtn');
@@ -1971,18 +1971,6 @@ function pushTx(tx) {
   state.rows.push({ tx, index, kind });
 }
 
-// Serializes all cursor access — a filter change can trigger a background
-// drain (see ensureFullyLoaded) while a user-initiated fetch is in flight,
-// and `state.audit.nextTx()` is a stateful iterator that isn't safe to call
-// concurrently from two call sites.
-let cursorQueue = Promise.resolve();
-
-function queueCursorOp(fn) {
-  const run = cursorQueue.then(fn, fn);
-  cursorQueue = run.then(() => {}, () => {});
-  return run;
-}
-
 async function fetchBatch(limit) {
   return queueCursorOp(async () => {
     let fetched = 0;
@@ -2246,23 +2234,8 @@ async function populatePools() {
   auditBtnEl.disabled = false;
 }
 
-async function loadStoredAuthorityKey() {
-  if (!privateKeyEl) return;
-
-  try {
-    const setting = await client().storage().getGvkAuthoritySetting();
-    if (setting?.privateKey) {
-      privateKeyEl.value = setting.privateKey;
-      if (keyHintEl) {
-        keyHintEl.textContent = 'Loaded authority key from local DB (gvk_authority). Not saved from this page.';
-      }
-    }
-  } catch (err) {
-    console.warn('[global-view] authority key load failed:', err);
-  }
-}
-
 function resetAuditState() {
+  if (state.audit) releaseCursor(state.audit);
   state.audit = null;
   state.auditedPoolContractId = null;
   state.tokenDecimals = null;
@@ -2290,41 +2263,40 @@ async function readPoolFee(poolContractId) {
   return BigInt(pool.fee);
 }
 
-async function startAudit({ reset }) {
-  const poolContractId = poolSelectEl?.value?.trim();
-  const privateKey = privateKeyEl?.value?.trim();
+async function startAudit(privateKey) {
+  const poolContractId = poolSelectEl.value;
 
   if (!poolContractId) {
     throw new Error('Select a GVK-enabled pool');
   }
-  if (!privateKey) {
-    throw new Error('Enter the authority private key');
+  // Non-ASCII input makes the wasm glue copy the key into a buffer it frees unwiped.
+  if (!/^(0x)?[0-9a-fA-F]{64}$/.test(privateKey)) {
+    throw new Error('Enter the authority private key as 64 hex digits');
   }
 
-  if (reset) {
-    resetAuditState();
-    renderResults();
-  }
+  resetAuditState();
+  renderResults();
 
-  if (!state.audit) {
-    const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
-    const [decimals, fee] = await Promise.all([
-      readDisplayDecimals({ tokenDecimals: () => readTokenDecimals(getCurrentRpcUrl(), poolEntry.tokenContractId) }),
-      readPoolFee(poolContractId),
-    ]);
-    const authority = client().gvkAuthority(privateKey);
-    try {
-      state.audit = await authority.audit(poolContractId);
-    } finally {
-      authority.free();
-    }
-    state.tokenDecimals = decimals;
-    state.poolFee = fee;
-    state.auditedPoolContractId = poolContractId;
-    state.tokenSymbol = tokenLabel(poolEntry);
-    setFilterControlsDisabled(false);
-    state.poolGvkMode = poolEntry?.gvkMode ?? null;
+  const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
+  const [decimals, fee] = await Promise.all([
+    readDisplayDecimals({ tokenDecimals: () => readTokenDecimals(getCurrentRpcUrl(), poolEntry.tokenContractId) }),
+    readPoolFee(poolContractId),
+  ]);
+  const authority = client().gvkAuthority(privateKey);
+  try {
+    // An overlapping Sync & Audit may have opened a cursor during the awaits.
+    const audit = await authority.audit(poolContractId);
+    if (state.audit) releaseCursor(state.audit);
+    state.audit = audit;
+  } finally {
+    authority.free();
   }
+  state.tokenDecimals = decimals;
+  state.poolFee = fee;
+  state.auditedPoolContractId = poolContractId;
+  state.tokenSymbol = tokenLabel(poolEntry);
+  setFilterControlsDisabled(false);
+  state.poolGvkMode = poolEntry?.gvkMode ?? null;
 
   await fetchBatch(BATCH_SIZE);
 }
@@ -2372,7 +2344,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     resetAuditState();
     renderResults();
     syncActionButtons();
-    setPanelStatus('Pool changed — click Sync & Audit to load it.', 'info');
+    setPanelStatus('Pool changed — enter the authority key and run Sync & Audit.', 'info');
   });
 
   filtersClearBtnEl?.addEventListener('click', () => {
@@ -2395,12 +2367,13 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     await ensureCryptoReady(options);
     if (!panelReady) {
       await populatePools();
-      await loadStoredAuthorityKey();
       panelReady = true;
     }
   }
 
   auditBtnEl?.addEventListener('click', async () => {
+    const privateKey = privateKeyEl.value.trim();
+    privateKeyEl.value = '';
     const originalText = auditBtnEl.textContent;
     try {
       auditBtnEl.disabled = true;
@@ -2408,7 +2381,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       auditBtnEl.textContent = 'Syncing…';
       setPanelStatus('Syncing chain data and opening audit cursor…', 'info');
       await ensurePanelReady({ unlock: true });
-      await startAudit({ reset: true });
+      await startAudit(privateKey);
       await applyFiltersAndRender();
     } catch (err) {
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
@@ -2436,7 +2409,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     try {
       loadMoreBtnEl.disabled = true;
       loadMoreBtnEl.textContent = 'Loading…';
-      await startAudit({ reset: false });
+      await fetchBatch(BATCH_SIZE);
       await applyFiltersAndRender();
     } catch (err) {
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
