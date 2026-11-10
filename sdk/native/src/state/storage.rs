@@ -4151,7 +4151,6 @@ mod tests {
         }
     }
 
-    /// `events` folded in the order given.
     /// The hash of `contract_address`'s saved event chain after its first
     /// `count` events, or `None` when fewer of them are saved and folded.
     fn chain_hash_at(
@@ -4176,6 +4175,7 @@ mod tests {
             .transpose()
     }
 
+    /// `events` folded in the order given.
     fn folded(events: &[&ContractEvent]) -> Result<EventChain> {
         events.iter().try_fold(EventChain::EMPTY, |chain, event| {
             chain.extend(&event.topics, &event.value)
