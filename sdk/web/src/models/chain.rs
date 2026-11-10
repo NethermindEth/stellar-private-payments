@@ -1,6 +1,7 @@
 use stellar_private_payments::types::{
     AspMembership as NativeAspMembership, AspNonMembership as NativeAspNonMembership,
-    ContractsStateData as NativeContractsStateData,
+    ContractsStateData as NativeContractsStateData, NoteKeyOwner as NativeNoteKeyOwner,
+    NoteKeyOwnerLookup as NativeNoteKeyOwnerLookup,
     OperationalFeedItem as NativeOperationalFeedItem, PoolInfo as NativePoolInfo,
     PublicKeyEntry as NativePublicKeyEntry, RecipientLookup as NativeRecipientLookup,
 };
@@ -75,6 +76,69 @@ impl RecipientLookup {
 
 impl From<NativeRecipientLookup> for RecipientLookup {
     fn from(inner: NativeRecipientLookup) -> Self {
+        Self { inner }
+    }
+}
+
+/// A Stellar address that registered a note public key.
+#[wasm_bindgen]
+pub struct NoteKeyOwner {
+    inner: NativeNoteKeyOwner,
+}
+
+#[wasm_bindgen]
+impl NoteKeyOwner {
+    /// Note public key as a `0x` big-endian field hex string (same encoding as
+    /// a GVK-audited note's `pk`).
+    #[wasm_bindgen(getter, js_name = noteKey)]
+    pub fn note_key(&self) -> String {
+        field_hex(&self.inner.note_key)
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn address(&self) -> String {
+        self.inner.address.clone()
+    }
+}
+
+impl From<NativeNoteKeyOwner> for NoteKeyOwner {
+    fn from(inner: NativeNoteKeyOwner) -> Self {
+        Self { inner }
+    }
+}
+
+/// Addresses that registered the requested note public keys in the
+/// configured public key registry.
+#[wasm_bindgen]
+pub struct NoteKeyOwnerLookup {
+    inner: NativeNoteKeyOwnerLookup,
+}
+
+#[wasm_bindgen]
+impl NoteKeyOwnerLookup {
+    /// One entry per (note key, address) pair; a key with several entries has
+    /// been registered by several addresses.
+    #[wasm_bindgen(getter)]
+    pub fn owners(&self) -> Vec<NoteKeyOwner> {
+        self.inner
+            .owners
+            .iter()
+            .cloned()
+            .map(NoteKeyOwner::from)
+            .collect()
+    }
+
+    /// Whether the registry is indexed up to the network tip and all of its
+    /// indexed events are processed into owners; until then a key can still
+    /// gain owners.
+    #[wasm_bindgen(getter, js_name = registryFullySynced)]
+    pub fn registry_fully_synced(&self) -> bool {
+        self.inner.registry_fully_synced
+    }
+}
+
+impl From<NativeNoteKeyOwnerLookup> for NoteKeyOwnerLookup {
+    fn from(inner: NativeNoteKeyOwnerLookup) -> Self {
         Self { inner }
     }
 }
