@@ -3245,6 +3245,7 @@ dependencies = [
  "sqlite3mc-src",
  "stellar-strkey 0.0.18",
  "stellar-xdr",
+ "subtle",
  "taceo-poseidon2",
  "tar",
  "thiserror",

@@ -6042,6 +6042,7 @@ dependencies = [
  "sqlite3mc-src",
  "stellar-strkey 0.0.18",
  "stellar-xdr",
+ "subtle",
  "taceo-poseidon2",
  "tar",
  "tempfile",
@@ -6103,6 +6104,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
+ "zeroize",
 ]
 
 [[package]]

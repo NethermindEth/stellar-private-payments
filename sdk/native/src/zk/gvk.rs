@@ -89,7 +89,8 @@ impl GvkNote {
             babyjub::scalar_mul(babyjub::base8(), r)
                 .ok_or_else(|| anyhow!("failed to derive ephemeral public key"))?,
         );
-        let shared = shared_secret(r, d)?;
+        let shared = shared_secret(r, d)
+            .ok_or_else(|| anyhow!("invalid admin public key for global view key encryption"))?;
         if shared.x.is_zero() {
             bail!("degenerate global view key shared secret");
         }
@@ -145,14 +146,10 @@ impl GvkRecoveredNote {
 impl GlobalViewKeyCiphertext {
     /// Admin-side decryption using the authority private scalar `d`.
     pub fn decrypt(&self, d_priv: &Field) -> Result<GvkRecoveredNote> {
-        let d_priv = field_to_scalar(d_priv);
-        let big_r =
-            babyjub::point_from_coords(field_to_scalar(&self.r.x), field_to_scalar(&self.r.y));
         let k = keystream(
-            babyjub::mul8(babyjub::scalar_mul(big_r, d_priv).ok_or_else(|| {
+            shared_secret(field_to_scalar(d_priv), self.r.to_coords()).ok_or_else(|| {
                 anyhow!("invalid ephemeral public key in global view key ciphertext")
-            })?)
-            .ok_or_else(|| anyhow!("invalid ephemeral public key in global view key ciphertext"))?,
+            })?,
         );
         Ok(GvkRecoveredNote {
             pk: scalar_to_field(&(field_to_scalar(&self.c1) - k[0])),
@@ -321,13 +318,10 @@ pub fn generate_gvk_nonce() -> Result<Field> {
     generate_random_blinding()
 }
 
-fn shared_secret(r: Scalar, d: (Scalar, Scalar)) -> Result<Point> {
-    babyjub::scalar_mul(
-        babyjub::mul8(babyjub::point_from_coords(d.0, d.1))
-            .ok_or_else(|| anyhow!("invalid admin public key for global view key encryption"))?,
-        r,
-    )
-    .ok_or_else(|| anyhow!("invalid admin public key for global view key encryption"))
+/// Returns `k·(8·P)`, which equals `8·(k·P)` on the curve; doubling the public
+/// `P` first keeps the variable-time inversions off the secret `k`.
+fn shared_secret(k: Scalar, p: (Scalar, Scalar)) -> Option<Point> {
+    babyjub::scalar_mul(babyjub::mul8(babyjub::point_from_coords(p.0, p.1))?, k)
 }
 
 fn keystream(s: Point) -> [Scalar; 3] {
@@ -404,6 +398,25 @@ mod tests {
         assert_eq!(recovered.pk, note.pk);
         assert_eq!(recovered.amount, note.amount);
         assert_eq!(recovered.amount()?, NoteAmount::from(1_000_000));
+        assert_eq!(recovered.blinding, note.blinding);
+        Ok(())
+    }
+
+    /// Decryption clears the cofactor, so `R` shifted by the order-2 point
+    /// `(0, -1)` decrypts to the same note.
+    #[test]
+    fn decrypt_clears_the_cofactor() -> Result<()> {
+        // Odd, so `d·(0, -1)` is not the identity.
+        let d_priv = field(987_654_321);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
+        let note = sample_note();
+        let mut ct = note.encrypt(&admin, &field(42), 0)?;
+        // `R + (0, -1)` is `(-x, -y)`.
+        let (x, y) = ct.r.to_coords();
+        ct.r = BabyJubJubPoint::from_coords(-x, -y);
+        let recovered = ct.decrypt(&d_priv)?;
+        assert_eq!(recovered.pk, note.pk);
+        assert_eq!(recovered.amount, note.amount);
         assert_eq!(recovered.blinding, note.blinding);
         Ok(())
     }

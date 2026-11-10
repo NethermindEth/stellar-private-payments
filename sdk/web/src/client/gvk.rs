@@ -7,8 +7,8 @@ use wasm_bindgen::prelude::*;
 
 /// Cursor over decrypted pool transacts for admin audit.
 ///
-/// Holds the admin view private key for its lifetime; drop the cursor when
-/// finished rather than retaining it longer than needed.
+/// Holds the authority key until `nextTx()` returns `null` or `free()` runs,
+/// and both wipe it.
 #[wasm_bindgen]
 pub struct GvkAudit {
     inner: RefCell<NativeGvkAudit>,

@@ -19,6 +19,7 @@ use stellar_private_payments::{
     types::{ContractConfig, DisclosureReceipt, Field, NoteOwnerAddress},
 };
 use wasm_bindgen::prelude::*;
+use zeroize::Zeroizing;
 
 use crate::{
     correlation::{new_correlation_id, with_correlation_id},
@@ -275,13 +276,16 @@ impl Client {
     }
 
     /// Open a session for a Global View Key private key, a `0x`-prefixed
-    /// field hex string.
+    /// field hex string. The SDK wipes its copies of the key once the session
+    /// and its audit cursors are freed; the JS string, stack copies, and the
+    /// wasm-bindgen glue's copy of non-ASCII input are not.
     #[wasm_bindgen(js_name = gvkAuthority)]
     pub fn gvk_authority(
         &self,
         global_view_private_key_hex: String,
     ) -> Result<GvkAuthority, JsError> {
-        let key = Field::from_str(global_view_private_key_hex.trim())
+        // Owned, not `&str`, so the buffer wasm-bindgen wrote can be wiped.
+        let key = Field::from_str(Zeroizing::new(global_view_private_key_hex).trim())
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(self.inner.gvk_authority(key).map_err(pool_err)?.into())
     }
