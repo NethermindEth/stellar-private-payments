@@ -35,7 +35,7 @@ use crate::types::SignerAddress;
 /// Matches js-stellar-sdk's default (~8.3 minutes at ~5s/ledger).
 const AUTH_EXPIRATION_LEDGERS: u32 = 100;
 
-fn network_id(network_passphrase: &str) -> [u8; 32] {
+pub(crate) fn network_id(network_passphrase: &str) -> [u8; 32] {
     Sha256::digest(network_passphrase.as_bytes()).into()
 }
 

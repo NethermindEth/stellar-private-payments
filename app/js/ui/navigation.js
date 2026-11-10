@@ -130,6 +130,7 @@ function setActiveView(view) {
 function setMoveFlow(flow) {
     App.state.views.moveFlow = flow;
     document.querySelector('[data-signing-account="move"]')?.classList.toggle('hidden', flow === 'deposit');
+    document.querySelector('[data-max-spend]')?.classList.toggle('hidden', flow === 'deposit');
     document.querySelectorAll('[data-move-flow]').forEach(btn => {
         const active = btn.dataset.moveFlow === flow;
         btn.classList.toggle('bg-cyan-400', active);

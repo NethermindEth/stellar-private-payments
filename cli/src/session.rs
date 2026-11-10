@@ -10,8 +10,8 @@ use stellar_private_payments::{
     LocalProver, LocalStorage, ProverHandle, SignerHandle,
     blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{
-        EncryptionPublicKey, NoteOwnerAddress, NotePublicKey, Sensitive, SignerAddress,
-        TransferRecipient,
+        EncryptionPublicKey, NoteAmount, NoteOwnerAddress, NotePublicKey, PoolInfo, Sensitive,
+        SignerAddress, TransferRecipient,
     },
 };
 
@@ -34,25 +34,10 @@ impl ClientSession {
         network: &StellarNetwork,
         readonly: bool,
     ) -> Result<Self> {
-        let storage_path = config.db_path().to_string_lossy().into_owned();
-        let storage = LocalStorage::open_with_key(&storage_path, config.database_key()?)
-            .map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
-        let bootnode_setting = storage
-            .storage()
-            .get_bootnode_setting()
-            .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
-        let bootnode_url = (bootnode_setting.enabled && !bootnode_setting.url.trim().is_empty())
-            .then_some(bootnode_setting.url);
-
         let client = if readonly {
-            Client::init_readonly(
-                network.rpc_url.clone(),
-                storage,
-                config.deployment.clone(),
-                bootnode_url,
-            )
-            .map_err(|e| anyhow::anyhow!("init client: {e}"))?
+            readonly_client(config, network)?
         } else {
+            let (storage, bootnode_url) = open_storage(config)?;
             let artifacts = load_transact_artifacts(
                 &config.circuits_dir_path(),
                 &config.circuit_keys_dir_path(),
@@ -147,28 +132,54 @@ impl ClientSession {
         &self,
         pool_ids: impl IntoIterator<Item = &'a str>,
     ) -> std::collections::HashMap<String, Result<u32>> {
+        self.read_pools(pool_ids, "token precision", |pool| {
+            Ok(pool.token_decimals()?)
+        })
+    }
+
+    /// Reads each pool's state, its fee and smallest deposit included, and the
+    /// most one spend from this account's notes can send after that fee.
+    ///
+    /// The states are read in parallel, but each max spend runs alone: it syncs
+    /// notes into the one local database.
+    pub fn pool_limits<'a>(
+        &self,
+        pool_ids: impl IntoIterator<Item = &'a str>,
+    ) -> std::collections::HashMap<String, Result<(PoolInfo, NoteAmount)>> {
+        self.read_pools(pool_ids, "pool state", |pool| Ok((pool.pool_info()?, pool)))
+            .into_iter()
+            .map(|(id, read)| {
+                let limits = read.and_then(|(info, pool)| Ok((info, pool.max_spend()?)));
+                (id, limits)
+            })
+            .collect()
+    }
+
+    /// Runs `read` on each pool's session in parallel, keyed by pool id.
+    fn read_pools<'a, T: Send>(
+        &self,
+        pool_ids: impl IntoIterator<Item = &'a str>,
+        what: &str,
+        read: impl Fn(PrivatePool) -> Result<T> + Sync,
+    ) -> std::collections::HashMap<String, Result<T>> {
         let pools: std::collections::HashMap<_, _> = pool_ids
             .into_iter()
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .map(|id| (id.to_string(), self.pool(id)))
             .collect();
+        let read = &read;
         std::thread::scope(|scope| {
             let reads: Vec<_> = pools
                 .into_iter()
-                .map(|(id, pool)| {
-                    (
-                        id,
-                        scope.spawn(move || pool.and_then(|pool| Ok(pool.token_decimals()?))),
-                    )
-                })
+                .map(|(id, pool)| (id, scope.spawn(move || pool.and_then(read))))
                 .collect();
             reads
                 .into_iter()
-                .map(|(id, read)| {
-                    let result = read
+                .map(|(id, handle)| {
+                    let result = handle
                         .join()
-                        .unwrap_or_else(|_| Err(anyhow::anyhow!("token precision read failed")));
+                        .unwrap_or_else(|_| Err(anyhow::anyhow!("{what} read failed")));
                     (id, result)
                 })
                 .collect()
@@ -200,6 +211,31 @@ fn client_with_prover(
     network: &StellarNetwork,
     prover: ProverHandle,
 ) -> Result<Client> {
+    let (storage, bootnode_url) = open_storage(config)?;
+    Client::init(
+        network.rpc_url.clone(),
+        storage,
+        prover,
+        config.deployment.clone(),
+        bootnode_url,
+    )
+    .map_err(|e| anyhow::anyhow!("init client: {e}"))
+}
+
+/// A client with no prover, for reads of local storage.
+pub fn readonly_client(config: &CliConfig, network: &StellarNetwork) -> Result<Client> {
+    let (storage, bootnode_url) = open_storage(config)?;
+    Client::init_readonly(
+        network.rpc_url.clone(),
+        storage,
+        config.deployment.clone(),
+        bootnode_url,
+    )
+    .map_err(|e| anyhow::anyhow!("init client: {e}"))
+}
+
+/// Unlocks local storage and reads its bootnode URL, when one is enabled.
+fn open_storage(config: &CliConfig) -> Result<(LocalStorage, Option<String>)> {
     let storage_path = config.db_path().to_string_lossy().into_owned();
     let storage = LocalStorage::open_with_key(&storage_path, config.database_key()?)
         .map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
@@ -209,14 +245,7 @@ fn client_with_prover(
         .map_err(|e| anyhow::anyhow!("load bootnode setting: {e:#}"))?;
     let bootnode_url = (bootnode_setting.enabled && !bootnode_setting.url.trim().is_empty())
         .then_some(bootnode_setting.url);
-    Client::init(
-        network.rpc_url.clone(),
-        storage,
-        prover,
-        config.deployment.clone(),
-        bootnode_url,
-    )
-    .map_err(|e| anyhow::anyhow!("init client: {e}"))
+    Ok((storage, bootnode_url))
 }
 
 /// A native prover with all registered selective-disclosure circuits.

@@ -43,6 +43,13 @@ async function typedConsumer(config: ContractConfig) {
 
   const estimate = await pool.estimate(500_000n);
   void estimate.txCount;
+  void (estimate.fees satisfies bigint);
+  const info = await pool.poolInfo();
+  void (info.fee satisfies bigint);
+  void (info.minimumDepositAmount satisfies bigint);
+  void (info.maximumDepositAmount satisfies bigint);
+  void ((await pool.notes())[0]?.amount satisfies bigint | undefined);
+  void ((await account.portfolio())[0]?.amount satisfies bigint | undefined);
 }
 
 void typedConsumer;

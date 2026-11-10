@@ -7,7 +7,7 @@ use rusqlite::params;
 use stellar_private_payments::{
     state::SqliteStorage,
     types::{
-        AspNonMembershipProof, ContractEvent, ContractsEventData, Field, GvkMode,
+        AspNonMembershipProof, ContractEvent, ContractsEventData, ExtAmount, Field, GvkMode,
         KeyDerivationSignature, LeafAddedEvent, NewCommitmentEvent, NoteAmount, NoteKeyPair,
         PolicyFlags, SMT_DEPTH, SyncMetadata, TransactChainContext,
     },
@@ -359,6 +359,7 @@ fn chain_snapshot_from_storage(
         deposits_paused: false,
         fee: NoteAmount::ZERO,
         minimum_deposit_amount: NoteAmount::ZERO,
+        maximum_deposit_amount: ExtAmount::MAX,
     })
 }
 

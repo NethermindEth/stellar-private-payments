@@ -21,18 +21,17 @@ use crate::{
         verify_disclosure_receipt,
     },
     error::{Error, PlanExecutionError},
-    gvk::GvkAudit,
     plan::PreparedTransactionPlan,
     prover::ProverHandle,
     signer::SignerHandle,
     sleep::sleep,
     storage::StorageHandle,
     sync::{SyncHandle, confirm_tx},
-    transact::transact_request_from_step,
+    transact::{self, DepositLimits, input_total, transact_request_from_step},
     types::{
         AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
-        Estimate, ExtAmount, Field, GvkMode, PoolInfo, PrivatePoolConfig, SignedTransaction,
-        TransactChainContext, TransactionResult, TransferRecipient, first_duplicate,
+        Estimate, ExtAmount, PoolInfo, PrivatePoolConfig, SignedTransaction, TransactChainContext,
+        TransactionResult, TransferRecipient, first_duplicate,
     },
 };
 
@@ -122,39 +121,96 @@ impl PrivatePool {
             .await
     }
 
+    /// Reads this pool's on-chain state, its fee and deposit limits included.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Other`] when the pool's state cannot be fetched or does
+    /// not include this pool.
+    pub async fn pool_info(&self) -> Result<PoolInfo, Error> {
+        let data = self
+            .fetcher
+            .contracts_data_for_pool(&self.config.pool_contract_id)
+            .await
+            .context("fetch pool state")?;
+        let pool = data.pools.into_iter().next().ok_or_else(|| {
+            Error::Other(anyhow::anyhow!(
+                "pool {} not found in contract state",
+                self.config.pool_contract_id
+            ))
+        })?;
+        let _ = self.fee.set(pool.fee);
+        Ok(pool)
+    }
+
     /// Reads the fee the pool charges on every `transact`.
     ///
-    /// The pool's fee never changes, so the first read serves the session.
+    /// The pool's fee never changes, so the first read, here or by
+    /// [`Self::pool_info`], serves the session.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Other`] when the pool's state cannot be fetched or does
     /// not include this pool.
     pub async fn fee(&self) -> Result<NoteAmount, Error> {
-        if let Some(&fee) = self.fee.get() {
-            return Ok(fee);
+        match self.fee.get() {
+            Some(&fee) => Ok(fee),
+            None => Ok(self.pool_info().await?.fee),
         }
-        let fee = self.pool_info().await?.fee;
-        Ok(*self.fee.get_or_init(|| fee))
     }
 
-    pub async fn estimate(&self, amount: NoteAmount, fee: NoteAmount) -> Result<Estimate, Error> {
+    pub async fn estimate(&self, amount: NoteAmount) -> Result<Estimate, Error> {
         let wallet = self.spendable_notes().await?;
-        self.core.estimate(&wallet, amount, fee)
+        self.core.estimate(&wallet, amount, self.fee().await?)
     }
 
     /// Returns the most one spend from the spendable notes can send after
-    /// paying `fee` on every step.
+    /// paying the pool fee on every step.
     ///
     /// # Errors
     ///
     /// Returns the sync or storage error when the spendable notes cannot be
-    /// read, and [`Error::Plan`] when their total or the fees overflow.
-    pub async fn max_spend(&self, fee: NoteAmount) -> Result<NoteAmount, Error> {
+    /// read, the errors of [`Self::fee`], and [`Error::Plan`] when the notes'
+    /// total or the fees overflow.
+    pub async fn max_spend(&self) -> Result<NoteAmount, Error> {
         Ok(crate::planner::max_spend(
             &self.spendable_notes().await?,
-            fee,
+            self.fee().await?,
         )?)
+    }
+
+    /// Refuses a deposit of `amount` that the pool would refuse, without
+    /// building it.
+    ///
+    /// `amount` is what the notes receive; the pool fee goes on top, as
+    /// [`Self::deposit`] adds it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors of [`Self::pool_info`], then
+    /// [`Error::DepositsPaused`], [`Error::DepositAboveMaximum`], or
+    /// [`Error::DepositBelowMinimum`] in the pool's order.
+    pub async fn check_deposit(&self, amount: NoteAmount) -> Result<(), Error> {
+        DepositLimits::from(&self.pool_info().await?)
+            .check_note_amount(amount, &self.config.pool_contract_id)
+    }
+
+    /// Refuses a transaction that [`Self::transact`] would refuse before
+    /// proving, without building it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the deposit-limit, recipient, and balance errors of
+    /// [`Self::transact`], an error for a commitment listed more often than the
+    /// wallet holds unspent copies of it, and [`Error::MembershipSync`] at once
+    /// for an input not yet synced.
+    pub async fn check_transact(&self, step: &Transact) -> Result<(), Error> {
+        let pool = self.pool_info().await?;
+        DepositLimits::from(&pool).check(step.ext_amount, &self.config.pool_contract_id)?;
+        if step.ext_amount < ExtAmount::ZERO {
+            self.core.check_withdrawal_recipient(&step.ext_recipient)?;
+        }
+        self.check_balance(step, pool.fee).await
     }
 
     #[tracing::instrument(skip(self), fields(correlation_id = %correlation_id_or_new(), amount = ?Sensitive(amount)))]
@@ -176,10 +232,7 @@ impl PrivatePool {
         let recipient = recipient.into();
         tracing::info!(recipient = ?Sensitive(&recipient), amount = ?Sensitive(amount), "transfer started");
         let wallet = self.spendable_notes().await?;
-        let fee = self.fee().await?;
-        let mut plan = self
-            .prepare_transfer(&wallet, recipient, amount, fee)
-            .await?;
+        let mut plan = self.prepare_transfer(&wallet, recipient, amount).await?;
         self.execute(&mut plan).await
     }
 
@@ -192,8 +245,7 @@ impl PrivatePool {
         let recipient = recipient.into();
         tracing::info!(amount = ?Sensitive(amount), recipient = ?Sensitive(&recipient), "withdraw started");
         let wallet = self.spendable_notes().await?;
-        let fee = self.fee().await?;
-        let mut plan = self.prepare_withdraw(&wallet, amount, recipient, fee)?;
+        let mut plan = self.prepare_withdraw(&wallet, amount, recipient).await?;
         self.execute(&mut plan).await
     }
 
@@ -314,31 +366,6 @@ impl PrivatePool {
         Ok(())
     }
 
-    pub async fn audit(&self, global_view_private_key: Field) -> Result<GvkAudit, Error> {
-        let pool = self
-            .config
-            .contract_config
-            .pool(&self.config.pool_contract_id)
-            .map_err(|e| Error::InvalidConfig(e.to_string()))?;
-        if pool.gvk_mode == GvkMode::Off {
-            return Err(Error::InvalidConfig(format!(
-                "GVK audit requires a pool-gvk deployment; {} is configured with gvk_mode Off",
-                self.config.pool_contract_id
-            )));
-        }
-        crate::types::validate_gvk_authority_key(&global_view_private_key, pool)
-            .map_err(|e| Error::InvalidConfig(e.to_string()))?;
-        self.ensure_synced().await?;
-
-        let storage = self.storage.fork()?;
-        let pool_contract_id = self.config.pool_contract_id.clone();
-        Ok(GvkAudit::new(
-            storage,
-            pool_contract_id,
-            global_view_private_key,
-        ))
-    }
-
     // lower level methods
 
     pub async fn spendable_notes(&self) -> Result<Vec<SpendableNote>, Error> {
@@ -361,22 +388,26 @@ impl PrivatePool {
         wallet: &[SpendableNote],
         recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
-        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
         let (note_public_key, encryption_public_key) =
             self.resolve_transfer_recipient(recipient.into()).await?;
-        self.core
-            .prepare_transfer(wallet, note_public_key, encryption_public_key, amount, fee)
+        self.core.prepare_transfer(
+            wallet,
+            note_public_key,
+            encryption_public_key,
+            amount,
+            self.fee().await?,
+        )
     }
 
-    pub fn prepare_withdraw(
+    pub async fn prepare_withdraw(
         &self,
         wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
-        fee: NoteAmount,
     ) -> Result<PreparedTransactionPlan, Error> {
-        self.core.prepare_withdraw(wallet, amount, recipient, fee)
+        self.core
+            .prepare_withdraw(wallet, amount, recipient, self.fee().await?)
     }
 
     pub fn prepare_transact(&self, step: Transact) -> PreparedTransactionPlan {
@@ -416,20 +447,6 @@ impl PrivatePool {
             .await
     }
 
-    async fn pool_info(&self) -> Result<PoolInfo, Error> {
-        let data = self
-            .fetcher
-            .contracts_data_for_pool(&self.config.pool_contract_id)
-            .await
-            .context("fetch pool state")?;
-        data.pools.into_iter().next().ok_or_else(|| {
-            Error::Other(anyhow::anyhow!(
-                "pool {} not found in contract state",
-                self.config.pool_contract_id
-            ))
-        })
-    }
-
     async fn resolve_transfer_recipient(
         &self,
         recipient: TransferRecipient,
@@ -463,17 +480,22 @@ impl PrivatePool {
         self.ensure_synced().await?;
 
         let chain = self.fetch_transact_chain_context().await?;
+        let limits = DepositLimits::from(&chain);
         let step = if let Some(amount) = plan.deposit_amount() {
+            // Before the step, which cannot hold an amount past `ExtAmount`.
+            limits.check_note_amount(amount, &self.config.pool_contract_id)?;
             self.deposit_transact_step(amount, chain.fee).await?
         } else if let Some(step) = plan.raw_transact_step() {
             step.clone()
         } else {
             transact_step_for_plan(plan)?
         };
-        if chain.deposits_paused && step.ext_amount > ExtAmount::ZERO {
-            return Err(Error::DepositsPaused {
-                pool: self.config.pool_contract_id.clone(),
-            });
+        limits.check(step.ext_amount, &self.config.pool_contract_id)?;
+        if step.ext_amount < ExtAmount::ZERO {
+            self.core.check_withdrawal_recipient(&step.ext_recipient)?;
+        }
+        if plan.raw_transact_step().is_some() {
+            self.check_balance(&step, chain.fee).await?;
         }
         let req = transact_request_from_step(
             &step,
@@ -481,13 +503,31 @@ impl PrivatePool {
             &self.config.contract_config.kdf_domain,
             &self.config.pool_contract_id,
             &chain,
-        )?;
+        );
 
         let params = self.storage.build_transact_params(&req).await?;
         let prepared = self.prover.prove_transact(params).await?;
 
         plan.finish_proved_tx(&prepared.prepared.output_commitments)?;
         Ok(prepared)
+    }
+
+    async fn check_balance(&self, step: &Transact, fee: NoteAmount) -> Result<(), Error> {
+        // No sync: `transact` has synced, and `check_transact` must not.
+        let notes = self
+            .storage
+            .spendable_notes(
+                &self.config.pool_contract_id,
+                self.config.user_address.as_str(),
+                &self.config.contract_config.kdf_domain,
+            )
+            .await?;
+        transact::check_balance(
+            input_total(&step.input_commitments, &notes)?,
+            step.output_amounts,
+            step.ext_amount,
+            fee,
+        )
     }
 
     async fn fetch_transact_chain_context(&self) -> Result<TransactChainContext, Error> {

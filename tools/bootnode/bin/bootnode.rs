@@ -22,6 +22,11 @@ struct Cli {
     #[arg(long, env = "BOOTNODE_BIND", default_value = "0.0.0.0:443")]
     bind: SocketAddr,
 
+    /// Bind address for the plain-HTTP Prometheus metrics listener; when unset,
+    /// the bootnode records no metrics.
+    #[arg(long, env = "BOOTNODE_METRICS_BIND")]
+    metrics_bind: Option<SocketAddr>,
+
     /// Upstream Stellar RPC endpoint used by the background indexer.
     #[arg(long, env = "BOOTNODE_UPSTREAM_RPC_URL")]
     upstream_rpc_url: Option<Url>,
@@ -230,6 +235,9 @@ async fn main() -> Result<()> {
     };
     let cfg = cli.config(upstream_rpc_url.clone());
     let _otel = otel::init_telemetry(&cfg)?;
+    if let Some(addr) = cli.metrics_bind {
+        metrics::serve(addr).await?;
+    }
     tokio::select! {
         result = bootnode::wait_for_upstream_network(upstream_rpc_url, &deployment) => result?,
         result = tokio::signal::ctrl_c() => {
@@ -241,10 +249,8 @@ async fn main() -> Result<()> {
     let storage = cli
         .open_storage(current_deployment_storage_id(&deployment)?)
         .await?;
-    metrics::init_metrics()?;
-    let prom_handle = metrics::install_prometheus_recorder()?;
 
-    Bootnode::setup_with_deployment(cfg, storage, prom_handle, spec)
+    Bootnode::setup_with_deployment(cfg, storage, spec)
         .await?
         .serve()
         .await

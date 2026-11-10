@@ -71,6 +71,10 @@ pub enum Error {
     Timeout,
     #[error("too many contract IDs for a single event filter: {0} (max {MAX_FILTER_CONTRACT_IDS})")]
     TooManyContracts(usize),
+    #[error(
+        "the RPC did not queue transaction {0} (TRY_AGAIN_LATER); a copy sent earlier may still land, otherwise send it again"
+    )]
+    NotQueued(String),
 }
 
 // JSON-RPC Plumbing
@@ -225,6 +229,8 @@ pub struct LedgerEntryResult {
     pub xdr: String,
     #[serde(rename = "lastModifiedLedgerSeq")]
     pub last_modified_ledger: u32,
+    #[serde(rename = "liveUntilLedgerSeq", default)]
+    pub live_until_ledger: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -285,6 +291,27 @@ pub struct GetTransactionResponse {
     pub status: String,
     #[serde(rename = "resultXdr", default)]
     pub result_xdr: Option<String>,
+    #[serde(rename = "diagnosticEventsXdr", default)]
+    pub diagnostic_events_xdr: Option<Vec<String>>,
+    /// Where protocol 23 RPCs put the events.
+    #[serde(default)]
+    pub events: Option<TransactionEvents>,
+}
+
+impl GetTransactionResponse {
+    /// The base64 `DiagnosticEvent`s, wherever the RPC put them.
+    pub fn diagnostic_events(&self) -> &[String] {
+        self.diagnostic_events_xdr
+            .as_deref()
+            .or_else(|| self.events.as_ref()?.diagnostic_events_xdr.as_deref())
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct TransactionEvents {
+    #[serde(rename = "diagnosticEventsXdr", default)]
+    pub diagnostic_events_xdr: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -299,6 +326,11 @@ impl Client {
     const DEFAULT_TIMEOUT_SECS: u32 = 30;
     // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getLedgerEntries
     const MAX_LEDGER_KEYS_PER_REQUEST: usize = 200;
+
+    /// The RPC URL this client calls.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
 
     /// Creates a client with the default 30-second timeout.
     pub fn new(base_url: &str) -> Result<Self, Error> {
@@ -813,17 +845,22 @@ impl Client {
         let transaction = tx.to_xdr_base64(Limits::none())?;
         let params = json!({ "transaction": transaction });
         let resp: SendTransactionResponse = self.rpc_call("sendTransaction", params).await?;
-        if resp.status == "ERROR" {
-            tracing::warn!(hash = %resp.hash, status = %resp.status, "send_transaction_failed");
-            return Err(Error::JsonRpc {
-                code: -1,
-                message: format!(
-                    "sendTransaction failed: {}",
-                    resp.error_result_xdr.unwrap_or_default()
-                ),
-            });
+        match resp.status.as_str() {
+            "ERROR" => {
+                let result_xdr = resp.error_result_xdr.unwrap_or_default();
+                tracing::warn!(hash = %resp.hash, status = %resp.status, result_xdr, "send_transaction_failed");
+                let code = super::submit::result_code(&result_xdr).unwrap_or(result_xdr);
+                Err(Error::JsonRpc {
+                    code: -1,
+                    message: format!("sendTransaction failed: {code}"),
+                })
+            }
+            "TRY_AGAIN_LATER" => {
+                tracing::warn!(hash = %resp.hash, status = %resp.status, "send_transaction_not_queued");
+                Err(Error::NotQueued(resp.hash))
+            }
+            _ => Ok(resp),
         }
-        Ok(resp)
     }
 
     /// Fetches transaction status by hash.
@@ -1155,6 +1192,66 @@ mod tests {
 
         let contract_state = state.get(TEST_CONTRACT_ID).expect("contract state");
         assert_eq!(contract_state.get("Levels"), Some(&xdr::ScVal::U32(20)));
+    }
+
+    /// A node that queued nothing must not read as a sent transaction, which
+    /// callers would then poll until they time out.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn send_transaction_refuses_what_the_node_did_not_queue() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+        let envelope = xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
+            tx: xdr::Transaction {
+                source_account: xdr::MuxedAccount::Ed25519(Uint256([1; 32])),
+                fee: 100,
+                seq_num: xdr::SequenceNumber(1),
+                cond: xdr::Preconditions::None,
+                memo: xdr::Memo::None,
+                operations: xdr::VecM::default(),
+                ext: xdr::TransactionExt::V0,
+            },
+            signatures: xdr::VecM::default(),
+        });
+        let bad_seq = xdr::TransactionResult {
+            fee_charged: 100,
+            result: xdr::TransactionResultResult::TxBadSeq,
+            ext: xdr::TransactionResultExt::V0,
+        }
+        .to_xdr_base64(Limits::none())
+        .expect("result xdr");
+        for (status, error_result_xdr) in [("TRY_AGAIN_LATER", None), ("ERROR", Some(bad_seq))] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "hash": "ab",
+                        "status": status,
+                        "errorResultXdr": error_result_xdr,
+                        "latestLedger": 1,
+                    },
+                })))
+                .mount(&server)
+                .await;
+            let error = Client::new(&server.uri())
+                .expect("client")
+                .send_transaction(&envelope)
+                .await
+                .expect_err(status);
+            match status {
+                "TRY_AGAIN_LATER" => {
+                    assert!(matches!(error, Error::NotQueued(ref hash) if hash == "ab"))
+                }
+                _ => assert!(
+                    error
+                        .to_string()
+                        .ends_with("sendTransaction failed: TxBadSeq"),
+                    "{error}"
+                ),
+            }
+        }
     }
 
     #[cfg(target_arch = "wasm32")]

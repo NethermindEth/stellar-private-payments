@@ -4,7 +4,7 @@ use stellar_private_payments::types::{
 use wasm_bindgen::prelude::*;
 
 use super::{
-    convert::{encryption_public_key_hex, field_hex, note_amount_string, note_public_key_hex},
+    convert::{encryption_public_key_hex, field_hex, note_public_key_hex},
     global_view_key_ciphertext::GlobalViewKeyCiphertext,
 };
 
@@ -29,10 +29,10 @@ impl UserNoteSummary {
         self.inner.pool_contract_id.clone()
     }
 
-    /// Stroops as a decimal string.
+    /// Amount in stroops (`bigint` in JS).
     #[wasm_bindgen(getter)]
-    pub fn amount(&self) -> String {
-        note_amount_string(&self.inner.amount)
+    pub fn amount(&self) -> u128 {
+        u128::from(self.inner.amount)
     }
 
     #[wasm_bindgen(getter, js_name = leafIndex)]
