@@ -636,7 +636,7 @@ mod tests {
         );
     }
 
-    /// The attack from issue 776: the RPC appends a source-account entry
+    /// A malicious RPC appends a source-account entry
     /// moving the payer's tokens, which the payer's envelope signature would
     /// authorize without a prompt of its own.
     #[tokio::test]

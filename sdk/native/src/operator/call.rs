@@ -145,9 +145,16 @@ pub(crate) async fn build_call(
         min_time: xdr::TimePoint(0),
         max_time: xdr::TimePoint(unix_now()?.saturating_add(VALIDITY_SECS)),
     });
+    let (_, invoked) =
+        contract_call(&envelope.tx).ok_or_else(|| anyhow!("expected a contract call"))?;
+    let invoked = invoked.clone();
 
     let simulation = rpc.simulate_transaction(&raw).await?;
-    let prepared = PreparedSorobanTx::from_simulation(&raw, &simulation)?;
+    let prepared = PreparedSorobanTx::from_simulation(&raw, &simulation, |entries| {
+        Ok(check_source_auth(entries, &invoked)?)
+    })
+    // Keep the refusal an `Error::Refused` through the `anyhow` check.
+    .map_err(|e| e.downcast::<Error>().unwrap_or_else(Error::from))?;
     let envelope = xdr::TransactionEnvelope::from_xdr_base64(&prepared.tx_xdr, Limits::none())
         .context("decode assembled envelope")?;
     let call = describe(&envelope)?;
@@ -197,19 +204,7 @@ pub fn describe(envelope: &xdr::TransactionEnvelope) -> Result<OperatorCall, Err
     {
         return Err(refusal("the call has a source other than the envelope's"));
     }
-    // The signatures cover every source-account entry, so another call's
-    // entry would run undescribed.
-    let described = |entry: &xdr::SorobanAuthorizationEntry| {
-        entry.credentials == xdr::SorobanCredentials::SourceAccount
-            && entry.root_invocation.function
-                == xdr::SorobanAuthorizedFunction::ContractFn(call.clone())
-            && entry.root_invocation.sub_invocations.is_empty()
-    };
-    if !invoke.auth.iter().all(described) {
-        return Err(refusal(
-            "the envelope authorizes something other than this call by its source",
-        ));
-    }
+    check_source_auth(&invoke.auth, call)?;
 
     Ok(OperatorCall {
         source: account_strkey(&tx.source_account),
@@ -220,6 +215,28 @@ pub fn describe(envelope: &xdr::TransactionEnvelope) -> Result<OperatorCall, Err
         method: call.function_name.to_utf8_string_lossy(),
         args: call.args.to_vec(),
     })
+}
+
+/// Refuses authorization beyond `call` by the envelope's source.
+///
+/// The signatures cover every source-account entry, so another call's entry
+/// would run undescribed.
+fn check_source_auth(
+    entries: &[xdr::SorobanAuthorizationEntry],
+    call: &xdr::InvokeContractArgs,
+) -> Result<(), Error> {
+    let described = |entry: &xdr::SorobanAuthorizationEntry| {
+        entry.credentials == xdr::SorobanCredentials::SourceAccount
+            && entry.root_invocation.function
+                == xdr::SorobanAuthorizedFunction::ContractFn(call.clone())
+            && entry.root_invocation.sub_invocations.is_empty()
+    };
+    if !entries.iter().all(described) {
+        return Err(refusal(
+            "the envelope authorizes something other than this call by its source",
+        ));
+    }
+    Ok(())
 }
 
 fn contract_call(
