@@ -38,6 +38,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
             include_str!("schema_v8_event_chain.sql"),
             fold_saved_event_chains,
         ),
+        M::up(include_str!("schema_v9_registry_lookup_indexes.sql")),
     ])
 });
 /// Raw events one pass of [`Storage::fold_event_chain`] loads at a time.
@@ -4065,6 +4066,23 @@ mod tests {
     }
 
     #[test]
+    fn opening_an_older_database_applies_the_v9_note_key_index_migration() -> Result<()> {
+        for version in [7, 8] {
+            let mut conn = Connection::open_in_memory()?;
+            MIGRATIONS.to_version(&mut conn, version)?;
+            assert!(
+                !index_exists(&conn, "idx_public_keys_note_key")?,
+                "v{version} must predate the index"
+            );
+
+            let storage = Storage::connect_with_connection(conn)?;
+
+            assert!(index_exists(&storage.conn, "idx_public_keys_note_key")?);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn opening_a_v4_database_files_leaves_under_their_tree() -> Result<()> {
         let mut conn = Connection::open_in_memory()?;
         MIGRATIONS.to_version(&mut conn, 4)?;
@@ -4347,6 +4365,21 @@ mod tests {
             )?;
         }
         Ok(())
+    }
+
+    #[test]
+    fn migrations_are_valid() -> Result<()> {
+        MIGRATIONS.validate()?;
+        Ok(())
+    }
+
+    fn index_exists(conn: &Connection, name: &str) -> Result<bool> {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            params![name],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
