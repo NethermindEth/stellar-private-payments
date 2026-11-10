@@ -4,9 +4,9 @@ use crate::{
     types::{
         AspMembershipSync, BootnodeSetting, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey,
         EncryptionPublicKey, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting, LeafAddedEvent,
-        NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey,
-        NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent,
-        RecipientLookup, UserNoteSummary, UserOperation,
+        NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyOwner, NoteKeyOwnerLookup,
+        NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem, PortfolioBalance,
+        PortfolioPoolEntry, PublicKeyEvent, RecipientLookup, UserNoteSummary, UserOperation,
     },
 };
 use anyhow::{Context, Result, anyhow, ensure};
@@ -704,6 +704,52 @@ impl Storage {
             .context("lookup_public_key_by_address")
     }
 
+    /// Every address that registered a key in `note_keys` with the registry
+    /// `public_key_registry_contract_id`.
+    ///
+    /// Only that registry's events count: one database can index several
+    /// deployments, such as `local` and `testnet` sharing a CLI data dir.
+    ///
+    /// Several addresses may register the same key (see
+    /// [`NoteKeyOwnerLookup`]). Rows are ordered per key by address; unknown
+    /// keys yield no rows.
+    pub fn lookup_owners_by_note_keys(
+        &self,
+        note_keys: &[Field],
+        public_key_registry_contract_id: &str,
+    ) -> Result<Vec<NoteKeyOwner>> {
+        // `Field` binds as its 32-byte little-endian blob, the same layout the
+        // registry emits and `public_keys.note_key` stores.
+        let mut stmt = self.conn.prepare(
+            "SELECT p.owner
+             FROM public_keys p
+             JOIN raw_contract_events r ON r.id = p.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE p.note_key = ?1 AND c.address = ?2
+             GROUP BY p.owner
+             ORDER BY p.owner",
+        )?;
+
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for note_key in note_keys {
+            if !seen.insert(*note_key) {
+                continue;
+            }
+            let rows =
+                stmt.query_map(params![note_key, public_key_registry_contract_id], |row| {
+                    Ok(NoteKeyOwner {
+                        note_key: *note_key,
+                        address: row.get(0)?,
+                    })
+                })?;
+            for row in rows {
+                out.push(row.context("lookup_owners_by_note_keys")?);
+            }
+        }
+        Ok(out)
+    }
+
     /// List notes derived for `address` (newest first).
     pub fn list_user_notes(
         &self,
@@ -957,6 +1003,25 @@ impl Storage {
 
         Ok(RecipientLookup {
             entry,
+            registry_fully_synced,
+            network_tip_ledger,
+            registry_last_fully_indexed_ledger,
+        })
+    }
+
+    /// [`Self::lookup_owners_by_note_keys`] together with the sync status of
+    /// the same registry, so both describe one contract.
+    pub fn note_key_owner_lookup(
+        &self,
+        note_keys: &[Field],
+        public_key_registry_contract_id: &str,
+    ) -> Result<NoteKeyOwnerLookup> {
+        let owners = self.lookup_owners_by_note_keys(note_keys, public_key_registry_contract_id)?;
+        let (registry_fully_synced, network_tip_ledger, registry_last_fully_indexed_ledger) =
+            self.registry_sync_status(public_key_registry_contract_id)?;
+
+        Ok(NoteKeyOwnerLookup {
+            owners,
             registry_fully_synced,
             network_tip_ledger,
             registry_last_fully_indexed_ledger,
@@ -4386,6 +4451,214 @@ mod tests {
     #[test]
     fn migrations_are_valid() -> Result<()> {
         MIGRATIONS.validate()?;
+        Ok(())
+    }
+
+    const REGISTRY: &str = "CREGISTRY";
+    /// The registry of another deployment indexed into the same database.
+    const OTHER_REGISTRY: &str = "COTHERREGISTRY";
+
+    /// Store a [`REGISTRY`] event registering `note_key` for `owner` at
+    /// `ledger`.
+    fn register_note_key(
+        storage: &mut Storage,
+        id: &str,
+        ledger: u32,
+        owner: &str,
+        note_key: NotePublicKey,
+    ) -> Result<()> {
+        register_note_key_in(storage, REGISTRY, id, ledger, owner, note_key)
+    }
+
+    /// Store an event of `registry` registering `note_key` for `owner` at
+    /// `ledger`.
+    fn register_note_key_in(
+        storage: &mut Storage,
+        registry: &str,
+        id: &str,
+        ledger: u32,
+        owner: &str,
+        note_key: NotePublicKey,
+    ) -> Result<()> {
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![ContractEvent {
+                id: id.to_string(),
+                ledger,
+                contract_id: registry.to_string(),
+                topics: vec!["PublicKeyEvent".to_string()],
+                value: "dummy".to_string(),
+            }],
+            cursor: id.to_string(),
+            latest_ledger: ledger,
+        })?;
+        storage.save_public_key_events_batch(&vec![PublicKeyEvent {
+            id: id.to_string(),
+            owner: owner.to_string(),
+            encryption_key: EncryptionPublicKey([9u8; 32]),
+            note_key,
+        }])
+    }
+
+    /// A note key as the registry stores it: the little-endian field bytes.
+    fn note_key_of(field: Field) -> NotePublicKey {
+        NotePublicKey(field.to_le_bytes())
+    }
+
+    fn owners_of(storage: &Storage, keys: &[Field]) -> Result<Vec<(Field, String)>> {
+        Ok(storage
+            .lookup_owners_by_note_keys(keys, REGISTRY)?
+            .into_iter()
+            .map(|o| (o.note_key, o.address))
+            .collect())
+    }
+
+    #[test]
+    fn note_key_lookup_returns_the_registering_address() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(11));
+        register_note_key(&mut storage, "evt-a", 7, "GALICE", note_key_of(key))?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GALICE".to_string())]
+        );
+        Ok(())
+    }
+
+    /// The registry never emits two events for one address, but a lying
+    /// source can repeat one under another id.
+    #[test]
+    fn note_key_lookup_lists_a_repeated_registration_once() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(3));
+        register_note_key(&mut storage, "evt-first", 10, "GALICE", note_key_of(key))?;
+        register_note_key(&mut storage, "evt-again", 30, "GALICE", note_key_of(key))?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GALICE".to_string())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_returns_every_owner_of_a_shared_key_by_address() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(4));
+        register_note_key(&mut storage, "evt-zed", 15, "GZED", note_key_of(key))?;
+        register_note_key(&mut storage, "evt-amy", 25, "GAMY", note_key_of(key))?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GAMY".to_string()), (key, "GZED".to_string())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_ignores_registrations_of_other_deployments() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let shared = Field::from(NoteAmount::from(12));
+        let other_only = Field::from(NoteAmount::from(13));
+        register_note_key_in(
+            &mut storage,
+            OTHER_REGISTRY,
+            "evt-other-shared",
+            5,
+            "GLOCAL",
+            note_key_of(shared),
+        )?;
+        register_note_key_in(
+            &mut storage,
+            OTHER_REGISTRY,
+            "evt-other-only",
+            6,
+            "GLOCAL",
+            note_key_of(other_only),
+        )?;
+        register_note_key(&mut storage, "evt-this", 7, "GALICE", note_key_of(shared))?;
+
+        assert_eq!(
+            owners_of(&storage, &[shared, other_only])?,
+            vec![(shared, "GALICE".to_string())]
+        );
+        assert!(
+            storage
+                .note_key_owner_lookup(&[other_only], REGISTRY)?
+                .owners
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_of_an_unknown_key_is_empty() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(5));
+        register_note_key(&mut storage, "evt-a", 7, "GALICE", note_key_of(key))?;
+
+        assert!(owners_of(&storage, &[Field::from(NoteAmount::from(6))])?.is_empty());
+        assert!(owners_of(&storage, &[])?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_matches_the_registry_little_endian_bytes() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(0x0102_0304));
+        assert_ne!(key.to_le_bytes(), key.to_be_bytes());
+        register_note_key(&mut storage, "evt-a", 7, "GALICE", note_key_of(key))?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GALICE".to_string())]
+        );
+        // The same 32 bytes read as a big-endian integer are a different key.
+        let be_misread = Field::try_from_be_bytes(key.to_le_bytes())?;
+        assert!(owners_of(&storage, &[be_misread])?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_ignores_duplicate_requested_keys() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let k1 = Field::from(NoteAmount::from(7));
+        let k2 = Field::from(NoteAmount::from(8));
+        register_note_key(&mut storage, "evt-k1", 10, "GALICE", note_key_of(k1))?;
+        register_note_key(&mut storage, "evt-k2", 20, "GBOB", note_key_of(k2))?;
+
+        assert_eq!(
+            owners_of(&storage, &[k2, k1, k2, k1])?,
+            vec![(k2, "GBOB".to_string()), (k1, "GALICE".to_string())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_owner_lookup_reports_registry_sync_status() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(9));
+        register_note_key(&mut storage, "evt-a", 7, "GALICE", note_key_of(key))?;
+
+        let lookup = storage.note_key_owner_lookup(&[key], REGISTRY)?;
+        assert_eq!(lookup.owners.len(), 1);
+        assert!(!lookup.registry_fully_synced);
+        assert_eq!(lookup.network_tip_ledger, 0);
+
+        storage.save_sync_progress(
+            &[crate::types::SyncMetadata {
+                contract_id: REGISTRY.to_string(),
+                cursor: "c".to_string(),
+                last_indexed_ledger: 42,
+                last_fully_indexed_ledger: 0,
+            }],
+            true,
+        )?;
+
+        let lookup = storage.note_key_owner_lookup(&[key], REGISTRY)?;
+        assert!(lookup.registry_fully_synced);
+        assert_eq!(lookup.network_tip_ledger, 42);
+        assert_eq!(lookup.registry_last_fully_indexed_ledger, 42);
         Ok(())
     }
 

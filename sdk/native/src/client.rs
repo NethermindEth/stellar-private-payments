@@ -1,6 +1,9 @@
 use anyhow::Context;
 
-use crate::types::{ContractConfig, Field, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
+use crate::types::{
+    ContractConfig, Field, NoteKeyOwnerLookup, NoteOwnerAddress, OperationalFeedItem,
+    RecipientLookup,
+};
 
 use crate::{
     Account, Error, ProverHandle, SignerHandle, StorageHandle, SyncMode,
@@ -132,6 +135,25 @@ impl Client {
         self.ensure_synced().await?;
         self.storage
             .recipient_lookup(address.as_ref(), &self.contract_config)
+            .await
+    }
+
+    /// Reverse lookup in the configured public key registry: every Stellar
+    /// address that registered each of `note_keys`. A key may map to several
+    /// addresses or none; see [`NoteKeyOwnerLookup`].
+    ///
+    /// Only trust the result once
+    /// [`registry_fully_synced`](NoteKeyOwnerLookup::registry_fully_synced)
+    /// is set: until then a later registration can still add an address.
+    ///
+    /// With [`SyncMode::Inline`], local storage is synced before reading.
+    pub async fn note_key_owner_lookup(
+        &self,
+        note_keys: &[Field],
+    ) -> Result<NoteKeyOwnerLookup, Error> {
+        self.ensure_synced().await?;
+        self.storage
+            .note_key_owner_lookup(note_keys, &self.contract_config)
             .await
     }
 

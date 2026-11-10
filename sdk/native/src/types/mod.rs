@@ -237,6 +237,39 @@ pub struct RecipientLookup {
     pub registry_last_fully_indexed_ledger: u32,
 }
 
+/// A Stellar address that registered a given note public key in the public
+/// key registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteKeyOwner {
+    /// BN254 note public key, as the field element the circuits and GVK audit
+    /// use.
+    pub note_key: Field,
+    /// Stellar address that registered `note_key`.
+    pub address: String,
+}
+
+/// Reverse lookup in the configured public key registry: every address that
+/// registered one of the requested note public keys.
+///
+/// The registry is write-once per address and each registration proves
+/// control of the note private key at registration time, but several
+/// addresses may register the same key, so a key may map to several addresses
+/// (or none). The proofs do not show that those addresses belong to one
+/// person.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteKeyOwnerLookup {
+    /// One entry per (note key, address) pair; a key registered by several
+    /// addresses yields several entries, an unknown key none.
+    pub owners: Vec<NoteKeyOwner>,
+    /// Whether the registry is indexed up to the network tip. Until it is,
+    /// `owners` may miss registrations, so a key can gain addresses later.
+    pub registry_fully_synced: bool,
+    pub network_tip_ledger: u32,
+    pub registry_last_fully_indexed_ledger: u32,
+}
+
 /// A high-level operation the user performed in a pool (deposit / sent /
 /// withdraw / advanced), persisted in `user_operations` and shown as pool
 /// history.
