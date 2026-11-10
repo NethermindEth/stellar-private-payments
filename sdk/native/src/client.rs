@@ -8,7 +8,7 @@ use crate::{
     correlation::correlation_id_or_new,
     operator::{self, AllowlistOperator, BlocklistOperator, GvkAuthority, PoolAdmin},
     prover::NoopProver,
-    sync::{BackgroundSync, SyncHandle, catch_up},
+    sync::{BackgroundSync, SyncHandle, catch_up, reset_contract_history},
 };
 
 /// Top-level SDK client for a privacy pools deployment.
@@ -101,8 +101,21 @@ impl Client {
     /// Recovers from [`Error::EventHistoryMismatch`] and
     /// [`Error::EventHistoryIncomplete`]. The same bootnode serves the same
     /// history, so to sync from another one, open a client with it first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RetentionGap::SyncGap`](crate::RetentionGap::SyncGap),
+    /// forgetting nothing, when no bootnode is configured and the wallet RPC
+    /// no longer holds the contract's deployment ledger.
     pub async fn reset_history(&self, contract_id: &str) -> Result<(), Error> {
-        self.storage.forget_contract_history(contract_id).await?;
+        reset_contract_history(
+            &self.rpc,
+            &self.storage,
+            &self.contract_config,
+            self.sync.bootnode_url(),
+            contract_id,
+        )
+        .await?;
         self.sync.kick.set_history_fault(None);
         Ok(())
     }

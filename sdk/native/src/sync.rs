@@ -399,6 +399,40 @@ fn retention_handoff_from_ledger(err: &RpcError) -> Option<u32> {
     }
 }
 
+/// Forgets everything synced from `contract_id`, once its events can be
+/// fetched again from its deployment: from the bootnode, or without one, from
+/// the wallet RPC.
+///
+/// # Errors
+///
+/// Returns [`RetentionGap::SyncGap`], forgetting nothing, when no bootnode is
+/// configured and the wallet RPC no longer holds the contract's deployment
+/// ledger.
+pub(crate) async fn reset_contract_history(
+    rpc: &RpcClient,
+    storage: &StorageHandle,
+    contract_config: &ContractConfig,
+    bootnode_url: Option<&str>,
+    contract_id: &str,
+) -> Result<(), Error> {
+    if bootnode_url.is_none() {
+        let deployment_ledger = contract_config
+            .indexed_contracts()
+            .find(|(id, _)| *id == contract_id)
+            .and_then(|(_, ledger)| ledger)
+            .map_or_else(|| contract_config.min_deployment_ledger(), Ok)?;
+        match rpc
+            .get_contract_events(&[contract_id.to_owned()], deployment_ledger, 1, None)
+            .await
+        {
+            Ok(_) | Err(RpcError::RpcAhead(_)) => {}
+            Err(RpcError::RpcSyncGap(_)) => return Err(RetentionGap::SyncGap.into()),
+            Err(e) => return Err(e.into()),
+        }
+    }
+    storage.forget_contract_history(contract_id).await
+}
+
 fn is_rpc_sync_gap(err: &IndexerError) -> bool {
     matches!(err, IndexerError::Rpc(RpcError::RpcSyncGap(_)))
 }
@@ -1300,6 +1334,75 @@ mod tests {
 
         assert!(result.is_ok(), "{result:?}");
         assert_eq!(get_events_calls(&bootnode).await, 1);
+    }
+
+    /// Storage holding one saved event of `contract_id`.
+    async fn storage_with_one_event(name: &str, contract_id: &str) -> Result<StorageHandle, Error> {
+        let storage = temp_storage(name);
+        storage
+            .save_events_batch(ContractsEventData {
+                events: vec![crate::types::ContractEvent {
+                    id: "0000000000000000001-0000000001".to_owned(),
+                    ledger: 1,
+                    contract_id: contract_id.to_owned(),
+                    topics: vec!["AAAA".to_owned()],
+                    value: "AAAA".to_owned(),
+                }],
+                cursor: "saved".to_owned(),
+                latest_ledger: 1,
+            })
+            .await?;
+        Ok(storage)
+    }
+
+    #[tokio::test]
+    async fn a_reset_the_rpc_cannot_refill_forgets_nothing_without_a_bootnode() -> Result<(), Error>
+    {
+        let rpc = MockServer::start().await;
+        mount_get_events(&rpc, vec![range_error(100, 3_000_000)]).await;
+        let rpc = RpcClient::new(&rpc.uri())?;
+        let config = test_config();
+        let pool = config.pools[0].pool_contract_id.clone();
+        let storage = storage_with_one_event("reset-gap", &pool).await?;
+        let saved = EventChainCheck::Differs {
+            synced: 1,
+            published: 0,
+        };
+
+        let refused = reset_contract_history(&rpc, &storage, config, None, &pool).await;
+        assert!(
+            matches!(refused, Err(Error::RetentionGap(RetentionGap::SyncGap))),
+            "{refused:?}"
+        );
+        assert_eq!(
+            storage.check_event_chain(&pool, EventChain::EMPTY).await?,
+            saved
+        );
+
+        reset_contract_history(&rpc, &storage, config, Some("http://bootnode"), &pool).await?;
+        assert_eq!(
+            storage.check_event_chain(&pool, EventChain::EMPTY).await?,
+            EventChainCheck::Matches
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_reset_the_rpc_can_refill_forgets_without_a_bootnode() -> Result<(), Error> {
+        let rpc = MockServer::start().await;
+        mount_get_events(&rpc, vec![get_events_page("held", json!([]), 3_000_000)]).await;
+        let rpc = RpcClient::new(&rpc.uri())?;
+        let config = test_config();
+        let pool = config.pools[0].pool_contract_id.clone();
+        let storage = storage_with_one_event("reset-held", &pool).await?;
+
+        reset_contract_history(&rpc, &storage, config, None, &pool).await?;
+
+        assert_eq!(
+            storage.check_event_chain(&pool, EventChain::EMPTY).await?,
+            EventChainCheck::Matches
+        );
+        Ok(())
     }
 
     #[tokio::test]
