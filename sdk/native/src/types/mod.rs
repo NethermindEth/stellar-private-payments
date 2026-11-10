@@ -263,11 +263,10 @@ pub struct NoteKeyOwnerLookup {
     /// One entry per (note key, address) pair; a key registered by several
     /// addresses yields several entries, an unknown key none.
     pub owners: Vec<NoteKeyOwner>,
-    /// Whether the registry is indexed up to the network tip. Until it is,
+    /// Whether the registry is indexed up to the network tip and all of its
+    /// indexed events are processed into owners. Until it is,
     /// `owners` may miss registrations, so a key can gain addresses later.
     pub registry_fully_synced: bool,
-    pub network_tip_ledger: u32,
-    pub registry_last_fully_indexed_ledger: u32,
 }
 
 /// A high-level operation the user performed in a pool (deposit / sent /
