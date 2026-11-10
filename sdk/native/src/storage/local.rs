@@ -7,7 +7,7 @@ use std::{
 use anyhow::Context;
 
 use crate::{
-    chain::ContractDataStorage,
+    chain::{ContractDataStorage, EventChain, EventChainCheck},
     planner::SpendableNote,
     state::SqliteStorage,
     storage::NoteKeyPair,
@@ -331,6 +331,18 @@ impl Storage for LocalStorage {
         Ok(self
             .storage()
             .pool_has_commitments(pool_contract_id, commitments)?)
+    }
+
+    async fn check_event_chain(
+        &self,
+        contract_id: &str,
+        published: EventChain,
+    ) -> Result<EventChainCheck, Error> {
+        Ok(self.storage().check_event_chain(contract_id, &published)?)
+    }
+
+    async fn forget_contract_history(&self, contract_id: &str) -> Result<(), Error> {
+        Ok(self.storage_mut().forget_contract_history(contract_id)?)
     }
 }
 

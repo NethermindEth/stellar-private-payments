@@ -94,6 +94,19 @@ impl Client {
         .await
     }
 
+    /// Forgets everything synced from `contract_id`: its events, what was
+    /// derived from them, and the notes they made. The next sync fetches the
+    /// contract's events again from its deployment.
+    ///
+    /// Recovers from [`Error::EventHistoryMismatch`] and
+    /// [`Error::EventHistoryIncomplete`]. The same bootnode serves the same
+    /// history, so to sync from another one, open a client with it first.
+    pub async fn reset_history(&self, contract_id: &str) -> Result<(), Error> {
+        self.storage.forget_contract_history(contract_id).await?;
+        self.sync.kick.set_history_fault(None);
+        Ok(())
+    }
+
     /// Keep client synced in [`SyncMode::Background`] mode.
     ///
     /// Uses the bootnode URL from [`Self::init`] when the wallet RPC has a

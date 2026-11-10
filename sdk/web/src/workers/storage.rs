@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use stellar_private_payments::{
     Error, Storage,
-    chain::ContractDataStorage,
+    chain::{ContractDataStorage, EventChain, EventChainCheck},
     disclosure::{
         BuildDisclosureInputs, DisclosureInputs, DisclosureInputsRequest, build_disclosure_inputs,
     },
@@ -195,6 +195,11 @@ pub(crate) enum StorageWorkerRequest {
         pool_contract_id: String,
         commitments: Vec<Field>,
     },
+    CheckEventChain {
+        contract_id: String,
+        published: EventChain,
+    },
+    ForgetContractHistory(String),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -221,6 +226,7 @@ pub(crate) enum StorageWorkerResponse {
     Logs(String),
     PoolGvkEvents(Vec<GvkEvent>),
     PoolHasCommitments(Vec<Field>),
+    EventChainCheck(EventChainCheck),
 }
 
 #[derive(Clone, Debug)]
@@ -1006,6 +1012,19 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             )?;
             StorageWorkerResponse::PoolHasCommitments(found.into_iter().collect())
         }
+        StorageWorkerRequest::CheckEventChain {
+            contract_id,
+            published,
+        } => {
+            tracing::trace!("[{WORKER_NAME}] check the event chain of {contract_id}");
+            let check = with_storage!(s => s.check_event_chain(&contract_id, &published)?)?;
+            StorageWorkerResponse::EventChainCheck(check)
+        }
+        StorageWorkerRequest::ForgetContractHistory(contract_id) => {
+            tracing::info!("[{WORKER_NAME}] forget the synced history of {contract_id}");
+            with_storage_mut!(s => s.forget_contract_history(&contract_id)?)?;
+            StorageWorkerResponse::Saved
+        }
     };
     Ok(resp)
 }
@@ -1764,6 +1783,45 @@ impl Storage for StorageBridge {
             Ok(StorageWorkerResponse::PoolHasCommitments(found)) => Ok(found.into_iter().collect()),
             Ok(other) => Err(Error::Other(anyhow::anyhow!(
                 "unexpected storage response verifying pool commitments: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e)),
+        }
+    }
+
+    async fn check_event_chain(
+        &self,
+        contract_id: &str,
+        published: EventChain,
+    ) -> Result<EventChainCheck, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::CheckEventChain {
+                    contract_id: contract_id.to_string(),
+                    published,
+                },
+                2_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::EventChainCheck(check)) => Ok(check),
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
+                "unexpected storage response checking an event chain: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e)),
+        }
+    }
+
+    async fn forget_contract_history(&self, contract_id: &str) -> Result<(), Error> {
+        match self
+            .call(
+                StorageWorkerRequest::ForgetContractHistory(contract_id.to_string()),
+                30_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::Saved) => Ok(()),
+            Ok(other) => Err(Error::Other(anyhow::anyhow!(
+                "unexpected storage response forgetting a contract's history: {other:?}"
             ))),
             Err(e) => Err(Error::Other(e)),
         }

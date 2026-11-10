@@ -13,15 +13,18 @@
 //! served, decoding nothing but base64, so an event withheld, altered, added
 //! or reordered by whoever served it changes the hash.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::cmp::Ordering;
+use stellar_xdr::ScVal;
 
 /// `SCV_VEC`, the `ScVal` discriminant of a vector.
 const SCV_VEC: u32 = 16;
 
 /// A contract's event chain after its first `count` events.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventChain {
     /// How many events the chain covers.
     pub count: u64,
@@ -75,11 +78,70 @@ impl EventChain {
             hash: hasher.finalize().into(),
         })
     }
+
+    /// Compares this chain, which the wallet folded from the events it synced,
+    /// with the chain the contract `published`.
+    pub fn check(&self, published: &EventChain) -> EventChainCheck {
+        let (synced, published_count) = (self.count, published.count);
+        match synced.cmp(&published_count) {
+            Ordering::Less => EventChainCheck::Behind {
+                synced,
+                published: published_count,
+            },
+            Ordering::Equal if self.hash == published.hash => EventChainCheck::Matches,
+            _ => EventChainCheck::Differs {
+                synced,
+                published: published_count,
+            },
+        }
+    }
+
+    /// Decodes what a contract's `event_chain()` returns: a map of `count`, a
+    /// `u64`, and `hash`, 32 bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `value` is not such a map.
+    pub fn from_scval(value: &ScVal) -> Result<Self> {
+        let ScVal::Map(Some(entries)) = value else {
+            bail!("event_chain() returned {value:?}, not a map");
+        };
+        let (mut count, mut hash) = (None, None);
+        for entry in entries.iter() {
+            match (&entry.key, &entry.val) {
+                (ScVal::Symbol(key), ScVal::U64(n)) if key.0.as_slice() == b"count" => {
+                    count = Some(*n);
+                }
+                (ScVal::Symbol(key), ScVal::Bytes(bytes)) if key.0.as_slice() == b"hash" => {
+                    hash = Some(<[u8; 32]>::try_from(bytes.as_slice()).map_err(|_| {
+                        anyhow!("event_chain() returned a hash of {} bytes", bytes.len())
+                    })?);
+                }
+                _ => bail!("event_chain() returned an unexpected entry {entry:?}"),
+            }
+        }
+        Ok(Self {
+            count: count.context("event_chain() returned no count")?,
+            hash: hash.context("event_chain() returned no hash")?,
+        })
+    }
+}
+
+/// How the wallet's event chain for a contract compares with the contract's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EventChainCheck {
+    /// The wallet holds the events the contract published, all of them.
+    Matches,
+    /// The wallet holds fewer events than the contract published.
+    Behind { synced: u64, published: u64 },
+    /// The wallet holds more events than the contract published, or as many
+    /// but different ones.
+    Differs { synced: u64, published: u64 },
 }
 
 #[cfg(test)]
 mod tests {
-    use super::EventChain;
+    use super::{EventChain, EventChainCheck};
     use anyhow::Result;
     use stellar_xdr::{
         Limits, ScBytes, ScMap, ScMapEntry, ScSymbol, ScVal, UInt256Parts, WriteXdr,
@@ -175,5 +237,64 @@ mod tests {
                 .extend::<&str>(&[], "not base64!")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn a_chain_checks_against_the_published_one_by_count_then_hash() -> Result<()> {
+        let [first, second] = sample_events()?;
+        let one = fold(std::slice::from_ref(&first))?;
+        let two = fold(&[first.clone(), second.clone()])?;
+        let other_two = fold(&[second, first])?;
+
+        assert_eq!(two.check(&two), EventChainCheck::Matches);
+        assert_eq!(
+            one.check(&two),
+            EventChainCheck::Behind {
+                synced: 1,
+                published: 2
+            }
+        );
+        assert_eq!(
+            other_two.check(&two),
+            EventChainCheck::Differs {
+                synced: 2,
+                published: 2
+            }
+        );
+        assert_eq!(
+            two.check(&one),
+            EventChainCheck::Differs {
+                synced: 2,
+                published: 1
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_contracts_return_value_decodes() -> Result<()> {
+        let value = ScVal::Map(Some(ScMap(
+            vec![
+                ScMapEntry {
+                    key: symbol("count")?,
+                    val: ScVal::U64(2),
+                },
+                ScMapEntry {
+                    key: symbol("hash")?,
+                    val: ScVal::Bytes(ScBytes(vec![9; 32].try_into()?)),
+                },
+            ]
+            .try_into()?,
+        )));
+
+        assert_eq!(
+            EventChain::from_scval(&value)?,
+            EventChain {
+                count: 2,
+                hash: [9; 32]
+            }
+        );
+        assert!(EventChain::from_scval(&ScVal::U64(2)).is_err());
+        Ok(())
     }
 }
