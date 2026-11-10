@@ -646,3 +646,30 @@ fn register_renews_the_persistent_registration() {
     let after = env.as_contract(&setup.registry, || env.storage().persistent().get_ttl(&key));
     assert_eq!(after, before.saturating_add(MAX_EXTENSION_LEDGERS));
 }
+
+/// Each registration extends the registry's event chain with the event it
+/// published, encoded as a client receives it. A repeated registration
+/// publishes nothing and leaves the chain as it was.
+#[test]
+fn the_event_chain_covers_every_registration() {
+    use soroban_sdk::testutils::Events as _;
+    use soroban_utils::event_chain::testutils::fold;
+    let setup = Setup::new();
+    let env = &setup.env;
+    let client = setup.client();
+    let mut chain = EventChain::empty(env);
+    assert_eq!(client.event_chain(), chain);
+
+    for seed in [0x11, 0x22, 0x11] {
+        let registrant = Registrant::new(seed);
+        let account = registrant.account(env);
+        let proof = registrant.prove(env, &setup.registry, &account);
+
+        client.register(&account, &proof);
+
+        let published = env.events().all().filter_by_contract(&setup.registry);
+        chain = fold(env, &chain, published.events());
+        assert_eq!(client.event_chain(), chain);
+    }
+    assert_eq!(chain.count, 2);
+}

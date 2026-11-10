@@ -29,7 +29,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, String, U256, Vec, contract, contracterror, contractevent,
     contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
-use soroban_utils::{AdminError, constants::bn256_modulus};
+use soroban_utils::{AdminError, EventChain, constants::bn256_modulus, event_chain, publish_event};
 
 // Re-exported rather than merely imported so `pool::ExtData` and
 // `pool::hash_ext_data` keep resolving for existing consumers (`e2e-tests`,
@@ -645,22 +645,26 @@ impl PoolContract {
 
         // 11. Emit events
         for n in proof.input_nullifiers.iter() {
-            NewNullifierEvent { nullifier: n }.publish(env);
+            publish_event!(env, NewNullifierEvent { nullifier: n });
         }
 
-        NewCommitmentEvent {
-            commitment: proof.output_commitment0,
-            index: idx_0,
-            encrypted_output: ext_data.encrypted_output0.clone(),
-        }
-        .publish(env);
+        publish_event!(
+            env,
+            NewCommitmentEvent {
+                commitment: proof.output_commitment0,
+                index: idx_0,
+                encrypted_output: ext_data.encrypted_output0.clone(),
+            }
+        );
 
-        NewCommitmentEvent {
-            commitment: proof.output_commitment1,
-            index: idx_1,
-            encrypted_output: ext_data.encrypted_output1.clone(),
-        }
-        .publish(env);
+        publish_event!(
+            env,
+            NewCommitmentEvent {
+                commitment: proof.output_commitment1,
+                index: idx_1,
+                encrypted_output: ext_data.encrypted_output1.clone(),
+            }
+        );
 
         Ok(())
     }
@@ -783,6 +787,12 @@ impl PoolContract {
         Ok(env.storage().persistent().has(&key))
     }
 
+    /// Returns the running hash over every event the pool has published, and
+    /// how many there were, for clients to check the events they synced.
+    pub fn event_chain(env: &Env) -> EventChain {
+        event_chain::event_chain(env)
+    }
+
     /// Proposes a new contract administrator.
     ///
     /// Replaces any earlier proposal. The current admin keeps every power until
@@ -802,8 +812,10 @@ impl PoolContract {
     ///
     /// Panics if the admin does not authorize the call.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)
-            .map_err(Error::from)
+        let event =
+            soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)?;
+        publish_event!(&env, event);
+        Ok(())
     }
 
     /// Withdraws the pending admin transfer.
@@ -817,8 +829,10 @@ impl PoolContract {
     ///
     /// Panics if the admin does not authorize the call.
     pub fn cancel_admin_transfer(env: &Env) -> Result<(), Error> {
-        soroban_utils::cancel_admin_transfer(env, &DataKey::Admin, &DataKey::PendingAdmin)
-            .map_err(Error::from)
+        let event =
+            soroban_utils::cancel_admin_transfer(env, &DataKey::Admin, &DataKey::PendingAdmin)?;
+        publish_event!(env, event);
+        Ok(())
     }
 
     /// Installs the pending admin as the contract administrator.
@@ -834,8 +848,9 @@ impl PoolContract {
     ///
     /// Panics if the pending admin does not authorize the call.
     pub fn accept_admin(env: &Env) -> Result<(), Error> {
-        soroban_utils::accept_admin(env, &DataKey::Admin, &DataKey::PendingAdmin)
-            .map_err(Error::from)
+        let event = soroban_utils::accept_admin(env, &DataKey::Admin, &DataKey::PendingAdmin)?;
+        publish_event!(env, event);
+        Ok(())
     }
 
     /// Returns the contract administrator.
@@ -897,9 +912,9 @@ impl PoolContract {
             .instance()
             .set(&DataKey::DepositsPaused, &paused);
         if changed {
-            DepositPauseChanged { paused }.publish(env);
+            publish_event!(env, DepositPauseChanged { paused });
         } else {
-            DepositPauseRepeated { paused }.publish(env);
+            publish_event!(env, DepositPauseRepeated { paused });
         }
         Ok(())
     }
@@ -924,7 +939,7 @@ impl PoolContract {
         totals::claim(env, amount)?;
         let token_client = TokenClient::new(env, &token);
         token_client.transfer(&env.current_contract_address(), &to, &amount);
-        FeesClaimed { to, amount }.publish(env);
+        publish_event!(env, FeesClaimed { to, amount });
         Ok(())
     }
 
@@ -968,11 +983,13 @@ impl PoolContract {
         env.storage()
             .instance()
             .set(&DataKey::ASPMembership, &new_asp_membership);
-        AspMembershipUpdated {
-            old_tree,
-            new_tree: new_asp_membership,
-        }
-        .publish(env);
+        publish_event!(
+            env,
+            AspMembershipUpdated {
+                old_tree,
+                new_tree: new_asp_membership,
+            }
+        );
         Ok(())
     }
 
@@ -1001,11 +1018,13 @@ impl PoolContract {
         env.storage()
             .instance()
             .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
-        AspNonMembershipUpdated {
-            old_tree,
-            new_tree: new_asp_non_membership,
-        }
-        .publish(env);
+        publish_event!(
+            env,
+            AspNonMembershipUpdated {
+                old_tree,
+                new_tree: new_asp_non_membership,
+            }
+        );
         Ok(())
     }
 

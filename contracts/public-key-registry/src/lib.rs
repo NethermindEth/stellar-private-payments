@@ -6,7 +6,7 @@ use soroban_sdk::{
     Address, Bytes, BytesN, Env, String, U256, address_payload::AddressPayload, contract,
     contracterror, contractevent, contractimpl, contracttype, crypto::bn254::Bn254Fr, vec,
 };
-use soroban_utils::constants::bn256_modulus;
+use soroban_utils::{EventChain, constants::bn256_modulus, event_chain, publish_event};
 
 /// User account registration data
 ///
@@ -196,6 +196,12 @@ impl PublicKeyRegistry {
             .expect("constructor sets the verifier")
     }
 
+    /// Returns the running hash over every event the registry has published,
+    /// and how many there were, for clients to check the events they synced.
+    pub fn event_chain(env: Env) -> EventChain {
+        event_chain::event_chain(&env)
+    }
+
     /// Register a user's public encryption and note keys.
     ///
     /// Registration is write-once: registering the same keys again changes
@@ -267,13 +273,15 @@ impl PublicKeyRegistry {
 
         env.storage().persistent().set(&key, &next);
         soroban_utils::extend_persistent(&env, &key);
-        PublicKeyEvent {
-            owner: account.owner,
-            encryption_key: account.encryption_key,
-            note_key: account.note_key,
-            owner_signature: proof.owner_signature.clone(),
-        }
-        .publish(&env);
+        publish_event!(
+            &env,
+            PublicKeyEvent {
+                owner: account.owner,
+                encryption_key: account.encryption_key,
+                note_key: account.note_key,
+                owner_signature: proof.owner_signature.clone(),
+            }
+        );
         Ok(())
     }
 

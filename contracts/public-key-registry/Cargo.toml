@@ -21,6 +21,9 @@ soroban-utils.workspace = true
 soroban-sdk.workspace = true
 
 [dev-dependencies]
+# workspace
+soroban-utils = { workspace = true, features = ["testutils"] }
+
 # external
 ed25519-dalek.workspace = true
 sha2.workspace = true

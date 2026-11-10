@@ -21,6 +21,7 @@ pub enum AdminError {
 /// The event [`update_admin`] publishes when the admin proposes a successor.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use = "the admin helpers return the event for the caller to publish"]
 pub struct AdminTransferProposed {
     /// The admin that made the proposal.
     pub admin: Address,
@@ -32,6 +33,7 @@ pub struct AdminTransferProposed {
 /// proposal.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use = "the admin helpers return the event for the caller to publish"]
 pub struct AdminTransferCancelled {
     /// The admin that withdrew the proposal.
     pub admin: Address,
@@ -42,6 +44,7 @@ pub struct AdminTransferCancelled {
 /// The event [`accept_admin`] publishes when the proposed address takes over.
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[must_use = "the admin helpers return the event for the caller to publish"]
 pub struct AdminTransferAccepted {
     /// The admin replaced by the transfer.
     pub old_admin: Address,
@@ -77,7 +80,8 @@ where
 /// Proposes `new_admin` as the next administrator.
 ///
 /// Stores the proposal under `pending_key`, replacing any earlier one, and
-/// publishes [`AdminTransferProposed`]. The admin keeps every power until
+/// returns [`AdminTransferProposed`] for the caller to publish. The admin
+/// keeps every power until
 /// `new_admin` calls [`accept_admin`]. Each contract passes its own keys, so
 /// contracts sharing this helper keep separate entries.
 ///
@@ -97,7 +101,7 @@ pub fn update_admin<K>(
     admin_key: &K,
     pending_key: &K,
     new_admin: &Address,
-) -> Result<(), AdminError>
+) -> Result<AdminTransferProposed, AdminError>
 where
     K: IntoVal<Env, Val>,
 {
@@ -107,17 +111,15 @@ where
     let storage = env.storage().persistent();
     storage.set(pending_key, new_admin);
     storage.extend_ttl(pending_key, LIFETIME_LEDGERS, LIFETIME_LEDGERS);
-    AdminTransferProposed {
+    Ok(AdminTransferProposed {
         admin,
         pending_admin: new_admin.clone(),
-    }
-    .publish(env);
-    Ok(())
+    })
 }
 
 /// Withdraws the proposal stored under `pending_key`.
 ///
-/// Publishes [`AdminTransferCancelled`].
+/// Returns [`AdminTransferCancelled`] for the caller to publish.
 ///
 /// # Errors
 ///
@@ -128,7 +130,11 @@ where
 /// # Panics
 ///
 /// Panics if the address stored under `admin_key` does not authorize the call.
-pub fn cancel_admin_transfer<K>(env: &Env, admin_key: &K, pending_key: &K) -> Result<(), AdminError>
+pub fn cancel_admin_transfer<K>(
+    env: &Env,
+    admin_key: &K,
+    pending_key: &K,
+) -> Result<AdminTransferCancelled, AdminError>
 where
     K: IntoVal<Env, Val>,
 {
@@ -137,18 +143,16 @@ where
     let pending_admin = get_pending_admin(env, pending_key).ok_or(AdminError::NoPendingAdmin)?;
 
     env.storage().persistent().remove(pending_key);
-    AdminTransferCancelled {
+    Ok(AdminTransferCancelled {
         admin,
         pending_admin,
-    }
-    .publish(env);
-    Ok(())
+    })
 }
 
 /// Installs the address proposed under `pending_key` as the administrator.
 ///
-/// Replaces the address under `admin_key`, removes the proposal, and publishes
-/// [`AdminTransferAccepted`].
+/// Replaces the address under `admin_key`, removes the proposal, and returns
+/// [`AdminTransferAccepted`] for the caller to publish.
 ///
 /// Renews the admin entry to [`LIFETIME_LEDGERS`] when less remains, so a
 /// transfer leaves the new admin at least that long.
@@ -162,7 +166,11 @@ where
 /// # Panics
 ///
 /// Panics if the proposed address does not authorize the call.
-pub fn accept_admin<K>(env: &Env, admin_key: &K, pending_key: &K) -> Result<(), AdminError>
+pub fn accept_admin<K>(
+    env: &Env,
+    admin_key: &K,
+    pending_key: &K,
+) -> Result<AdminTransferAccepted, AdminError>
 where
     K: IntoVal<Env, Val>,
 {
@@ -174,12 +182,10 @@ where
     storage.set(admin_key, &new_admin);
     storage.extend_ttl(admin_key, LIFETIME_LEDGERS, LIFETIME_LEDGERS);
     storage.remove(pending_key);
-    AdminTransferAccepted {
+    Ok(AdminTransferAccepted {
         old_admin,
         new_admin,
-    }
-    .publish(env);
-    Ok(())
+    })
 }
 
 /// Mock token contract for testing purposes

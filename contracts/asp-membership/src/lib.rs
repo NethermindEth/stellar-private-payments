@@ -184,8 +184,9 @@ impl ASPMembership {
     ///
     /// Panics if the admin does not authorize the call.
     pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
-        soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)
-            .map_err(Error::from)
+        soroban_utils::update_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin, &new_admin)?
+            .publish(&env);
+        Ok(())
     }
 
     /// Withdraws the pending admin transfer.
@@ -199,8 +200,9 @@ impl ASPMembership {
     ///
     /// Panics if the admin does not authorize the call.
     pub fn cancel_admin_transfer(env: Env) -> Result<(), Error> {
-        soroban_utils::cancel_admin_transfer(&env, &DataKey::Admin, &DataKey::PendingAdmin)
-            .map_err(Error::from)
+        soroban_utils::cancel_admin_transfer(&env, &DataKey::Admin, &DataKey::PendingAdmin)?
+            .publish(&env);
+        Ok(())
     }
 
     /// Installs the pending admin as the contract administrator.
@@ -216,8 +218,8 @@ impl ASPMembership {
     ///
     /// Panics if the pending admin does not authorize the call.
     pub fn accept_admin(env: Env) -> Result<(), Error> {
-        soroban_utils::accept_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin)
-            .map_err(Error::from)
+        soroban_utils::accept_admin(&env, &DataKey::Admin, &DataKey::PendingAdmin)?.publish(&env);
+        Ok(())
     }
 
     /// Returns the contract administrator.

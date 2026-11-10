@@ -4180,3 +4180,87 @@ fn claim_fees_errors_when_admin_unset() {
         Err(Ok(Error::NotInitialized))
     );
 }
+
+/// Folds the events the pool's last call published into `chain`, as a client
+/// folds the events it syncs, and checks that the pool reports the same chain.
+fn follow_chain(
+    env: &Env,
+    pool: &PoolContractClient,
+    chain: &soroban_utils::EventChain,
+    published: usize,
+) -> soroban_utils::EventChain {
+    use soroban_sdk::testutils::Events as _;
+    let events = env.events().all().filter_by_contract(&pool.address);
+    assert_eq!(events.events().len(), published);
+    let next = soroban_utils::event_chain::testutils::fold(env, chain, events.events());
+    assert_eq!(pool.event_chain(), next);
+    next
+}
+
+/// Every entry point that publishes extends the pool's event chain with
+/// exactly the events it published, encoded as a client receives them.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn the_event_chain_covers_every_event_the_pool_publishes() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    setup.token = register_funded_token(&env, &sender, 50);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let pool = PoolContractClient::new(&env, &register_pool_charging(&env, &setup, 5, 1));
+    let mut chain = soroban_utils::EventChain::empty(&env);
+    assert_eq!(pool.event_chain(), chain);
+
+    let (proof, deposit) = mk_paying_proof(&env, &pool, &setup.token, 50, 45, 0xFB);
+    pool.transact(&proof, &deposit, &sender);
+    // One nullifier, then two commitments.
+    chain = follow_chain(&env, &pool, &chain, 3);
+    pool.pause_deposits();
+    chain = follow_chain(&env, &pool, &chain, 1);
+    pool.pause_deposits();
+    chain = follow_chain(&env, &pool, &chain, 1);
+    pool.unpause_deposits();
+    chain = follow_chain(&env, &pool, &chain, 1);
+    pool.claim_fees(&Address::generate(&env), &5);
+    chain = follow_chain(&env, &pool, &chain, 1);
+    let membership = deploy_same_code(
+        &env,
+        &setup.asp_membership_address,
+        (setup.admin.clone(), ASP_MEMBERSHIP_LEVELS),
+    );
+    pool.update_asp_membership(&membership);
+    chain = follow_chain(&env, &pool, &chain, 1);
+    let non_membership = deploy_same_code(
+        &env,
+        &setup.asp_non_membership_address,
+        (setup.admin.clone(),),
+    );
+    pool.update_asp_non_membership(&non_membership);
+    chain = follow_chain(&env, &pool, &chain, 1);
+    let successor = Address::generate(&env);
+    pool.update_admin(&successor);
+    chain = follow_chain(&env, &pool, &chain, 1);
+    pool.cancel_admin_transfer();
+    chain = follow_chain(&env, &pool, &chain, 1);
+    pool.update_admin(&successor);
+    chain = follow_chain(&env, &pool, &chain, 1);
+    pool.accept_admin();
+    chain = follow_chain(&env, &pool, &chain, 1);
+
+    assert_eq!(chain.count, 13);
+}
+
+/// A refused call publishes nothing and leaves the chain as it was.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn a_refused_call_leaves_the_event_chain_unchanged() {
+    let env = test_env();
+    let (pool, _) = deposit_fifty_charging_five(&env);
+    let before = pool.event_chain();
+
+    assert!(pool.try_claim_fees(&Address::generate(&env), &6).is_err());
+
+    assert_eq!(pool.event_chain(), before);
+    assert_eq!(before.count, 3);
+}

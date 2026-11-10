@@ -461,19 +461,19 @@ macro_rules! expected {
 }
 
 const EXPECTED: &[Pinned] = expected! {
-    "pool transact, deposit, blocklist, fresh tree" => 14, 7, 5908, 2, 530_841_344;
-    "pool transact, transfer, blocklist, fresh tree" => 11, 5, 5460, 2, 530_841_344;
-    "pool transact, withdrawal, blocklist, fresh tree" => 14, 7, 5908, 2, 530_841_344;
-    "pool transact, transfer, root one transaction old" => 11, 5, 5460, 2, 530_841_344;
-    "pool transact, transfer, allowlist and blocklist, fresh tree" => 14, 5, 5460, 2, 530_841_344;
-    "pool transact, transfer, membership root one insert old" => 14, 5, 5460, 2, 530_841_344;
+    "pool transact, deposit, blocklist, fresh tree" => 14, 7, 6032, 3, 787_967_620;
+    "pool transact, transfer, blocklist, fresh tree" => 11, 5, 5584, 3, 787_967_620;
+    "pool transact, withdrawal, blocklist, fresh tree" => 14, 7, 6032, 3, 787_967_620;
+    "pool transact, transfer, root one transaction old" => 11, 5, 5584, 2, 530_841_344;
+    "pool transact, transfer, allowlist and blocklist, fresh tree" => 14, 5, 5584, 3, 787_967_620;
+    "pool transact, transfer, membership root one insert old" => 14, 5, 5584, 3, 787_967_620;
     "pool get_root" => 2, 0, 0, 0, 0;
-    "pool-gvk transact, transfer, view-only" => 11, 5, 5636, 2, 530_841_344;
+    "pool-gvk transact, transfer, view-only" => 11, 5, 5760, 3, 787_967_620;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
     "asp-non-membership insert_leaves, three keys into nine" => 28, 23, 2748, 12, 5_200_586_292;
-    "public-key-registry register, first registration" => 6, 2, 340, 1, 547_430_136;
+    "public-key-registry register, first registration" => 6, 3, 688, 2, 804_556_412;
 };
 
 /// Rows that read entries from disk, and how many. An account authorizer's
