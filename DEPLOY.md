@@ -1,8 +1,10 @@
 # Deploying pools
 
 `deployments/scripts/deploy.sh` provides support for deploying pools.
-It builds the contracts before submitting deployment transactions. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for build prerequisites.
+It deploys the contracts of a release, as
+[Deploy from a release](#deploy-from-a-release) describes. Without one, it
+builds the contracts first; see [CONTRIBUTING.md](CONTRIBUTING.md) for build
+prerequisites.
 
 ## Usage
 
@@ -53,7 +55,10 @@ default.
 | `--token <ADDRESS>` | Legacy single-pool native XLM contract (cannot mix with `--pool`) |
 | `--gvk-authority-pubkey <JSON>` / `--gvk-authority-pubkey-file <PATH>` | Admin Baby JubJub public key (`{"x":"0x..","y":"0x.."}`), required by any pool using `gvk-viewonly` or `gvk-traceable` |
 | `--vk-json <JSON>` / `--vk-file <PATH>` | Verification key for allowlist-blocklist (AB) ceremony builds only — other VKs load automatically from `deployments/<network>/circuit_keys/` |
-| `--skip-init` | Deploy WASM only, no constructors |
+| `--skip-init` | Deploy Wasm only, no constructors |
+| `--release-dir <DIR>` | Deploy the contracts of a release downloaded to `<DIR>` instead of building them. Cannot be combined with `--vk-json`, `--vk-file`, or `--skip-init` |
+| `--release-repo <OWNER/REPO>` | Repository whose `contracts-release.yml` workflow must have attested the release; defaults to `NethermindEth/stellar-private-payments` |
+| `--allow-unverified` | Warn instead of stopping when the release's attestation cannot be verified, or, on mainnet, when the contracts are built locally |
 | `--yes` | Skip the confirmation prompt on mainnet |
 
 Per-pool `policyFlags` and `gvkMode` are recorded in
@@ -98,15 +103,17 @@ generate` can also save the key into an encrypted client SDK wallet database via
 
 ## Pool fee and smallest deposit
 
-Every `transact` pays the pool fee: a deposit sends it on top of what it
-leaves in notes, and a transfer or withdrawal pays it from the notes it spends.
-The pool's `get_fee` returns the fee. No entry point changes the
-fee or the smallest deposit after deployment. The examples below set a fee of
-0.1 XLM (1,000,000 stroops) and a smallest deposit of 1 XLM.
+Every `transact` pays the pool fee: a deposit sends it on top of what it leaves
+in notes, and a transfer or withdrawal pays it from the notes it spends. The SDK
+spends three or more notes as a chain of transactions, one fewer than the notes,
+and each one pays the fee. The pool's `get_fee` returns the fee. No entry point
+changes the fee or the smallest deposit after deployment. The examples below set
+a fee of 0.1 XLM (1,000,000 stroops) and a smallest deposit of 1 XLM.
 
 When you choose the values, weigh these effects:
 
-- `--min-deposit` applies to what a deposit leaves in notes after the fee.
+- `--min-deposit` applies to what a deposit leaves in notes after the fee, which
+  is the amount a user types in the app's Deposit form or in `spp deposit`.
   Withdrawals have no minimum.
 - `--max-deposit` caps what a deposit sends, fee included, so a deposit leaves
   at most the maximum deposit less the fee in notes. The fee plus the smallest
@@ -191,19 +198,99 @@ deployments/scripts/deploy.sh testnet \
   --pool allowlist-blocklist:gvk-traceable:native:$(stellar contract id asset --asset native --network testnet)
 ```
 
+## Deploy from a release
+
+A contracts release is the GitHub release `contracts-v<version>`, where
+`<version>` is the contracts version, the `version` under `[workspace.package]`
+in the root `Cargo.toml`. It holds the Wasm of every contract, a verifier Wasm
+for each `policy_tx_2_2*_vk.json` and `keyOwnership_vk.json` file in
+`deployments/*/circuit_keys/`, the source archive they were built from,
+`contracts.json`, which says what each Wasm is, and `SHA256SUMS`. Bumping the
+contracts version on `main` publishes a release, as
+[CONTRIBUTING.md](CONTRIBUTING.md) describes: the `contracts-release.yml`
+workflow builds the files, rebuilds them on a second runner, and attests each
+Wasm and `SHA256SUMS`, signing a GitHub record that this run built the file,
+before publishing the release.
+
+Download a release into a new directory and pass that directory to
+`--release-dir`:
+
+```sh
+gh release download contracts-v<version> \
+  --repo NethermindEth/stellar-private-payments --dir <release-dir>
+deployments/scripts/deploy.sh testnet \
+  --deployer <identity> \
+  --policy-flags blocklist \
+  --asp-levels 10 \
+  --pool-levels 20 \
+  --fee 1000000 \
+  --min-deposit 10000000 \
+  --max-deposit 1000000000 \
+  --kdf-domain Nethermind \
+  --pool native:$(stellar contract id asset --asset native --network testnet) \
+  --release-dir <release-dir>
+```
+
+Before any transaction, `deploy.sh` checks the release:
+
+1. It runs `gh attestation verify` on `SHA256SUMS`, which passes only when
+   `contracts-release.yml` on the `main` branch of `--release-repo` attested
+   the file on a GitHub-hosted runner. `gh` must be installed and logged in.
+2. It checks `contracts.json` and every file it deploys against `SHA256SUMS`,
+   and stops when `contracts.json` names a repository other than
+   `--release-repo`.
+3. It picks each verifier by the SHA-256 of this network's key file, and
+   checks the build options each Wasm records in its meta, the contract
+   metadata `stellar contract info meta` prints: the package it was built
+   from and, for a verifier, the feature that embeds its key. On mainnet, it
+   stops when a verifier was built for another network.
+
+It then deploys the files it picked, and records the release and each
+contract's Wasm hash in the manifest under `contracts_release`.
+
+When the attestation check fails, `deploy.sh` stops. `--allow-unverified`
+turns that stop into a warning and relaxes no other check, but those checks
+then rest only on what the release says about itself, including which key
+each verifier holds.
+
+A fork publishes its own releases the same way, from its own `main` with
+GitHub Actions turned on. Pass the fork as `--repo` to `gh release download`
+and as `--release-repo` to `deploy.sh`.
+
+`scripts/build-contracts.sh --out <dir>` builds the same files locally, with
+no attestation, so its output is for checking a release. `deploy.sh` deploys
+it only with `--allow-unverified`, and only when it was built with `--tag` and
+`--repo`, because `deploy.sh` compares the repository its `contracts.json`
+names with `--release-repo`.
+
+Without `--release-dir`, `deploy.sh` builds the contracts with your own
+Stellar CLI and Rust toolchain. That code matches no release, and the manifest
+records none. On mainnet, which `deploy.sh` detects by the network
+passphrase, it refuses such a run unless `--allow-unverified` is passed.
+
+A release holds verifiers only for the key files committed when it was made.
+Before a network with keys of its own, such as mainnet, can deploy from a
+release, commit its key files under `deployments/<network>/circuit_keys/`, add
+a feature for each one to `contracts/circom-groth16-verifier/Cargo.toml`,
+named as the `vk-testnet-*` features are, and then bump the contracts version.
+Off mainnet, a network whose key files are copies of testnet's deploys the
+release's testnet verifiers.
+
 ## Claim collected fees
 
 A pool keeps two totals: the value of its unspent notes, and the fees it has
-collected and not paid out. Its token balance is their sum, plus any tokens
-sent to it directly, which belong to neither total and no call can pay out.
+collected and not paid out. Its token balance is their sum, plus any tokens sent
+to it directly, which belong to neither total and no call can pay out.
 `claim_fees` pays only from the fees collected, never from the value in users'
-notes, and returns `Error(Contract, #23)` for a negative amount, an amount
-above the fees collected, or the pool itself as recipient. A claim needs the
-admin's authorization, works while deposits are paused, and publishes a
-`FeesClaimed` event. The
-[governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md#claim-collected-fees)
-covers the recipient's trustline and how an M-of-N admin builds and signs a
-claim.
+notes. It returns `Error(Contract, #23)` for a negative amount or an amount
+above the fees collected, and `Error(Contract, #24)` for a claim paid to the
+pool or its token contract. A claim needs the admin's authorization, works while
+deposits are paused, and publishes a `FeesClaimed` event. An M-of-N admin claims
+with the admin page's Claim fees button or with the CLI, as the [governance
+runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md#claim-collected-fees)
+describes. For a classic asset, the admin account needs a trustline to the
+asset, authorized by the issuer if the asset requires authorization, before a
+claim can pay it.
 
 A single-key admin can read a pool's collected fees and pay 0.1 XLM of them to
 itself with these commands:

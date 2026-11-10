@@ -345,8 +345,7 @@ pub fn parse_0x_hex_32(s: &str) -> Result<[u8; 32]> {
     }
 
     let mut out = [0u8; 32];
-    hex::decode_to_slice(s, &mut out)
-        .map_err(|e| anyhow!("cannot decode hex `{s}` to 32 bytes: {e}"))?;
+    hex::decode_to_slice(s, &mut out).map_err(|e| anyhow!("cannot decode hex to 32 bytes: {e}"))?;
     Ok(out)
 }
 
@@ -418,6 +417,28 @@ impl ContractConfig {
         self.indexed_contracts()
             .map(|(contract_id, _)| contract_id.to_owned())
             .collect()
+    }
+
+    /// Reports whether `address` is a contract this deployment names, enabled
+    /// or not. An empty `address` never matches.
+    pub fn is_deployment_contract(&self, address: &str) -> bool {
+        !address.is_empty()
+            && self
+                .pools
+                .iter()
+                .flat_map(|pool| [&pool.pool_contract_id, &pool.token_contract_id])
+                .chain([
+                    &self.asp_membership,
+                    &self.asp_non_membership,
+                    &self.public_key_registry,
+                ])
+                .chain(
+                    self.added_asp_memberships
+                        .iter()
+                        .map(|tree| &tree.contract_id),
+                )
+                .chain(self.verifiers.values())
+                .any(|id| id == address)
     }
 
     /// Returns the earliest deployment ledger among enabled pools and added ASP
@@ -796,6 +817,37 @@ mod contract_config_tests {
     }
 
     #[test]
+    fn is_deployment_contract_names_every_contract_of_the_deployment() -> Result<()> {
+        let mut config = config()?;
+        let disabled = PoolConfigEntry {
+            pool_contract_id: "COFF".into(),
+            token_contract_id: "COFFTOKEN".into(),
+            enabled: false,
+            ..config.pool("CPOOL")?.clone()
+        };
+        config.pools.push(disabled);
+        config.verifiers.insert("B".into(), "CVERIFIER".into());
+        config.verifiers.insert("A".into(), String::new());
+
+        for id in [
+            "CPOOL",
+            "CTOKEN",
+            "COFF",
+            "COFFTOKEN",
+            "CMEMBERSHIP",
+            "CADDED_A",
+            "CNONMEMBERSHIP",
+            "CVERIFIER",
+            "CREGISTRY",
+        ] {
+            assert!(config.is_deployment_contract(id), "{id}");
+        }
+        assert!(!config.is_deployment_contract("GADMIN"));
+        assert!(!config.is_deployment_contract(""));
+        Ok(())
+    }
+
+    #[test]
     fn min_deployment_ledger_counts_added_allowlists() -> Result<()> {
         assert_eq!(config()?.min_deployment_ledger()?, 80);
         Ok(())
@@ -812,5 +864,21 @@ mod contract_config_tests {
         let config: ContractConfig = serde_json::from_value(manifest)?;
         assert!(config.added_asp_memberships.is_empty());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod hex_tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn a_hex_error_leaves_the_input_out() {
+        let secret = format!("{}g", "1f".repeat(31) + "1");
+        let err = parse_0x_hex_32(&secret).expect_err("bad character");
+        assert!(!err.to_string().contains(&secret[..16]), "{err}");
+        let err = Field::from_str(&secret).expect_err("bad character");
+        assert!(!format!("{err:#}").contains(&secret[..16]), "{err:#}");
     }
 }

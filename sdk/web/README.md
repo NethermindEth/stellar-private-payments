@@ -68,12 +68,69 @@ artifact base URL, and expected fingerprints at runtime; no network-specific
 package build is required. Each prover worker uses one bundle. To change bundles,
 create a new client/prover instead of reconfiguring an active worker.
 
+## Operator API
+
+Admins reach their contracts through one handle per contract, as in the
+[Rust SDK](../native/README.md#operator-api). None needs a `Storage` or a
+`Client`:
+
+```js
+import init, { AllowlistOperator, BlocklistOperator, PoolAdmin } from 'stellar-private-payments';
+
+await init();
+const tree = AllowlistOperator.open(rpcUrl, contractConfig, contractConfig.asp_membership);
+const { admin, pendingAdmin } = await tree.admin();
+const leaf = AllowlistOperator.deriveUserLeaf(notePublicKey, aspSecret);
+const { envelopeXdr, call } = await tree.insertLeaf(leaf);
+// Each signer of call.source adds a signature to envelopeXdr, then anyone sends it.
+```
+
+`BlocklistOperator` builds `insertKeys(noteKeys)` and `deleteKey(noteKey)`, and
+`PoolAdmin` builds `pauseDeposits()`, `unpauseDeposits()`,
+`claimFees(to, amount)`, `repointAllowlist(tree)`, and `repointBlocklist(tree)`. All three build
+`proposeAdmin(newAdmin)`, `cancelAdminTransfer()`, and `acceptAdmin()`, and
+report `listed`: whether the deployment config names the contract. A builder
+that refuses a call over entries about to archive throws an `Error` whose
+`extendCommands` holds the `stellar contract extend` commands that fix it.
+
+A `Client` opens the same handles with `allowlistOperator(id)`,
+`blocklistOperator(id)`, and `poolAdmin(id)`, lists the deployment's contracts
+with `allowlistIds()`, `blocklistIds()`, and `poolIds()`, and opens a GVK audit
+with `gvkAuthority(keyHex).audit(poolContractId)`.
+
+Migrating:
+
+| Removed | Use |
+| --- | --- |
+| `deriveAspUserLeaf(noteKey, secret)` | `AllowlistOperator.deriveUserLeaf(noteKey, secret)` |
+| `client.aspState()` | `client.allowlistOperator(id).state()` and `client.blocklistOperator(id).state()` |
+| `pool.audit(keyHex)` | `client.gvkAuthority(keyHex).audit(poolContractId)` |
+
 ## API reference
 
 Method names mirror the [Rust SDK](../native/README.md). Full signatures live in
 the generated types: [`js/types/api-types.d.ts`](./js/types/api-types.d.ts)
 (`Client`, `Account`, `PrivatePool`, options) and
 [`js/types/index.d.ts`](./js/types/index.d.ts) (package entry).
+
+### Errors
+
+When the SDK refuses a deposit or a spend before proving, the call rejects with
+an `Error` that carries a `code` and the amounts the refusal names (`PoolRefusal`
+in `api-types.d.ts`). Amounts are `bigint` base units.
+
+| `code` | Amount properties |
+| --- | --- |
+| `DEPOSITS_PAUSED` | none |
+| `DEPOSIT_BELOW_MINIMUM` | `minimum` |
+| `DEPOSIT_ABOVE_MAXIMUM` | `maximum`, `largestDeposit` |
+| `NO_COMBINATION` | `maxSpend` |
+| `NO_SPENDABLE_NOTES` | none |
+| `NOT_BALANCED` | `gap`, negative when more goes out than comes in |
+| `WITHDRAWAL_TO_CONTRACT` | none |
+
+A refusal after a payment's first transaction has confirmed resolves as a failed
+result instead, so the confirmed transaction's hash is not lost.
 
 ## Signer
 

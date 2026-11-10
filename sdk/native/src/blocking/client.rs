@@ -1,13 +1,17 @@
 //! Sync wrapper around [`crate::Client`] via a shared Tokio runtime.
 
-use crate::types::{ContractConfig, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
+use crate::types::{ContractConfig, Field, NoteOwnerAddress, OperationalFeedItem, RecipientLookup};
 
 use crate::{
     BackgroundSync, Error, ProverHandle, SignerHandle, StorageHandle, chain::StateFetcher,
     client::Client as AsyncClient, storage::LocalStorage,
 };
 
-use super::{account::Account, runtime::block_on};
+use super::{
+    account::Account,
+    operator::{AllowlistOperator, BlocklistOperator, GvkAuthority, PoolAdmin},
+    runtime::block_on,
+};
 
 /// Blocking wrapper around [`crate::Client`].
 pub struct Client {
@@ -86,5 +90,45 @@ impl Client {
 
     pub fn state_fetcher(&self) -> Result<StateFetcher, Error> {
         self.inner.state_fetcher()
+    }
+
+    /// Membership trees of the deployment, `asp_membership` first.
+    pub fn allowlist_ids(&self) -> Vec<String> {
+        self.inner.allowlist_ids()
+    }
+
+    /// Non-membership trees of the deployment.
+    pub fn blocklist_ids(&self) -> Vec<String> {
+        self.inner.blocklist_ids()
+    }
+
+    /// Pools of the deployment, enabled or not, in config order.
+    pub fn pool_ids(&self) -> Vec<String> {
+        self.inner.pool_ids()
+    }
+
+    /// Open an [`AllowlistOperator`] session for `contract_id`, listed in
+    /// [`Self::allowlist_ids`] or not.
+    pub fn allowlist_operator(&self, contract_id: &str) -> AllowlistOperator {
+        AllowlistOperator::from_inner(self.inner.allowlist_operator(contract_id))
+    }
+
+    /// Open a [`BlocklistOperator`] session for `contract_id`, listed in
+    /// [`Self::blocklist_ids`] or not.
+    pub fn blocklist_operator(&self, contract_id: &str) -> BlocklistOperator {
+        BlocklistOperator::from_inner(self.inner.blocklist_operator(contract_id))
+    }
+
+    /// Open a [`PoolAdmin`] session for `contract_id`, listed in
+    /// [`Self::pool_ids`] or not.
+    pub fn pool_admin(&self, contract_id: &str) -> PoolAdmin {
+        PoolAdmin::from_inner(self.inner.pool_admin(contract_id))
+    }
+
+    /// Open a [`GvkAuthority`] session for a Global View Key private key.
+    pub fn gvk_authority(&self, global_view_private_key: Field) -> Result<GvkAuthority, Error> {
+        Ok(GvkAuthority::from_inner(
+            self.inner.gvk_authority(global_view_private_key)?,
+        ))
     }
 }

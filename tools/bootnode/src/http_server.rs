@@ -67,7 +67,6 @@ impl HttpServer {
 
         let router = Router::new()
             .route("/healthz", get(healthz))
-            .route("/metrics", get(metrics))
             .route(
                 "/",
                 post(handle_rpc).layer(GovernorLayer::new(governor_conf)),
@@ -153,10 +152,6 @@ async fn run_https_acme(state: AppState, router: Router) -> anyhow::Result<()> {
         .serve(router.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
     Ok(())
-}
-
-async fn metrics(State(state): State<RpcState>) -> impl IntoResponse {
-    state.app.prom_handle.render()
 }
 
 async fn healthz(State(state): State<RpcState>) -> impl IntoResponse {

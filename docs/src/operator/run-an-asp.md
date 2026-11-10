@@ -4,8 +4,8 @@ An ASP decides who may spend from a pool by maintaining its allowlist, its block
 Being an ASP means being the admin of a tree. `deploy.sh` makes the deployment's admin account the
 admin of both trees, so by default the operator is also the ASP.
 
-Every write to a tree is an admin call: the admin page builds it, and the admin's signers sign it.
-For the signing flow, see [Make an admin call](../governance.md#make-an-admin-call).
+Every write to a tree is an admin call: the admin page or `spp` builds it, and the admin's signers
+sign it. For the signing flow, see [Make an admin call](../governance.md#make-an-admin-call).
 
 ## Allowlist and blocklist
 
@@ -43,7 +43,19 @@ sequenceDiagram
 2. Check the user through your own process. The contracts take any key you insert, and the ASP
    secret lets you link the user's leaf to them, so treat it as personal data.
 3. On the admin page's Allowlist tab, enter both values and press Add to Allowlist. The page
-   derives the leaf and builds the admin call.
+   derives the leaf and builds the admin call. With the CLI, derive the leaf, then add it:
+
+   ```bash
+   spp allowlist leaf --note-key NOTE_KEY --asp-secret-file -
+   spp allowlist add --leaf LEAF --account ASP_ADMIN
+   ```
+
+   Replace `NOTE_KEY` with the user's note public key, `LEAF` with the printed leaf, and
+   `ASP_ADMIN` with the tree admin's `stellar keys` identity. `leaf` reads the ASP secret from
+   stdin, which keeps it out of the shell history: paste it and press Ctrl-D, or pass a file
+   instead of `-`. For a multisig admin, pass
+   `--out tx.xdr` instead of `--account`. Without `--tree`, `add` writes to the allowlist the
+   deployment's enabled pools use, and stops if they use none or several.
 4. Once the call lands, the user can deposit. Before then, the app tells them to share their keys
    with the ASP.
 
@@ -64,11 +76,19 @@ members. A full allowlist can only be replaced by one that drops members.
 
 On the admin page's Blocklist tab, paste note public keys in the form the app shows them, one per
 line, and press Add to Blocklist. Several keys become one call. Remove from Blocklist takes one key
-per call.
+per call. The CLI takes the keys the same way:
 
-Write to the blocklist through the admin page. It converts each key to the byte order the contract
-expects; a key passed raw to `insert_leaf` through the Stellar CLI is stored reversed, and its owner
-stays unblocked.
+```bash
+spp blocklist add NOTE_KEY... --account ASP_ADMIN
+spp blocklist remove NOTE_KEY --account ASP_ADMIN
+```
+
+Without `--tree`, both write to the blocklist the deployment's enabled pools use. After a re-point
+that is not the manifest's `asp_non_membership`, which keeps the old tree.
+
+Write to the blocklist through the admin page or `spp blocklist`. Both convert each key to the byte
+order the contract expects; a key passed raw to `insert_leaf` through the Stellar CLI is stored
+reversed, and its owner stays unblocked.
 
 Blocking keys can also lock out a key that isn't listed. If two blocked keys share the lowest 31
 bits of a user's key, the user can't spend or deposit until you remove one of them. This is rare,
@@ -77,8 +97,11 @@ key the blocklist can't clear](features-and-limits.md#a-key-the-blocklist-cant-c
 
 ## Run a compliance contract for another operator's pool
 
-A pool accepts only allowlists and blocklists of its tree code. To run one for another operator's
-pool:
+A pool accepts only allowlists and blocklists of its tree code, the Wasm hashes of the trees it was
+deployed with. Each [contracts release](../deploy.md#deploy-from-a-release) gives every contract a
+new Wasm hash, because each Wasm records the hash of the source it was built from, so deploy your
+tree from the code already on chain with `--wasm-hash`, never from a fresh build. To run a tree
+for another operator's pool:
 
 1. For an allowlist, record the output of `stellar ledger latest --network testnet` as the tree's
    deployment ledger. Read the tree code the pool accepts and deploy your tree from it:
@@ -99,7 +122,9 @@ pool:
 
    A blocklist takes only `--admin`, so drop `--levels 10` for one.
 2. Enter your tree's address in the admin page's Overview tab, and load the entries on the
-   Allowlist or Blocklist tab, signing as `ASP_ADMIN`.
+   Allowlist or Blocklist tab, signing as `ASP_ADMIN`. With the CLI, pass `--tree TREE` to
+   `spp allowlist add` or `spp blocklist add`, with `TREE` your tree's address. Both ask before
+   writing to a tree no pool uses, which is expected for a new one; `--yes` answers for scripts.
 3. Send the pool's operator the tree's address, your records of its entries, and, for an
    allowlist, its deployment ledger. They check the tree on the Switch allowlist or blocklist panel
    and re-point their pool. For an allowlist, they first add it to `added_asp_memberships` in their

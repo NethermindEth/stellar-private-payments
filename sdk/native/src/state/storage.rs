@@ -3615,6 +3615,7 @@ mod tests {
             deposits_paused: false,
             fee: NoteAmount::ZERO,
             minimum_deposit_amount: NoteAmount::ZERO,
+            maximum_deposit_amount: ExtAmount::MAX,
         };
         let step = Transact::new(
             vec![c, c],
@@ -3624,7 +3625,7 @@ mod tests {
             [None, None],
             [None, None],
         );
-        let mut req = transact_request_from_step(&step, "GTESTACCOUNT", "tests", "CPOOL", &chain)?;
+        let mut req = transact_request_from_step(&step, "GTESTACCOUNT", "tests", "CPOOL", &chain);
         assert!(matches!(
             build_transact_params(&storage, &req)?,
             BuildTransactParams::Ready(params) if params.inputs.len() == 2

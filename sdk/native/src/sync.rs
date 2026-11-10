@@ -554,7 +554,10 @@ pub(crate) async fn confirm_tx(
                     tx_hash: hash.to_string(),
                 });
             }
-            TxConfirmStatus::Failed { detail } => {
+            TxConfirmStatus::Failed { result_xdr, .. } => {
+                let detail = result_xdr
+                    .map(|xdr| format!(" (resultXdr: {xdr})"))
+                    .unwrap_or_default();
                 return Err(Error::Other(anyhow::anyhow!("transaction failed{detail}")));
             }
             TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {

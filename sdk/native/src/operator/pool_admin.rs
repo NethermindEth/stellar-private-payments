@@ -1,0 +1,160 @@
+use std::collections::HashMap;
+
+use anyhow::anyhow;
+use stellar_xdr as xdr;
+
+use crate::{
+    Error,
+    chain::{ContractDataBulkRequest, RpcClient, scval_to_address_string, scval_to_policy_flags},
+    types::PolicyFlags,
+};
+
+use super::{UnsignedOperatorCall, address_arg};
+
+/// The trees a pool reads, and the policy that decides which of them its
+/// proofs use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoolLists {
+    pub allowlist: String,
+    pub blocklist: String,
+    pub policy_flags: PolicyFlags,
+}
+
+impl PoolLists {
+    /// Whether the pool's proofs use its allowlist.
+    pub fn uses_allowlist(&self) -> bool {
+        self.policy_flags.requires_membership_proofs()
+    }
+
+    /// Whether the pool's proofs use its blocklist.
+    pub fn uses_blocklist(&self) -> bool {
+        self.policy_flags.requires_non_membership_proofs()
+    }
+
+    fn from_instance(pool: &str, state: &HashMap<String, xdr::ScVal>) -> Result<Self, Error> {
+        let get = |key: &str| {
+            state
+                .get(key)
+                .ok_or_else(|| anyhow!("pool {pool} has no {key} in its instance storage"))
+        };
+        Ok(Self {
+            allowlist: scval_to_address_string(get("ASPMembership")?)?,
+            blocklist: scval_to_address_string(get("ASPNonMembership")?)?,
+            policy_flags: scval_to_policy_flags(get("PolicyFlags")?)?,
+        })
+    }
+}
+
+/// The lists of each of `pools`, in order, read in one request.
+pub async fn pool_lists(rpc_url: &str, pools: &[String]) -> Result<Vec<PoolLists>, Error> {
+    read_lists(&RpcClient::new(rpc_url)?, pools).await
+}
+
+async fn read_lists(rpc: &RpcClient, pools: &[String]) -> Result<Vec<PoolLists>, Error> {
+    let requests: Vec<_> = pools
+        .iter()
+        .map(|pool| ContractDataBulkRequest {
+            contract_id: pool,
+            enum_keys: Vec::new(),
+        })
+        .collect();
+    let (state, _) = rpc.get_contract_data_bulk(&requests).await?;
+    let empty = HashMap::new();
+    pools
+        .iter()
+        .map(|pool| PoolLists::from_instance(pool, state.get(pool).unwrap_or(&empty)))
+        .collect()
+}
+
+contract_handle! {
+    /// Session for the admin of one pool.
+    ///
+    /// Open with [`crate::Client::pool_admin`] or [`Self::open`].
+    PoolAdmin, pool_ids
+}
+
+impl PoolAdmin {
+    /// The trees the pool reads, which a re-point changes and the deployment
+    /// config does not follow.
+    pub async fn lists(&self) -> Result<PoolLists, Error> {
+        read_lists(&self.rpc, std::slice::from_ref(&self.contract_id))
+            .await?
+            .pop()
+            .ok_or_else(|| anyhow!("no lists read for pool {}", self.contract_id).into())
+    }
+
+    /// Points the pool at membership tree `tree`, sourced by the pool admin.
+    /// The pool refuses a tree that does not run its allowlist code.
+    pub async fn repoint_allowlist(&self, tree: &str) -> Result<UnsignedOperatorCall, Error> {
+        let tree = address_arg(tree)?;
+        self.admin_call("update_asp_membership", vec![tree]).await
+    }
+
+    /// Points the pool at non-membership tree `tree`, sourced by the pool
+    /// admin. The pool refuses a tree that does not run its blocklist code.
+    pub async fn repoint_blocklist(&self, tree: &str) -> Result<UnsignedOperatorCall, Error> {
+        let tree = address_arg(tree)?;
+        self.admin_call("update_asp_non_membership", vec![tree])
+            .await
+    }
+
+    /// Stops deposits; transfers and withdrawals continue.
+    pub async fn pause_deposits(&self) -> Result<UnsignedOperatorCall, Error> {
+        self.admin_call("pause_deposits", Vec::new()).await
+    }
+
+    pub async fn unpause_deposits(&self) -> Result<UnsignedOperatorCall, Error> {
+        self.admin_call("unpause_deposits", Vec::new()).await
+    }
+
+    /// Pays `amount` of the collected fees, in the token's base units, to
+    /// `to`, sourced by the pool admin. The pool refuses an amount above the
+    /// fees collected and a `to` that is the pool or its token.
+    pub async fn claim_fees(&self, to: &str, amount: i128) -> Result<UnsignedOperatorCall, Error> {
+        let to = address_arg(to)?;
+        if amount < 0 {
+            return Err(Error::Refused(format!("claim amount {amount} is negative")));
+        }
+        let bytes = amount.to_be_bytes();
+        let (hi, lo) = bytes.split_at(8);
+        let amount = xdr::ScVal::I128(xdr::Int128Parts {
+            hi: i64::from_be_bytes(hi.try_into().expect("8 bytes")),
+            lo: u64::from_be_bytes(lo.try_into().expect("8 bytes")),
+        });
+        self.admin_call("claim_fees", vec![to, amount]).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TREE: &str = "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE";
+
+    fn instance(flags: u32) -> HashMap<String, xdr::ScVal> {
+        let tree = xdr::ScVal::Address(TREE.parse().expect("address"));
+        HashMap::from([
+            ("ASPMembership".to_string(), tree.clone()),
+            ("ASPNonMembership".to_string(), tree),
+            ("PolicyFlags".to_string(), xdr::ScVal::U32(flags)),
+        ])
+    }
+
+    #[test]
+    fn lists_are_read_from_the_instance() {
+        let lists = PoolLists::from_instance("pool", &instance(PolicyFlags::BLOCKLIST.bits()))
+            .expect("lists");
+        assert_eq!(lists.allowlist, TREE);
+        assert_eq!(lists.blocklist, TREE);
+        assert!(!lists.uses_allowlist());
+        assert!(lists.uses_blocklist());
+    }
+
+    #[test]
+    fn a_missing_list_is_an_error() {
+        let mut state = instance(0);
+        state.remove("ASPNonMembership");
+        let err = PoolLists::from_instance("pool", &state).expect_err("missing blocklist");
+        assert!(err.to_string().contains("ASPNonMembership"), "{err}");
+    }
+}

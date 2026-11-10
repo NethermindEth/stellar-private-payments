@@ -2074,9 +2074,9 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.38.2"
+version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8"
+checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
 dependencies = [
  "pkg-config",
  "vcpkg",
@@ -2694,6 +2694,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48fd7bd8a6377e15ad9d42a8ec25371b94ddc67abe7c8b9127bec79bebaaae18"
 
 [[package]]
+name = "rusqlite"
+version = "0.41.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da9bba6f3506135e120a6586df05be18b48d18896600646a4bec8f993d91a594"
+dependencies = [
+ "bitflags 2.13.2",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "libsqlite3-sys",
+ "smallvec",
+ "sqlite-wasm-rs",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3150,27 +3164,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
 
 [[package]]
-name = "spp-rusqlite"
-version = "0.40.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8afaf2b27fc5d5c2eeb0df85dfcbfbf55f91f5b8e3a1e124773196becbc7ed1"
-dependencies = [
- "bitflags 2.13.2",
- "fallible-iterator",
- "fallible-streaming-iterator",
- "libsqlite3-sys",
- "smallvec",
- "sqlite-wasm-rs",
-]
-
-[[package]]
 name = "spp-rusqlite-migration"
-version = "2.6.0"
+version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c7ff526f1da67d67e0fdf08a38a274936951129e16381340d1c2bf66cee8a71"
+checksum = "bc1c0a590ea239bc2497cb834a82789b1c8ed3d8a2924aa85a22d4512a916517"
 dependencies = [
  "log",
- "spp-rusqlite",
+ "rusqlite",
 ]
 
 [[package]]
@@ -3205,7 +3205,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stellar-private-payments"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "ark-bn254",
@@ -3233,13 +3233,13 @@ dependencies = [
  "http",
  "reqwest",
  "ruint",
+ "rusqlite",
  "same-file",
  "serde",
  "serde-aux",
  "serde_json",
  "sha2 0.11.0",
  "sha3",
- "spp-rusqlite",
  "spp-rusqlite-migration",
  "sqlite-wasm-rs",
  "sqlite3mc-src",

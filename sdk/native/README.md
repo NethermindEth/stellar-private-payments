@@ -32,7 +32,7 @@ Wallet storage is selected with Cargo features; at least one must be enabled.
 - `unencrypted-storage`: plaintext storage built on rusqlite's bundled SQLite, opened with `LocalStorage::open`. No SQLite3MC is compiled when it is the only storage feature.
 
 ```toml
-stellar-private-payments = { version = "0.2", default-features = false, features = ["unencrypted-storage"] }
+stellar-private-payments = { version = "0.3", default-features = false, features = ["unencrypted-storage"] }
 ```
 
 With both features enabled, SQLite3MC provides SQLite for both kinds of storage. On native targets, the plaintext constructors refuse to open an encrypted database in any configuration; on WASM, the OPFS owner must check before calling `connect_file`.
@@ -103,6 +103,57 @@ let portfolio = account.portfolio()?;
 ```
 
 Method names mirror the async API; each call runs on an internal Tokio runtime.
+
+## Operator API
+
+Admin reads and calls live in `stellar_private_payments::operator`, apart from
+the user API. Each pool and each tree has its own admin, so each handle is bound
+to one contract:
+
+| Role | Handle | Reads | Calls |
+| --- | --- | --- | --- |
+| Allowlist ASP | `AllowlistOperator` | `state`, `admin` | `insert_leaf` |
+| Blocklist ASP | `BlocklistOperator` | `state`, `admin` | `insert_keys`, `delete_key` |
+| Pool admin | `PoolAdmin` | `admin`, `lists` | `pause_deposits`, `unpause_deposits`, `claim_fees`, `repoint_allowlist`, `repoint_blocklist` |
+| GVK holder | `GvkAuthority` | `audit` | |
+
+The three contract handles also build `propose_admin`, `cancel_admin_transfer`,
+and `accept_admin`. Open one without storage with
+`AllowlistOperator::open(rpc_url, deployment, contract_id)`, or from a client
+with `client.allowlist_operator(contract_id)`. `client.allowlist_ids()`,
+`blocklist_ids()`, and `pool_ids()` list the deployment's contracts. A handle
+also opens on a contract the deployment does not list, such as a new tree, and
+`is_listed()` tells the two apart. `client.gvk_authority(key)?` opens the GVK
+handle, since an audit reads synced storage.
+
+A call builder signs nothing. It returns an `UnsignedOperatorCall`: the
+envelope XDR, sourced from the contract's stored admin and valid for 24 hours,
+and the `OperatorCall` it makes. The admin's signers each add a signature, for
+example with `stellar tx sign`, and `Envelopes` checks and sends the result:
+
+```rust
+use stellar_private_payments::operator::{AllowlistOperator, Envelopes};
+
+let tree = AllowlistOperator::open(rpc_url, deployment.clone(), &deployment.asp_membership)?;
+let unsigned = tree.insert_leaf(leaf).await?;
+// Each signer adds a signature to unsigned.envelope_xdr, giving `signed`.
+let envelopes = Envelopes::open(rpc_url, network_passphrase)?;
+if envelopes.signing_status(&signed).await?.is_ready() {
+    let hash = envelopes.submit(&signed).await?;
+    let status = envelopes.confirm(&hash).await?;
+}
+```
+
+A builder refuses a call that reads an entry archiving within those 24 hours
+with `Error::EntriesArchiveSoon`, which lists the `stellar contract extend`
+commands that fix it. `Envelopes::state` tells whether an envelope can still
+land, or whether another signer already sent it, and `result_code` names the
+code of a failed call. `blocking::` mirrors every handle and `Envelopes`.
+
+Migrating to 0.3:
+
+- `pool.audit(key)` is now `client.gvk_authority(key)?.audit(pool_contract_id)`.
+- `Error` is `#[non_exhaustive]`, so a `match` on it needs a wildcard arm.
 
 ## Custom implementations
 

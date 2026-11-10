@@ -1,6 +1,6 @@
 /**
- * Admin calls from the multisig admin account, whose signers each sign the same
- * envelope. Kept out of `admin.js` so Node unit tests can import it.
+ * Admin calls the operator SDK builds, signed by each signer of the multisig
+ * admin account in turn. Kept out of `admin.js` so Node unit tests can import it.
  */
 import {
   Address,
@@ -9,28 +9,12 @@ import {
   StrKey,
   Transaction,
   TransactionBuilder,
-  contract,
   rpc,
   scValToNative,
   xdr,
 } from '@stellar/stellar-sdk';
 
 import { CONTRACT_ERRORS } from './ui/errors.js';
-
-/** Seconds an admin transaction stays valid: a day, since collecting signatures outlasts the SDK's five-minute default. */
-const ADMIN_TX_TIMEOUT_SECONDS = 86_400;
-
-/**
- * Refundable fee added to every admin call, in stroops. `accept_admin` and
- * `update_admin` extend an admin entry to 30 days from the ledger they land on,
- * so each ledger spent signing adds rent the simulation left out: about 14,000
- * stroops for a day on testnet in October 2026, its lifetime write included. The
- * network refunds what the call does not owe.
- */
-const ADMIN_RENT_MARGIN = 100_000;
-
-/** Ledgers an entry an admin call reads must outlive its build: 24 hours of five-second ledgers, plus an hour. */
-const ADMIN_TX_LEDGERS = 18_000;
 
 export const hex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
@@ -82,100 +66,6 @@ export async function maxEntryTtl(server) {
 }
 
 /**
- * Builds the unsigned, simulated envelope `{ xdr }` of a contract call whose
- * source is the admin account. A call reading archived entries restores them
- * first, paid by the admin account within the fee `describeAdminCall` shows.
- *
- * @param {{rpcUrl: string, networkPassphrase: string, source: string, contractId: string, method: string, args?: Object}} call
- *   `source` is the contract's admin; `args` are by name.
- * @returns {Promise<{xdr: string}>}
- * @throws {Error} if the contract has no `method`, refuses the call, or
- *   `finishAdminCall` refuses it.
- */
-export async function buildAdminCall({ rpcUrl, networkPassphrase, source, contractId, method, args }) {
-  const server = rpcServer(rpcUrl);
-  const client = await contract.Client.from({ rpcUrl, networkPassphrase, publicKey: source, contractId, server });
-  if (typeof client[method] !== 'function') {
-    throw new Error(`${contractId} has no ${method} entry point`);
-  }
-  const options = { timeoutInSeconds: ADMIN_TX_TIMEOUT_SECONDS };
-  const tx = await (args ? client[method](args, options) : client[method](options));
-  const { simulation } = tx;
-  if (rpc.Api.isSimulationError(simulation)) {
-    throw new Error(simulation.error);
-  }
-  return finishAdminCall({ server, rpcUrl, networkPassphrase, xdr: tx.toXdr() });
-}
-
-/**
- * Pads a simulated admin call's fee, checks its source, and refuses it when an
- * entry it reads archives within its 24 hours.
- *
- * @param {{server: rpc.Server, rpcUrl: string, networkPassphrase: string, xdr: string}} call
- * @returns {Promise<{xdr: string}>}
- * @throws {Error} if `describeAdminCall` refuses the envelope, or with the
- *   `stellar contract extend` command of each short-lived entry as `extendCommands`.
- */
-export async function finishAdminCall({ server, rpcUrl, networkPassphrase, xdr: simulated }) {
-  const xdr = withRentMargin(simulated, networkPassphrase);
-  // Throws if `source` is not the admin, before anyone signs.
-  describeAdminCall(xdr, networkPassphrase);
-  const keys = liveFootprintKeys(xdr, networkPassphrase);
-  if (keys.length > 0) {
-    const { entries, latestLedger } = await server.getLedgerEntries(...keys);
-    const short = shortLivedEntries(entries, latestLedger);
-    if (short.length > 0) {
-      const ledgers = (await maxEntryTtl(server)) - 1;
-      throw Object.assign(new Error('Entries this call reads archive within its 24 hours, so it would fail once sent. Extend them from any funded account, then build the call again.'), { extendCommands: short.map((key) => extendCommand(key, ledgers, rpcUrl, networkPassphrase)) });
-    }
-  }
-  return { xdr };
-}
-
-/**
- * Returns the persistent entries an envelope reads that it does not restore
- * itself. An entry archived between building and sending fails the call.
- */
-export function liveFootprintKeys(xdr, networkPassphrase) {
-  const data = TransactionBuilder.fromXdr(xdr, networkPassphrase).toEnvelope().value.tx.ext.value;
-  const { readOnly, readWrite } = data.resources.footprint;
-  const restored = new Set((data.ext.value?.archivedSorobanEntries ?? []).map((index) => readWrite[index].toXdr('base64')));
-  return [...readOnly, ...readWrite].filter((key) => !restored.has(key.toXdr('base64'))
-    && (key.type === 'contractCode' || (key.type === 'contractData' && key.value.durability.name === 'persistent')));
-}
-
-/**
- * Returns the keys of `entries`, as `getLedgerEntries` returns them, that
- * archive within `ADMIN_TX_LEDGERS` of `latestLedger`.
- */
-export function shortLivedEntries(entries, latestLedger) {
-  return entries
-    .filter(({ liveUntilLedgerSeq }) => liveUntilLedgerSeq < latestLedger + ADMIN_TX_LEDGERS)
-    .map(({ key }) => key);
-}
-
-/**
- * Returns the Stellar CLI command that extends the entry under `key` to live
- * `ledgers` ledgers past the current one. `ACCOUNT` stands for the paying account.
- */
-export function extendCommand(key, ledgers, rpcUrl, networkPassphrase) {
-  const target = key.type === 'contractCode'
-    ? `--wasm-hash ${key.value.hash.toXdr('hex')}`
-    : `--id ${Address.fromScAddress(key.value.contract)}`
-      + (key.value.key.type === 'scvLedgerKeyContractInstance' ? '' : ` --key-xdr ${key.value.key.toXdr('base64')}`);
-  return `stellar contract extend ${target} --ledgers-to-extend ${ledgers} --source-account ACCOUNT `
-    + `--rpc-url ${rpcUrl} --network-passphrase '${networkPassphrase}'`;
-}
-
-/** Returns the envelope with `ADMIN_RENT_MARGIN` added to its refundable fee and its fee. */
-export function withRentMargin(xdr, networkPassphrase) {
-  const envelope = TransactionBuilder.fromXdr(xdr, networkPassphrase).toEnvelope();
-  envelope.value.tx.fee += ADMIN_RENT_MARGIN;
-  envelope.value.tx.ext.value.resourceFee += BigInt(ADMIN_RENT_MARGIN);
-  return envelope.toXdr('base64');
-}
-
-/**
  * Describes an admin call for its signers to read before signing.
  *
  * @returns {{source: string, sequence: string, fee: string, validUntil: number, contract: string, method: string, args: Array}}
@@ -218,6 +108,16 @@ export function describeAdminCall(xdr, networkPassphrase) {
     method: call.functionName.toString(),
     args: call.args.map(scValToNative),
   };
+}
+
+/**
+ * Returns the card's line for a `claim_fees` call: the amount, when `amount`
+ * formats it, beside its base units, and whether it pays the admin account
+ * that signs it.
+ */
+export function claimLine({ source, args: [to, claimed] }, amount) {
+  const payee = to === source ? 'the admin account (Source)' : `${to}, not the admin account`;
+  return `Claim${amount ? ` ${amount(claimed)} (${claimed} in the token's smallest unit, as Arguments and Freighter show it)` : ''} to ${payee}`;
 }
 
 /** Returns the number of signatures an envelope carries. */
@@ -373,12 +273,23 @@ const landedFailure = (hash, landed) => new Error(`transaction ${hash} ${landed.
 const SEQUENCE_USED = 'This call is out of date: the admin account sent another transaction first. Build it again if it\'s still needed.';
 const TIME_BOUND_PASSED = 'This call has expired. Build it again.';
 
-/** Why the card's call can't land any more, or null. A co-signer may have sent it already. */
+/**
+ * Why the card's call can't land any more, or null. A co-signer may have sent
+ * it already, or the contract may refuse it now, as it refuses a claim that
+ * another claim has spent.
+ */
 export async function deadCall({ server, envelope, networkPassphrase, account, now, kind }) {
   const tx = TransactionBuilder.fromXdr(envelope, networkPassphrase);
   // Sequence number not used yet.
   if (BigInt(account.seqNum) < BigInt(tx.sequence)) {
-    return Number(tx.timeBounds.maxTime) * 1000 <= now ? { reason: TIME_BOUND_PASSED, landed: false } : null;
+    if (Number(tx.timeBounds.maxTime) * 1000 <= now) return { reason: TIME_BOUND_PASSED, landed: false };
+    const simulation = await server.simulateTransaction(tx);
+    if (!rpc.Api.isSimulationError(simulation)) return null;
+    const why = explainFailure(simulation.error, kind);
+    // An unnamed refusal is simulation output, unfit for the card.
+    if (why !== simulation.error) return { reason: `This call would fail if sent. ${why}`, landed: false };
+    console.error(simulation.error);
+    return { reason: 'This call would fail if sent, and this page can\'t tell why. The browser console shows the network\'s answer. Check the contract before building the call again.', landed: false };
   }
   const hash = hex(tx.hash());
   // About two ledger closes: a load-balanced node can lag the account read.

@@ -9,7 +9,6 @@ import {
   MuxedAccount,
   Networks,
   Operation,
-  SorobanDataBuilder,
   StrKey,
   TransactionBuilder,
   nativeToScVal,
@@ -19,20 +18,17 @@ import {
 import {
   adminTxFromHash,
   adminTxLink,
+  claimLine,
   custodyProblems,
   deadCall,
   describeAdminCall,
-  extendCommand,
   explainFailure,
-  finishAdminCall,
   hex,
   hostError,
-  liveFootprintKeys,
   newAdminRefusal,
   NoAnswer,
   repointsTo,
   rpcServer,
-  shortLivedEntries,
   signatureCount,
   signedBy,
   signedWeight,
@@ -40,7 +36,6 @@ import {
   signingRule,
   signRefusal,
   submitAdminCall,
-  withRentMargin,
 } from '../../../app/js/admin-transactions.js';
 import { CONTRACT_ERRORS } from '../../../app/js/ui/errors.js';
 
@@ -68,6 +63,15 @@ test('describeAdminCall reads the contract, function, and arguments of an insert
   assert.equal(call.contract, TREE);
   assert.equal(call.method, 'insert_leaf');
   assert.deepEqual(call.args, [42n]);
+});
+
+test('claimLine names who a claim pays, and its amount once the pool is read', () => {
+  const admin = Keypair.random().publicKey();
+  const other = Keypair.random().publicKey();
+  const amount = (value) => `${value} units`;
+  assert.equal(claimLine({ source: admin, args: [admin, 3000n] }, amount), 'Claim 3000 units (3000 in the token\'s smallest unit, as Arguments and Freighter show it) to the admin account (Source)');
+  assert.equal(claimLine({ source: admin, args: [other, 3000n] }, amount), `Claim 3000 units (3000 in the token's smallest unit, as Arguments and Freighter show it) to ${other}, not the admin account`);
+  assert.equal(claimLine({ source: admin, args: [other, 3000n] }, undefined), `Claim to ${other}, not the admin account`);
 });
 
 test('describeAdminCall refuses an envelope that holds a second operation', () => {
@@ -157,78 +161,6 @@ test('describeAdminCall refuses an operation whose source is not the transaction
     /authorizes something other than this call/,
   );
   assert.equal(describeAdminCall(authorizedInsertLeaf(sourceAccount, { source: ADMIN }), Networks.TESTNET).method, 'insert_leaf');
-});
-
-test('withRentMargin raises the refundable fee and the fee by the same margin and keeps the call', () => {
-  const built = insertLeafBuilder().setSorobanData(new SorobanDataBuilder().setResourceFee(1_213n).build()).setTimeout(86_400).build();
-  const padded = TransactionBuilder.fromXdr(withRentMargin(built.toXdr(), Networks.TESTNET), Networks.TESTNET);
-  const resourceFee = (tx) => tx.toEnvelope().value.tx.ext.value.resourceFee;
-  assert.equal(resourceFee(padded) - resourceFee(built), 100_000n);
-  assert.equal(Number(padded.fee) - Number(built.fee), 100_000);
-  assert.deepEqual(describeAdminCall(padded.toXdr(), Networks.TESTNET), {
-    ...describeAdminCall(built.toXdr(), Networks.TESTNET),
-    fee: padded.fee,
-  });
-});
-
-const treeKey = (name) => xdr.LedgerKey.contractData(new xdr.LedgerKeyContractData({
-  contract: new Address(TREE).toScAddress(),
-  key: xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(name)]),
-  durability: name === 'Temp' ? xdr.ContractDataDurability.temporary : xdr.ContractDataDurability.persistent,
-}));
-
-test('liveFootprintKeys keeps persistent entries and code but not temporary entries or ones the call restores', () => {
-  const code = xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: Buffer.alloc(32) }));
-  const data = new SorobanDataBuilder().setFootprint([code, treeKey('Temp')], [treeKey('Admin'), treeKey('Root')]).build();
-  data.ext = xdr.SorobanTransactionDataExt.resourceExt(new xdr.SorobanResourcesExtV0({ archivedSorobanEntries: [1] }));
-  const built = insertLeafBuilder().setSorobanData(data).setTimeout(86_400).build();
-  const keys = liveFootprintKeys(built.toXdr(), Networks.TESTNET).map((key) => key.toXdr('base64'));
-  assert.deepEqual(keys, [code, treeKey('Admin')].map((key) => key.toXdr('base64')));
-});
-
-test('shortLivedEntries keeps the entries that archive within the call\'s 24 hours, and only those', () => {
-  const entries = [{ key: treeKey('Admin'), liveUntilLedgerSeq: 1_000 + 18_000 }, { key: treeKey('Root'), liveUntilLedgerSeq: 1_000 + 17_999 }];
-  assert.deepEqual(shortLivedEntries(entries, 1_000), [treeKey('Root')]);
-});
-
-test('extendCommand names a data entry by its key, an instance by its contract, and code by its hash', () => {
-  const args = [99_999, 'https://rpc.example.com', Networks.TESTNET];
-  const tail = ` --ledgers-to-extend 99999 --source-account ACCOUNT --rpc-url https://rpc.example.com --network-passphrase '${Networks.TESTNET}'`;
-  assert.equal(extendCommand(treeKey('Admin'), ...args), `stellar contract extend --id ${TREE} --key-xdr AAAAEAAAAAEAAAABAAAADwAAAAVBZG1pbgAAAA==${tail}`);
-  assert.equal(extendCommand(new Contract(TREE).getFootprint(), ...args), `stellar contract extend --id ${TREE}${tail}`);
-  const code = xdr.LedgerKey.contractCode(new xdr.LedgerKeyContractCode({ hash: new Uint8Array(32).fill(0xab) }));
-  assert.equal(extendCommand(code, ...args), `stellar contract extend --wasm-hash ${'ab'.repeat(32)}${tail}`);
-});
-
-// A simulated insert_leaf reading the tree's `Admin` and `Root`, with an RPC
-// stub whose entries live until `liveUntil` past ledger 1,000. Only a refused
-// call reads `maxEntryTtl`.
-function finishInsertLeaf(liveUntil, maxEntryTtl) {
-  const data = new SorobanDataBuilder().setFootprint([treeKey('Admin')], [treeKey('Root')]).setResourceFee(1_213n).build();
-  const simulated = insertLeafBuilder().setSorobanData(data).setTimeout(86_400).build();
-  const server = {
-    getLedgerEntries: async (...keys) => ({ latestLedger: 1_000, entries: keys.map((key) => ({ key, liveUntilLedgerSeq: 1_000 + liveUntil })) }),
-    getLedgerEntry: async (key) => {
-      assert.equal(key.value.configSettingId.name, 'configSettingStateArchival');
-      assert.ok(maxEntryTtl);
-      return { val: { configSetting: { stateArchivalSettings: { maxEntryTtl } } } };
-    },
-  };
-  return finishAdminCall({ server, rpcUrl: 'https://rpc.example.com', networkPassphrase: Networks.TESTNET, xdr: simulated.toXdr() });
-}
-
-test('finishAdminCall pads the fee of a call whose entries outlive its 24 hours', async () => {
-  const { xdr: padded } = await finishInsertLeaf(18_000);
-  assert.equal(TransactionBuilder.fromXdr(padded, Networks.TESTNET).toEnvelope().value.tx.ext.value.resourceFee, 101_213n);
-});
-
-test('finishAdminCall refuses a call whose entries archive within its 24 hours, with a command for each', async () => {
-  await assert.rejects(finishInsertLeaf(17_999, 100_000), (err) => {
-    assert.match(err.message, /archive within its 24 hours/);
-    assert.equal(err.extendCommands.length, 2);
-    assert.match(err.extendCommands[0], / --ledgers-to-extend 99999 /);
-    return true;
-  });
 });
 
 test('signatureCount counts the signatures added to an envelope', () => {
@@ -444,11 +376,19 @@ test('explainFailure names a transaction the network refused', () => {
   );
 });
 
-test('explainFailure names the pool errors 18, 20 and 21', () => {
+test('explainFailure names the pool errors 18, 20, 21, 23 and 24', () => {
   const pool = (code) => explainFailure(new Error(`HostError: Error(Contract, #${code})`), 'pool');
   assert.equal(pool(18), 'Deposits into this pool are paused. Withdrawals and transfers still work.');
   assert.equal(pool(20), 'No admin transfer is pending.');
   assert.equal(pool(21), 'The contract does not run the code this pool accepts.');
+  assert.equal(
+    pool(23),
+    'The claim asks for more than the fees collected, most likely because another claim went through first. The Pools tab\'s Fees column now shows what is left to claim.',
+  );
+  assert.equal(
+    pool(24),
+    'The pool does not pay itself or its token contract. Choose another recipient.',
+  );
 });
 
 test('explainFailure reads #6 as NoPendingAdmin from an allowlist and not from a blocklist', () => {
@@ -520,11 +460,38 @@ test('submitAdminCall waits for a transaction the network already holds instead 
   }
 });
 
-test('deadCall waits while the sequence number is free and the time bound open', async () => {
+// A card whose sequence number is free, against a network that simulates its call as `simulation`.
+function freeCard(envelope, simulation) {
+  return {
+    server: {
+      pollTransaction: async () => assert.fail('no lookup while the number is free'),
+      simulateTransaction: async () => simulation,
+    },
+    envelope: envelope.toXdr(),
+    networkPassphrase: Networks.TESTNET,
+    account: { seqNum: 41n },
+    kind: 'pool',
+  };
+}
+
+test('deadCall waits while the sequence number is free, the time bound open, and the contract accepts the call', async () => {
   const envelope = insertLeafEnvelope();
-  const card = { server: { pollTransaction: async () => assert.fail('no lookup while the number is free') }, envelope: envelope.toXdr(), networkPassphrase: Networks.TESTNET, account: { seqNum: 41n } };
+  const card = freeCard(envelope, { result: {} });
   assert.equal(await deadCall({ ...card, now: Number(envelope.timeBounds.maxTime) * 1000 - 1 }), null);
   assert.deepEqual(await deadCall({ ...card, now: Number(envelope.timeBounds.maxTime) * 1000 }), { reason: explainFailure('tx_too_late'), landed: false });
+});
+
+test('deadCall settles a call the contract would refuse now, such as a claim another claim has spent', async () => {
+  const card = freeCard(insertLeafEnvelope(), { error: 'HostError: Error(Contract, #23)' });
+  assert.deepEqual(await deadCall({ ...card, now: 0 }), { reason: `This call would fail if sent. ${CONTRACT_ERRORS.pool[23]}`, landed: false });
+});
+
+test('deadCall keeps simulation output off the card for a refusal it cannot name', async (t) => {
+  const logged = t.mock.method(console, 'error', () => {});
+  const error = 'HostError: Error(Storage, ExceededLimit)\n\nEvent log (newest first): [Diagnostic Event] ...';
+  const card = freeCard(insertLeafEnvelope(), { error });
+  assert.deepEqual(await deadCall({ ...card, now: 0 }), { reason: 'This call would fail if sent, and this page can\'t tell why. The browser console shows the network\'s answer. Check the contract before building the call again.', landed: false });
+  assert.deepEqual(logged.mock.calls[0].arguments, [error]);
 });
 
 test('deadCall asks the network whether a used sequence number went to this call', async () => {

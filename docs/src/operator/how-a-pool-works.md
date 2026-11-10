@@ -42,9 +42,9 @@ sender's notes takes several transactions, which the clients plan and submit in 
 
 The pool fee is set when the pool is deployed. A deposit sends the pool fee on top of what it leaves
 in notes. A transfer or withdrawal pays the fee from the notes it spends, so the recipient gets the
-whole amount named. The pool keeps two totals, the notes total and the fees collected. The notes
-total is the value of every unspent note, and the fees collected stay in the pool until the admin
-claims them.
+whole amount named. A payment that takes several transactions pays the fee once for each. The pool
+keeps two totals, the notes total and the fees collected. The notes total is the value of every
+unspent note, and the fees collected stay in the pool until the admin claims them.
 
 The following sequence shows three transactions in one pool with a pool fee of 0.1 XLM:
 
@@ -81,7 +81,7 @@ failure:
    nobody can reuse it elsewhere.
 6. The amount the proof moves into or out of notes matches the call: what a deposit sends less
    the pool fee, what a withdrawal pays out plus the pool fee, or, for a transfer, the pool fee out
-   of notes.
+   of notes. A withdrawal does not pay the pool or its token contract.
 7. For a blocklist pool, the proof's blocklist root is the blocklist's current root. For an
    allowlist pool, the proof's allowlist root is one of the allowlist's last 90 roots.
 8. The verifier accepts the proof.
@@ -90,6 +90,8 @@ The pool then updates the notes total by what the call moves into or out of note
 fee to the fees collected, records the nullifiers, and adds the two new commitments. Only then do
 tokens move: a deposit's from the sender to the pool, or a withdrawal's from the pool to the
 recipient. Last, the pool publishes one event for each nullifier and commitment.
+
+The clients refuse a withdrawal paid to any contract the manifest lists.
 
 ## Keys
 

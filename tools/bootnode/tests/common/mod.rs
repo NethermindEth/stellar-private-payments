@@ -6,12 +6,11 @@ use bootnode::{
     config::Config,
     deployment_storage_id,
     messages::{Event, GetEventsParams, GetEventsResponse},
-    metrics,
     storage::Storage,
 };
 use serde::Deserialize;
 use serde_json::json;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 pub const GENESIS_LEDGER: u32 = 2_800_000;
 pub const NETWORK_TIP: u32 = 3_000_000;
@@ -35,13 +34,6 @@ pub struct JsonRpcErr {
     pub code: i64,
     pub message: String,
     pub data: Option<serde_json::Value>,
-}
-
-pub fn prom_handle() -> metrics_exporter_prometheus::PrometheusHandle {
-    static HANDLE: OnceLock<metrics_exporter_prometheus::PrometheusHandle> = OnceLock::new();
-    HANDLE
-        .get_or_init(|| metrics::install_prometheus_recorder().expect("prometheus"))
-        .clone()
 }
 
 pub fn contract_ids() -> Vec<String> {
@@ -135,14 +127,10 @@ pub async fn spawn_bootnode(
     config: Config,
     start_ledger: u32,
 ) -> tokio::task::JoinHandle<()> {
-    let bootnode = Bootnode::setup_with_deployment(
-        config,
-        storage,
-        prom_handle(),
-        fixture_deployment(start_ledger),
-    )
-    .await
-    .expect("setup");
+    let bootnode =
+        Bootnode::setup_with_deployment(config, storage, fixture_deployment(start_ledger))
+            .await
+            .expect("setup");
     tokio::spawn(async move {
         let _ = bootnode.serve().await;
     })
