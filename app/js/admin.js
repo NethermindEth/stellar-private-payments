@@ -891,7 +891,7 @@ async function poolRow(entry, lists) {
       const amount = (value) => Utils.formatTokenAmount(value, Utils.poolLabel(entry), decimals);
       state.poolAmounts.set(contractId, amount);
       feesEl.replaceChildren(...[`${amount(fees)} collected`, `${amount(stored.get('Fee'))} per transaction`]
-        .map((text) => Object.assign(document.createElement('div'), { textContent: text })));
+        .map((text) => el('div', null, text)));
       claim.disabled = fees === 0n;
       claim.addEventListener('click', () => buildRowCall(claim, 'pool', contractId, 'claim_fees', (pool) => pool.claimFees(admin, fees)));
     }
@@ -911,7 +911,7 @@ async function poolRow(entry, lists) {
     unpause.addEventListener('click', () => buildRowCall(unpause, 'pool', contractId, 'unpause_deposits', (admin) => admin.unpauseDeposits()));
   } catch (err) {
     depositsEl.textContent = `could not be read: ${err.message}`;
-    row.querySelectorAll('.pool-actions, .pool-claim').forEach((el) => el.remove());
+    row.querySelectorAll('.pool-actions, .pool-claim').forEach((node) => node.remove());
   }
   return row;
 }
