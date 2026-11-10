@@ -356,12 +356,34 @@ impl Storage {
 
     /// Compares the event chain over the events saved for `contract_address`
     /// with the chain the contract `published`.
+    ///
+    /// Events after one that does not fold are saved and processed but not
+    /// in the chain, so any such event makes the saved events differ from the
+    /// contract's, counting every saved event as synced.
     pub fn check_event_chain(
         &self,
         contract_address: &str,
         published: &EventChain,
     ) -> Result<EventChainCheck> {
-        Ok(self.event_chain(contract_address)?.check(published))
+        let chain = self.event_chain(contract_address)?;
+        let unfolded: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM raw_contract_events r
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE c.address = ?1 AND r.chain_count IS NULL",
+            params![contract_address],
+            |row| row.get(0),
+        )?;
+        if unfolded == 0 {
+            return Ok(chain.check(published));
+        }
+        let unfolded = u64::try_from(unfolded).context("negative event count")?;
+        Ok(EventChainCheck::Differs {
+            synced: chain
+                .count
+                .checked_add(unfolded)
+                .context("the event count overflows")?,
+            published: published.count,
+        })
     }
 
     /// Forgets everything synced from `contract_address`: its events, what was
@@ -4348,6 +4370,52 @@ mod tests {
         conn.execute_batch("DROP TRIGGER interrupt_fold")?;
         let storage = Storage::connect_with_connection(conn)?;
         assert_eq!(storage.event_chain("CPOOL")?, folded(&[&event])?);
+        Ok(())
+    }
+
+    /// Events served after one that does not fold, as a bootnode could append
+    /// forged ones behind it, make the history differ although the chain over
+    /// the events before it matches the contract's.
+    #[test]
+    fn events_after_one_that_does_not_fold_differ_from_the_contracts() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let genuine = chain_event("p1", 1, "CPOOL", 1)?;
+        let barrier = ContractEvent {
+            topics: vec!["commitment".to_string()],
+            ..chain_event("p2", 2, "CPOOL", 2)?
+        };
+        let forged = chain_event("p3", 3, "CPOOL", 3)?;
+        storage.save_events_batch(&batch(vec![genuine.clone(), barrier, forged]))?;
+
+        assert_eq!(storage.event_chain("CPOOL")?, folded(&[&genuine])?);
+        assert_eq!(
+            storage.check_event_chain("CPOOL", &folded(&[&genuine])?)?,
+            EventChainCheck::Differs {
+                synced: 3,
+                published: 1
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_event_that_does_not_fold_differs_from_the_contracts() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let first = chain_event("p1", 1, "CPOOL", 1)?;
+        let second = chain_event("p2", 2, "CPOOL", 2)?;
+        let corrupted = ContractEvent {
+            topics: vec!["commitment".to_string()],
+            ..second.clone()
+        };
+        storage.save_events_batch(&batch(vec![first.clone(), corrupted]))?;
+
+        assert_eq!(
+            storage.check_event_chain("CPOOL", &folded(&[&first, &second])?)?,
+            EventChainCheck::Differs {
+                synced: 2,
+                published: 2
+            }
+        );
         Ok(())
     }
 
