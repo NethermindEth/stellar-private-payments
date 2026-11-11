@@ -31,12 +31,12 @@ export function accountSession(wallet = {}) {
     };
 }
 
-const NOTE_OWNER_KEY = 'poolstellar_note_owner';
+const NOTE_OWNER_KEY = "poolstellar_note_owner";
 
 /**
  * The note owner the user connected, if one is remembered.
  *
- * Freighter's active account cannot stand in for it: signing as another
+ * Varial's active account cannot stand in for it: signing as another
  * account makes that account the active one, so the owner is remembered from
  * the connection instead and kept until the user disconnects.
  *
@@ -61,12 +61,12 @@ export function rememberNoteOwner(address, storage = globalThis.localStorage) {
     try {
         storage?.setItem(NOTE_OWNER_KEY, address);
     } catch (e) {
-        console.error('[AccountSession] rememberNoteOwner failed:', e);
+        console.error("[AccountSession] rememberNoteOwner failed:", e);
     }
 }
 
 /**
- * Forget the note owner, so the next connection takes Freighter's active
+ * Forget the note owner, so the next connection takes Varial's active
  * account.
  *
  * @param {Storage | undefined} [storage] - Defaults to `localStorage`.
@@ -75,6 +75,6 @@ export function forgetNoteOwner(storage = globalThis.localStorage) {
     try {
         storage?.removeItem(NOTE_OWNER_KEY);
     } catch (e) {
-        console.error('[AccountSession] forgetNoteOwner failed:', e);
+        console.error("[AccountSession] forgetNoteOwner failed:", e);
     }
 }

@@ -15,7 +15,8 @@
  * @returns {string[]} A new list.
  */
 export function addSigner(signers = [], address, owner) {
-    if (!address || address === owner || signers.includes(address)) return [...signers];
+    if (!address || address === owner || signers.includes(address))
+        return [...signers];
     return [...signers, address];
 }
 
@@ -31,20 +32,22 @@ export function removeSigner(signers = [], address) {
 }
 
 /**
- * Freighter's active account, when it is worth offering as a signer: shared
+ * Varial's active account, when it is worth offering as a signer: shared
  * with the app, and neither the owner nor an account already added.
  *
  * @param {{ active: string | null, owner: string | null, signers?: string[] }} accounts
  * @returns {string | null}
  */
 export function activeSuggestion({ active, owner, signers = [] }) {
-    return active && owner && active !== owner && !signers.includes(active) ? active : null;
+    return active && owner && active !== owner && !signers.includes(active)
+        ? active
+        : null;
 }
 
 /**
  * The account that signs the next transaction.
  *
- * The explicitly selected owner, added account, or Freighter account on offer.
+ * The explicitly selected owner, added account, or Varial account on offer.
  * Missing or stale selections require a new choice instead of using the owner.
  *
  * @param {{
@@ -59,7 +62,9 @@ export function chosenSigner({ selected, owner, signers = [], active = null }) {
     if (!owner || !selected) return null;
     if (selected === owner) return owner;
     if (signers.includes(selected)) return selected;
-    return selected === activeSuggestion({ active, owner, signers }) ? selected : null;
+    return selected === activeSuggestion({ active, owner, signers })
+        ? selected
+        : null;
 }
 
 /**
@@ -80,6 +85,6 @@ export function withdrawalLinksAccounts({ owner, signer, recipient }) {
 /** Privacy guidance when the deposit account signs a non-deposit transaction. */
 export function signingPrivacyWarning({ owner, signer }) {
     return owner && signer === owner
-        ? 'Signing with your deposit account can link this transaction to your deposits. Use an unrelated signing account for better privacy.'
-        : '';
+        ? "Signing with your deposit account can link this transaction to your deposits. Use an unrelated signing account for better privacy."
+        : "";
 }

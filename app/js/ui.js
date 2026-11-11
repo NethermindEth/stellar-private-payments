@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     registerServiceWorker();
 
     // Reconnect on load only to an owner the user connected before. Without
-    // one, connecting would take Freighter's active account as the owner, and
+    // one, connecting would take Varial's active account as the owner, and
     // that may be an account last used to sign; wait for the user to connect.
     // Without a local store there is nothing to unlock, so setting one up
     // also waits for the user's click.

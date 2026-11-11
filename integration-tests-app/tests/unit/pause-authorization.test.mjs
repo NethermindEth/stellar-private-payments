@@ -109,7 +109,7 @@ test('addSignature refuses a signature of another network\'s preimage', () => {
 test('walletSignature decodes the signature signAuthEntry returns into one addSignature accepts', () => {
   const entry = pauseEntry();
   const signer = Keypair.random();
-  // freighter-api 6 returns the signature as base64.
+  // The wallet SDK returns the signature as base64.
   const { signedAuthEntry } = {
     signedAuthEntry: Buffer.from(sign(entry, signer)).toString('base64'),
     signerAddress: signer.publicKey(),
@@ -119,7 +119,7 @@ test('walletSignature decodes the signature signAuthEntry returns into one addSi
 });
 
 test('walletSignature refuses a result that carries no signature', () => {
-  assert.throws(() => walletSignature(null), { message: 'Freighter returned no signature' });
+  assert.throws(() => walletSignature(null), { message: 'Varial returned no signature' });
 });
 
 test('an authorization file round-trips', () => {

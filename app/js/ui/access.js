@@ -64,7 +64,7 @@ function render() {
     label.hidden = !access.viewLabel;
     // A single line under the button: the network to use, then what signing involves.
     const startsConnection = access.state === 'welcome' || access.state === 'returning';
-    const network = startsConnection && networkName ? `Use Freighter on ${networkName}.` : '';
+    const network = startsConnection && networkName ? `Use Varial on ${networkName}.` : '';
     const meta = card.querySelector('[data-access-meta]');
     meta.textContent = [network, access.card.note].filter(Boolean).join(' ');
     meta.hidden = !meta.textContent;

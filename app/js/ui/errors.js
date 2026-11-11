@@ -104,12 +104,12 @@ const NETWORK_MESSAGES = [
  */
 const KNOWN_MESSAGES = [
     {
-        // The wallet signed as another account than the one asked for: Freighter
+        // The wallet signed as another account than the one asked for: Varial
         // does not hold the chosen account and signs as its active one instead.
         // Worded by the SDK's signer (sdk/web/src/signer.rs) for transactions,
         // and by wallet-signer-guard.js for the app's own wallet calls.
         test: /\bnot the requested\b|\bsigned with a different account\b/i,
-        message: 'The account chosen to sign and pay isn\'t in Freighter, so it signed with another account. Add the account to Freighter or pick another one.',
+        message: 'The account chosen to sign and pay isn\'t in Varial, so it signed with another account. Add the account to Varial or pick another one.',
     },
     {
         // The pool reads an allowlist the manifest does not name.
@@ -190,8 +190,8 @@ function getErrorMessage(error) {
  * Extracts the wallet-authored portion of an error message.
  *
  * Wallet adapters wrap the original wallet error and expose it as `cause`
- * (`normalizeWalletError` in wallet.js, `throwFreighterError` in the SDK's
- * freighter.js, `copy_js_error_fields` in sdk/web/src/signer.rs). The composed
+ * (`normalizeWalletError` in wallet.js, `throwVarialError` in the SDK's
+ * varial.js, `copy_js_error_fields` in sdk/web/src/signer.rs). The composed
  * `message` therefore mixes the wallet's text with prefixes we author
  * ourselves, e.g. "signer.signTransaction failed: <wallet text>".
  *

@@ -2,7 +2,7 @@
 <html lang="en" class="scroll-smooth">
 <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-xX3GGzsWOBkkZFDGzlbqMQDp7AuZuYp65Q/Q32otTGk='; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-pc04WRBw6jaIVr+IMADIR5EaL80zU35BErTGfi69qj8='; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="ASP Admin console." />
     <meta name="author" content="Stellar Private Payments" />
@@ -18,7 +18,7 @@
     {
         "imports": {
             "stellar-private-payments": "./js/stellar-private-payments/js/index.js",
-            "stellar-private-payments/freighter": "./js/stellar-private-payments/js/freighter.js"
+            "stellar-private-payments/varial": "./js/stellar-private-payments/js/varial.js"
         }
     }
     </script>
@@ -67,7 +67,7 @@
                         <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" class="btn-secondary px-4 py-2">Unlock</button>
                         <!-- Connect Wallet -->
                         <button id="connectBtn" type="button" class="btn-primary px-4 py-2">
-                            <span id="walletChip">Connect Freighter</span>
+                            <span id="walletChip">Connect Varial</span>
                         </button>
                     </div>
                 </div>
@@ -416,7 +416,7 @@
                 <div>
                     <p class="eyebrow">Admin Account</p>
                     <h2 id="admin-transaction-heading" class="section-title mt-2">Admin Transaction</h2>
-                    <p class="mt-2 text-sm text-slate-400">A call the connected account can sign alone goes straight to Freighter. Otherwise each signer signs here and passes the link on.</p>
+                    <p class="mt-2 text-sm text-slate-400">A call the connected account can sign alone goes straight to Varial. Otherwise each signer signs here and passes the link on.</p>
                 </div>
 
                 <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
