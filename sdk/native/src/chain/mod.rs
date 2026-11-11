@@ -11,7 +11,7 @@ mod tx_assemble;
 mod tx_prepare;
 
 pub use contract_state::{PreparedSorobanTx, StateFetcher};
-pub use event_chain::EventChain;
+pub use event_chain::{EventChain, EventChainCheck};
 pub use indexer::ContractDataStorage;
 pub use rpc::{Client, Client as RpcClient, MAX_CONTRACT_IDS_PER_FILTER, MAX_FILTER_CONTRACT_IDS};
 pub use signer::{

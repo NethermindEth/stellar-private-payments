@@ -9,6 +9,7 @@ use asp_membership::ASPMembership;
 use asp_non_membership::ASPNonMembership;
 use pool::PoolContract;
 use pool_core::policy;
+use public_key_registry::PublicKeyRegistry;
 use soroban_sdk::{Address, Env, U256, testutils::Address as _};
 use stellar_private_payments::types::{
     AssetDescriptor, ContractConfig, GvkMode, PolicyFlags, PoolConfigEntry,
@@ -46,13 +47,16 @@ pub struct Deployment {
     pub verifier: Address,
     pub asp_membership: Address,
     pub asp_non_membership: Address,
+    pub registry: Address,
 }
 
-/// Registers a pool and the two association sets it names.
+/// Registers a pool, the two association sets it names, and a public key
+/// registry.
 ///
 /// The association sets are registered for real, because the reader fetches
-/// their entries too. The token and the verifier stay placeholder addresses:
-/// the pool only stores their addresses and the reader only reports them.
+/// their entries too, and so is the registry, whose event chain a wallet
+/// checks. The token and the verifier stay placeholder addresses: the pool
+/// only stores their addresses and the reader only reports them.
 pub fn deploy() -> Deployment {
     let env = test_env();
     env.mock_all_auths();
@@ -79,6 +83,14 @@ pub fn deploy() -> Deployment {
             soroban_sdk::String::from_str(&env, "tests"),
         ),
     );
+    // The registry only calls its verifier on registration.
+    let registry = env.register(
+        PublicKeyRegistry,
+        (
+            soroban_sdk::String::from_str(&env, "tests"),
+            verifier.clone(),
+        ),
+    );
     Deployment {
         env,
         pool,
@@ -87,6 +99,7 @@ pub fn deploy() -> Deployment {
         verifier,
         asp_membership,
         asp_non_membership,
+        registry,
     }
 }
 
@@ -136,7 +149,7 @@ pub fn config_for(deployment: &Deployment, uri: &str) -> (ContractConfig, PoolCo
         verifiers: [("AB".to_string(), strkey(&deployment.verifier))]
             .into_iter()
             .collect(),
-        public_key_registry: strkey(&Address::generate(&deployment.env)),
+        public_key_registry: strkey(&deployment.registry),
         pools: vec![pool.clone()],
     };
     (config, pool)

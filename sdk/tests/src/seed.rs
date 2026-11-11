@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rusqlite::params;
 use stellar_private_payments::{
+    chain::EventChain,
     state::SqliteStorage,
     types::{
         AspNonMembershipProof, ContractEvent, ContractsEventData, ExtAmount, Field, GvkMode,
@@ -13,6 +14,7 @@ use stellar_private_payments::{
     },
     zk::{crypto, encryption, merkle::MerklePrefixTree},
 };
+use stellar_xdr::{Limits, ScBytes, ScMap, ScMapEntry, ScSymbol, ScVal, UInt256Parts, WriteXdr};
 
 /// Synthetic encryption key shared by this test fixture's connections.
 pub fn database_key() -> stellar_private_payments::state::database_key::DatabaseKey {
@@ -58,6 +60,14 @@ pub fn seeded_user_public_keys() -> Result<(
     let (note_keypair, encryption_keypair) =
         encryption::derive_encryption_and_note_keypairs(signature)?;
     Ok((note_keypair.public, encryption_keypair.public))
+}
+
+/// The nullifier the seeded wallet's note at `leaf_index` publishes when
+/// spent.
+pub fn seeded_note_nullifier(commitment: &Field, leaf_index: u32) -> Result<Field> {
+    let (note_keypair, _) =
+        encryption::derive_encryption_and_note_keypairs(test_derivation_signature())?;
+    expected_nullifier_for_note(&note_keypair, commitment, leaf_index)
 }
 
 /// Open (or create) `path` with schema migrations applied.
@@ -121,15 +131,16 @@ pub fn seed_prove_wallet(
         let encrypted_output =
             encryption::encrypt_output_note(&encryption_keypair.public, amount, &blinding)?;
 
-        let event_id = format!("test-pool-commit-{leaf_index}-{user_address}");
+        let index = u32::try_from(leaf_index).context("leaf index")?;
+        let event_id = commitment_event_id(index, user_address);
         storage.save_events_batch(&ContractsEventData {
-            events: vec![ContractEvent {
-                id: event_id.clone(),
-                ledger: TEST_LEDGER,
-                contract_id: pool_contract_id.to_string(),
-                topics: vec!["commitment".to_string()],
-                value: "dGVzdA==".to_string(),
-            }],
+            events: vec![commitment_contract_event(
+                event_id.clone(),
+                pool_contract_id,
+                &commitment,
+                index,
+                &encrypted_output,
+            )?],
             cursor: format!("pool-cur-{leaf_index}"),
             latest_ledger: TEST_LEDGER,
         })?;
@@ -137,7 +148,7 @@ pub fn seed_prove_wallet(
         storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
             id: event_id,
             commitment,
-            index: u32::try_from(leaf_index).context("leaf index")?,
+            index,
             encrypted_output,
             gvk_ciphertext: None,
         }])?;
@@ -197,6 +208,159 @@ pub fn seed_prove_wallet(
         asp_membership_contract_id,
         network,
     )
+}
+
+/// Garbles the `encrypted_output` of the seeded notes at `leaf_indices` and
+/// drops the notes, as if the wallet had synced commitment events whose
+/// ciphertexts were altered: it holds the commitments but never finds the
+/// notes.
+pub fn garble_seeded_outputs(storage_path: &Path, leaf_indices: &[u32]) -> Result<()> {
+    let mut conn = open_connection(storage_path).context("open seeded database to garble")?;
+    let tx = conn.transaction()?;
+    for &leaf_index in leaf_indices {
+        let (commitment, event_id, pool, length): (Field, String, String, i64) = tx
+            .query_row(
+                "SELECT pc.commitment, pc.event_id, c.address, length(pc.encrypted_output)
+                 FROM pool_commitments pc
+                 JOIN raw_contract_events r ON r.id = pc.event_id
+                 JOIN contracts c ON c.contract_id = r.contract_id
+                 WHERE pc.leaf_index = ?1",
+                params![leaf_index],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .with_context(|| format!("no seeded note at leaf {leaf_index}"))?;
+        let garbled = vec![0u8; usize::try_from(length)?];
+        let event =
+            commitment_contract_event(event_id.clone(), &pool, &commitment, leaf_index, &garbled)?;
+        tx.execute(
+            "DELETE FROM user_notes
+             WHERE commitment_id = (SELECT id FROM pool_commitments WHERE leaf_index = ?1)",
+            params![leaf_index],
+        )?;
+        tx.execute(
+            "UPDATE pool_commitments SET encrypted_output = ?2 WHERE leaf_index = ?1",
+            params![leaf_index, garbled],
+        )?;
+        tx.execute(
+            "UPDATE raw_contract_events SET value = ?2 WHERE id = ?1",
+            params![event_id, event.value],
+        )?;
+    }
+    refold_event_chains(&tx)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The ciphertexts of the seeded notes, by leaf index.
+pub fn seeded_encrypted_outputs(storage_path: &Path) -> Result<Vec<Vec<u8>>> {
+    let conn = open_connection(storage_path).context("open seeded database")?;
+    let mut stmt =
+        conn.prepare("SELECT encrypted_output FROM pool_commitments ORDER BY leaf_index")?;
+    let outputs = stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<Vec<u8>>, _>>()?;
+    Ok(outputs)
+}
+
+/// Folds every contract's raw events into its event chain again, as saving
+/// them did, after a raw event was rewritten.
+fn refold_event_chains(tx: &rusqlite::Transaction) -> Result<()> {
+    let rows = {
+        let mut stmt = tx.prepare(
+            "SELECT id, contract_id, topics, value FROM raw_contract_events
+             ORDER BY contract_id, ledger, id",
+        )?;
+        stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?
+    };
+    tx.execute(
+        "UPDATE raw_contract_events SET chain_count = NULL, chain_hash = NULL",
+        [],
+    )?;
+    // Per contract: its chain so far, and whether an event stopped it, as an
+    // event that does not fold stops saving's chain. The seed's ASP event
+    // does.
+    let mut current: Option<(i64, EventChain, bool)> = None;
+    for (id, contract_id, topics, value) in rows {
+        let (_, chain, stopped) = match &mut current {
+            Some(state) if state.0 == contract_id => state,
+            _ => current.insert((contract_id, EventChain::EMPTY, false)),
+        };
+        if *stopped {
+            continue;
+        }
+        let topics: Vec<&str> = topics.split(',').collect();
+        match chain.extend(&topics, &value) {
+            Ok(next) => *chain = next,
+            Err(_) => {
+                *stopped = true;
+                continue;
+            }
+        }
+        tx.execute(
+            "UPDATE raw_contract_events SET chain_count = ?2, chain_hash = ?3 WHERE id = ?1",
+            params![id, i64::try_from(chain.count)?, chain.hash.as_slice()],
+        )?;
+    }
+    Ok(())
+}
+
+/// The raw event id of the seeded commitment at `leaf_index`. Zero padding
+/// makes the ids sort by leaf index, as an RPC's ids sort by emission.
+fn commitment_event_id(leaf_index: u32, user_address: &str) -> String {
+    format!("test-pool-commit-{leaf_index:010}-{user_address}")
+}
+
+/// A pool's `NewCommitmentEvent` as an RPC serves it: the commitment as a
+/// topic after the event name, and a data map of the ciphertext and the leaf
+/// index, in base64 `ScVal` XDR.
+pub fn commitment_contract_event(
+    id: String,
+    pool_contract_id: &str,
+    commitment: &Field,
+    index: u32,
+    encrypted_output: &[u8],
+) -> Result<ContractEvent> {
+    let b64 = |val: &ScVal| val.to_xdr_base64(Limits::none());
+    let symbol = |name: &str| -> Result<ScVal> { Ok(ScVal::Symbol(ScSymbol(name.try_into()?))) };
+    let be = commitment.to_be_bytes();
+    let mut parts = be
+        .chunks_exact(8)
+        .map(|chunk| chunk.try_into().map(u64::from_be_bytes));
+    let mut part = || -> Result<u64> { Ok(parts.next().context("a 32-byte commitment")??) };
+    let commitment = ScVal::U256(UInt256Parts {
+        hi_hi: part()?,
+        hi_lo: part()?,
+        lo_hi: part()?,
+        lo_lo: part()?,
+    });
+    let data = ScVal::Map(Some(ScMap(
+        vec![
+            ScMapEntry {
+                key: symbol("encrypted_output")?,
+                val: ScVal::Bytes(ScBytes(encrypted_output.to_vec().try_into()?)),
+            },
+            ScMapEntry {
+                key: symbol("index")?,
+                val: ScVal::U32(index),
+            },
+        ]
+        .try_into()?,
+    )));
+    Ok(ContractEvent {
+        id,
+        ledger: TEST_LEDGER,
+        contract_id: pool_contract_id.to_string(),
+        topics: vec![b64(&symbol("new_commitment_event")?)?, b64(&commitment)?],
+        value: b64(&data)?,
+    })
 }
 
 /// Simulate on-chain effects of a prepared step for offline multi-tx tests.
@@ -269,15 +433,15 @@ pub fn apply_proved_step(
             continue;
         };
 
-        let event_id = format!("test-pool-apply-{leaf_index}-{user_address}");
+        let event_id = commitment_event_id(leaf_index, user_address);
         storage.save_events_batch(&ContractsEventData {
-            events: vec![ContractEvent {
-                id: event_id.clone(),
-                ledger: TEST_LEDGER,
-                contract_id: pool_contract_id.to_string(),
-                topics: vec!["commitment".to_string()],
-                value: "dGVzdA==".to_string(),
-            }],
+            events: vec![commitment_contract_event(
+                event_id.clone(),
+                pool_contract_id,
+                &commitment,
+                leaf_index,
+                encrypted_output,
+            )?],
             cursor: format!("pool-apply-cur-{leaf_index}"),
             latest_ledger: TEST_LEDGER,
         })?;

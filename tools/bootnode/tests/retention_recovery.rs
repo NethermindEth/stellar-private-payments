@@ -12,16 +12,58 @@ use std::{
 };
 use stellar_private_payments::{
     Client, LocalStorage, Storage, StorageHandle,
+    chain::EventChain,
     types::{ContractConfig, Field, KeyDerivationSignature, NoteAmount},
     zk::{crypto, encryption},
 };
-use stellar_xdr::{Limits, ScMap, ScMapEntry, ScVal, UInt256Parts, WriteXdr};
+use stellar_xdr::{
+    HostFunction, Limits, OperationBody, ReadXdr, ScAddress, ScMap, ScMapEntry, ScVal,
+    TransactionEnvelope, UInt256Parts, WriteXdr,
+};
 
 fn symbol(name: &str) -> ScVal {
     ScVal::Symbol(name.try_into().expect("symbol"))
 }
 fn encoded(value: ScVal) -> String {
     value.to_xdr_base64(Limits::none()).expect("XDR")
+}
+
+/// What a contract's `event_chain()` returns for `chain`.
+fn chain_value(chain: EventChain) -> String {
+    encoded(ScVal::Map(Some(ScMap(
+        vec![
+            ScMapEntry {
+                key: symbol("count"),
+                val: ScVal::U64(chain.count),
+            },
+            ScMapEntry {
+                key: symbol("hash"),
+                val: ScVal::Bytes(chain.hash.to_vec().try_into().expect("bytes")),
+            },
+        ]
+        .try_into()
+        .expect("map"),
+    ))))
+}
+
+/// The contract a `simulateTransaction` request calls.
+fn simulated_contract(request: &Value) -> ScAddress {
+    let tx = request["params"]["transaction"]
+        .as_str()
+        .expect("a transaction");
+    let TransactionEnvelope::Tx(envelope) =
+        TransactionEnvelope::from_xdr_base64(tx, Limits::none()).expect("envelope")
+    else {
+        panic!("expected a v1 envelope");
+    };
+    let OperationBody::InvokeHostFunction(invoke) = &envelope.tx.operations[0].body else {
+        panic!("expected a contract invocation");
+    };
+    let HostFunction::InvokeContract(call) = &invoke.host_function else {
+        panic!("expected a contract invocation");
+    };
+    assert_eq!(call.function_name.0.as_slice(), b"event_chain");
+    call.contract_address.clone()
 }
 
 // Exercise actual SDK filtering, bootnode HTTP, retention handoff, SQLite event
@@ -84,16 +126,38 @@ async fn recover_deposit(extra_pools: bool, port: u16) {
     });
     let encrypted =
         encryption::encrypt_output_note(&enc_keys.public, amount, &blinding).expect("encrypt");
+    let topics = [
+        encoded(symbol("new_commitment_event")),
+        encoded(commitment_xdr),
+    ];
+    let value = encoded(ScVal::Map(Some(ScMap(
+        vec![
+            ScMapEntry {
+                key: symbol("encrypted_output"),
+                val: ScVal::Bytes(encrypted.try_into().expect("bytes")),
+            },
+            ScMapEntry {
+                key: symbol("index"),
+                val: ScVal::U32(0),
+            },
+        ]
+        .try_into()
+        .expect("map"),
+    ))));
     let event: Event = serde_json::from_value(json!({
         "type":"contract", "ledger": GENESIS_LEDGER + 100,
         "ledgerClosedAt":"2024-01-01T00:00:00Z", "contractId":config.pools[0].pool_contract_id,
         "id":"0000000000000000001-0000000000", "inSuccessfulContractCall":true,
-        "topic":[encoded(symbol("new_commitment_event")), encoded(commitment_xdr)],
-        "value":encoded(ScVal::Map(Some(ScMap(vec![
-            ScMapEntry { key:symbol("encrypted_output"), val:ScVal::Bytes(encrypted.try_into().expect("bytes")) },
-            ScMapEntry { key:symbol("index"), val:ScVal::U32(0) },
-        ].try_into().expect("map")))))
-    })).expect("event");
+        "topic":topics, "value":value,
+    }))
+    .expect("event");
+    // The pool published the one event; every other contract published none.
+    let pool: ScAddress = config.pools[0]
+        .pool_contract_id
+        .parse()
+        .expect("pool address");
+    let pool_chain = chain_value(EventChain::EMPTY.extend(&topics, &value).expect("chain"));
+    let empty_chain = chain_value(EventChain::EMPTY);
     let gap_requests = Arc::new(AtomicUsize::new(0));
     let gaps = gap_requests.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -102,9 +166,13 @@ async fn recover_deposit(extra_pools: bool, port: u16) {
     let upstream_url = format!("http://{}", listener.local_addr().expect("address"));
     let app = axum::Router::new().route("/", axum::routing::post(move |axum::Json(request): axum::Json<Value>| {
         let gaps = gaps.clone();
+        let (pool, pool_chain, empty_chain) = (pool.clone(), pool_chain.clone(), empty_chain.clone());
         async move {
             let body = if request["method"] == "getLatestLedger" {
                 json!({"result":{"id":"tip","protocolVersion":22,"sequence":NETWORK_TIP}})
+            } else if request["method"] == "simulateTransaction" {
+                let chain = if simulated_contract(&request) == pool { &pool_chain } else { &empty_chain };
+                json!({"result":{"latestLedger":NETWORK_TIP,"results":[{"auth":[],"xdr":chain}]}})
             } else if request["params"]["startLedger"].as_u64().is_some_and(|l| l < u64::from(HANDOFF_FROM_LEDGER)) {
                 gaps.fetch_add(1, Ordering::SeqCst);
                 json!({"error":{"code":-32602,"message":format!("startLedger must be within the ledger range: {HANDOFF_FROM_LEDGER} - {NETWORK_TIP}")}})

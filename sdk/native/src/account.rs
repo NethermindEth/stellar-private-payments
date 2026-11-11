@@ -78,6 +78,7 @@ impl Account {
             &self.storage,
             &self.contract_config,
             self.sync.bootnode_url(),
+            self.sync.kick.history(),
         )
         .await
     }

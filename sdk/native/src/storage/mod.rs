@@ -1,6 +1,7 @@
 //! Pluggable async wallet storage for [`crate::pool::PrivatePool`].
 
 use crate::{
+    chain::{EventChain, EventChainCheck},
     gvk::GvkEvent,
     planner::SpendableNote,
     state::{SqliteStorage, StoredPrivateKeys},
@@ -221,6 +222,18 @@ pub trait Storage: crate::chain::ContractDataStorage {
         after: Option<(u32, String)>,
         limit: u32,
     ) -> Result<Vec<GvkEvent>, Error>;
+
+    /// Compares the event chain over the events saved for `contract_id` with
+    /// the chain the contract `published`.
+    async fn check_event_chain(
+        &self,
+        contract_id: &str,
+        published: EventChain,
+    ) -> Result<EventChainCheck, Error>;
+
+    /// Forgets everything synced from `contract_id`, so the next sync fetches
+    /// its events again from its deployment.
+    async fn forget_contract_history(&self, contract_id: &str) -> Result<(), Error>;
 
     /// Subset of `commitments` registered for `pool_contract_id`.
     async fn pool_has_commitments(

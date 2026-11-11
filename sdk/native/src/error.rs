@@ -115,6 +115,32 @@ pub enum Error {
     )]
     WithdrawalToContract,
 
+    /// The events synced for a contract differ from those it published, as its
+    /// event chain shows: an event was altered, added, or reordered. Nothing
+    /// read from them can be trusted until the contract's history is reset and
+    /// synced again from a source that serves it whole.
+    #[error(
+        "the {synced} events synced for contract {contract} differ from the {published} it published; reset its history and sync again"
+    )]
+    EventHistoryMismatch {
+        contract: String,
+        synced: u64,
+        published: u64,
+    },
+
+    /// Fewer events are synced for a contract than it published, after
+    /// catching up: an event was withheld. Nothing read from them can be
+    /// trusted until the contract's history is reset and synced again from a
+    /// source that serves it whole.
+    #[error(
+        "only {synced} of the {published} events contract {contract} published are synced; reset its history and sync again"
+    )]
+    EventHistoryIncomplete {
+        contract: String,
+        synced: u64,
+        published: u64,
+    },
+
     /// An untyped failure.
     ///
     /// The message holds the whole `anyhow` cause chain, so the variant has no

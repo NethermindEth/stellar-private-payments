@@ -1,6 +1,6 @@
 use super::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
 use crate::{
-    chain::EventChain,
+    chain::{EventChain, EventChainCheck},
     types::{
         AspMembershipSync, BootnodeSetting, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey,
         EncryptionPublicKey, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting, LeafAddedEvent,
@@ -352,6 +352,54 @@ impl Storage {
             .map(event_chain_from_row)
             .transpose()?
             .unwrap_or(EventChain::EMPTY))
+    }
+
+    /// Compares the event chain over the events saved for `contract_address`
+    /// with the chain the contract `published`.
+    ///
+    /// Events after one that does not fold are saved and processed but not
+    /// in the chain, so any such event makes the saved events differ from the
+    /// contract's, counting every saved event as synced.
+    pub fn check_event_chain(
+        &self,
+        contract_address: &str,
+        published: &EventChain,
+    ) -> Result<EventChainCheck> {
+        let chain = self.event_chain(contract_address)?;
+        let unfolded: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM raw_contract_events r
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE c.address = ?1 AND r.chain_count IS NULL",
+            params![contract_address],
+            |row| row.get(0),
+        )?;
+        if unfolded == 0 {
+            return Ok(chain.check(published));
+        }
+        let unfolded = u64::try_from(unfolded).context("negative event count")?;
+        Ok(EventChainCheck::Differs {
+            synced: chain
+                .count
+                .checked_add(unfolded)
+                .context("the event count overflows")?,
+            published: published.count,
+        })
+    }
+
+    /// Forgets everything synced from `contract_address`: its events, what was
+    /// derived from them, the notes they made, and its indexing progress. The
+    /// next sync fetches its events again from its deployment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an ASP membership contract with saved leaves,
+    /// whose leaves do not cascade.
+    pub fn forget_contract_history(&mut self, contract_address: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM contracts WHERE address = ?1",
+            params![contract_address],
+        )?;
+        Ok(())
     }
 
     pub fn save_sync_progress(
@@ -4322,6 +4370,74 @@ mod tests {
         conn.execute_batch("DROP TRIGGER interrupt_fold")?;
         let storage = Storage::connect_with_connection(conn)?;
         assert_eq!(storage.event_chain("CPOOL")?, folded(&[&event])?);
+        Ok(())
+    }
+
+    /// Events served after one that does not fold, as a bootnode could append
+    /// forged ones behind it, make the history differ although the chain over
+    /// the events before it matches the contract's.
+    #[test]
+    fn events_after_one_that_does_not_fold_differ_from_the_contracts() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let genuine = chain_event("p1", 1, "CPOOL", 1)?;
+        let barrier = ContractEvent {
+            topics: vec!["commitment".to_string()],
+            ..chain_event("p2", 2, "CPOOL", 2)?
+        };
+        let forged = chain_event("p3", 3, "CPOOL", 3)?;
+        storage.save_events_batch(&batch(vec![genuine.clone(), barrier, forged]))?;
+
+        assert_eq!(storage.event_chain("CPOOL")?, folded(&[&genuine])?);
+        assert_eq!(
+            storage.check_event_chain("CPOOL", &folded(&[&genuine])?)?,
+            EventChainCheck::Differs {
+                synced: 3,
+                published: 1
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_event_that_does_not_fold_differs_from_the_contracts() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let first = chain_event("p1", 1, "CPOOL", 1)?;
+        let second = chain_event("p2", 2, "CPOOL", 2)?;
+        let corrupted = ContractEvent {
+            topics: vec!["commitment".to_string()],
+            ..second.clone()
+        };
+        storage.save_events_batch(&batch(vec![first.clone(), corrupted]))?;
+
+        assert_eq!(
+            storage.check_event_chain("CPOOL", &folded(&[&first, &second])?)?,
+            EventChainCheck::Differs {
+                synced: 2,
+                published: 2
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn forgetting_a_contracts_history_keeps_the_others() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let registry = chain_event("r1", 1, "CREGISTRY", 4)?;
+        storage.save_events_batch(&batch(vec![
+            chain_event("p1", 1, "CPOOL", 1)?,
+            registry.clone(),
+        ]))?;
+
+        storage.forget_contract_history("CPOOL")?;
+
+        assert_eq!(storage.event_chain("CPOOL")?, EventChain::EMPTY);
+        assert_eq!(storage.event_chain("CREGISTRY")?, folded(&[&registry])?);
+        let pool_events: i64 = storage.conn.query_row(
+            "SELECT COUNT(*) FROM raw_contract_events WHERE id = 'p1'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(pool_events, 0);
         Ok(())
     }
 
