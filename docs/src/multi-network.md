@@ -114,7 +114,7 @@ passphrase, not deployment JSON. Unknown networks use their folder name as a
 label and have no default explorer; users can configure an explorer separately.
 Disclaimer acceptance is required on every network.
 Old files still deserialize, but network validation rejects missing passphrases.
-The website compares Freighter's passphrase with the configuration; wallet RPC
+The website compares Varial's passphrase with the configuration; wallet RPC
 overrides remain supported.
 
 `deploy.sh` resolves identity and RPC with `stellar network ls --long`. Downstream

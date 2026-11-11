@@ -14,7 +14,7 @@
 //! # Key Architecture
 //!
 //! ```text
-//! Freighter Wallet (Ed25519)
+//! Varial Wallet (Ed25519)
 //!        │
 //!        └── signMessage("Privacy Pool Key Derivation [v3] (<kdf_domain>)
 //!                         WARNING: signing this gives full control of …")
@@ -167,7 +167,7 @@ pub fn derive_membership_blinding(
 
 /// Encryption key derivation (X25519). Used for off-chain note
 /// encryption/decryption Derive X25519 encryption keypair deterministically
-/// from a Freighter signature.
+/// from a Varial signature.
 ///
 /// This keypair is used for encrypting note data (amount, blinding) so that
 /// only the recipient can decrypt it. The encryption scheme is
@@ -207,7 +207,7 @@ fn derive_keypair_from_signature(signature: &KeyDerivationSignature) -> Result<E
     Ok(keypair)
 }
 
-/// Derive private key (BN254 scalar) deterministically from a Freighter
+/// Derive private key (BN254 scalar) deterministically from a Varial
 /// signature for note identity. Used for ZK circuit ownership proofs
 ///
 /// This private key is used inside ZK circuits to prove ownership of notes.

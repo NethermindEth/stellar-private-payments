@@ -23,16 +23,16 @@ The admin account has this shape:
   master key as the only signer.
 
 Each signer creates a key on their own device and sends its address. The key has to be in two
-programs: Freighter signs admin calls and pause files on the admin page, and the Stellar CLI signs
+programs: Varial signs admin calls and pause files on the admin page, and the Stellar CLI signs
 what the page cannot describe (see [Sign with the CLI](#sign-with-the-cli)). Create the key as a
-Freighter account, then add it to the CLI's credential store from Freighter's recovery phrase:
+Varial account, then add it to the CLI's credential store from Varial's recovery phrase:
 
 ```bash
 stellar keys add SIGNER --secure-store
 ```
 
-Replace `SIGNER` with a name for the key. For a Freighter account other than the first, add
-`--hd-path N`, where `N` counts Freighter's accounts from 0. Don't use `stellar keys generate`,
+Replace `SIGNER` with a name for the key. For a Varial account other than the first, add
+`--hd-path N`, where `N` counts Varial's accounts from 0. Don't use `stellar keys generate`,
 which by default writes the seed phrase to a plain-text file.
 
 One person then creates the account and gives it its signers in one transaction:
@@ -137,21 +137,21 @@ deployments/scripts/verify-deployment.sh testnet
 Every admin call is a transaction whose source is the contract's admin, so the admin account's
 signers sign the transaction itself. The admin page builds it and carries it between signers:
 
-1. Connect Freighter with any account on the network and build the call: list writes on the
+1. Connect Varial with any account on the network and build the call: list writes on the
    Allowlist and Blocklist tabs, pauses, re-points, and fee claims on the Pools tab, and admin
    transfers on the Admins tab. The page reads the contract's admin from its `Admin` entry, builds
    the call with that account as the source, valid for 24 hours, and loads it into the Admin
    Transaction card.
 2. Press Copy link and send the link to the first signer.
-3. Each signer, on their own device, opens the link, connects Freighter, and reads the call the card
+3. Each signer, on their own device, opens the link, connects Varial, and reads the call the card
    describes. A signer who did not expect this exact call stops here. Otherwise the signer presses
    Sign beside their key in the card's signer list, then Copy link, and sends the new link on.
-   Freighter switches to that key when it holds it. The card shows who has signed and counts the
+   Varial switches to that key when it holds it. The card shows who has signed and counts the
    signatures against the account's threshold.
 4. Once the count reaches the threshold, anyone presses Submit.
 
 When the connected account can sign the call alone, as a single-key admin or one signer of a 1-of-N
-account can, Freighter asks for its signature as soon as the call is built and the page submits it.
+account can, Varial asks for its signature as soon as the call is built and the page submits it.
 A rejected request leaves the call in the card for the steps above.
 
 Make one admin call at a time: each uses the account's next sequence number, so a call built while
@@ -293,11 +293,11 @@ testnet and mainnet as of 2026-10-14.
 To make a file, use the Pre-signed deposit pauses panel on the Pools tab:
 
 1. Choose the pool and press New pause file. The page draws a random nonce and holds the file in
-   the panel. When the connected account can sign alone, as a single-key admin can, Freighter asks
+   the panel. When the connected account can sign alone, as a single-key admin can, Varial asks
    for its signature at once.
 2. Each signer reads the pool, admin, nonce, and expiration ledger on the file's card. A signer who
    did not expect exactly this file stops here. Otherwise the signer presses Sign beside their key,
-   checks that Freighter shows `pause_deposits` on that pool, and approves. Freighter switches to
+   checks that Varial shows `pause_deposits` on that pool, and approves. Varial switches to
    that key when it holds it. A signer on another device gets the file from Save file and adds it
    with Open pause files. Opening a copy of a file the panel holds adds the copy's signatures until
    the file meets the threshold, so copies signed on different devices combine. The panel checks
@@ -308,7 +308,7 @@ To make a file, use the Pre-signed deposit pauses panel on the Pools tab:
    its pool, nonce, and expiration ledger. A landed pause's nonce and that record name who kept
    the file.
 
-To pause, whoever keeps the files connects Freighter with any funded account, adds the files with
+To pause, whoever keeps the files connects Varial with any funded account, adds the files with
 Open pause files, one per pool, and presses Pause deposits now. The button stays disabled until a
 file in the panel can pause a pool whose deposits are still open, and a card whose file cannot says
 why. A signature from a key that no longer signs for the admin, such as a removed signer's, is left
@@ -444,7 +444,7 @@ than the RPC's event retention, about seven days on the public testnet RPC:
    allows fails, so split a long file over several calls. On the admin page instead, enter the new
    tree's address in the Overview tab's ASP Non-Membership Contract ID field, paste the keys on the
    Blocklist tab, and press Add to Blocklist, confirming when the page asks, since no pool uses the
-   tree yet. With Freighter connected as the deployer, the page signs and sends the insert at once.
+   tree yet. With Varial connected as the deployer, the page signs and sends the insert at once.
 3. Hand the tree to the admin account. The deployer proposes it, and the admin account's signers
    accept, as in [Build with spp](#build-with-spp), since the admin page lists only the trees its
    manifest names:

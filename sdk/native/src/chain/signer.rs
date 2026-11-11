@@ -183,7 +183,7 @@ pub struct AuthSignStep {
 }
 
 impl AuthSignStep {
-    /// Base64 XDR for Freighter `signAuthEntry`.
+    /// Base64 XDR for Varial `signAuthEntry`.
     pub fn wallet_preimage_b64(&self) -> Result<String> {
         self.preimage
             .to_xdr_base64(Limits::none())

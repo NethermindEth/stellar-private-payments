@@ -21,7 +21,7 @@ use stellar_private_payments::{
 
 const SIGN_METHODS: &[&str] = &["signMessage", "signTransaction", "signAuthEntry"];
 
-/// Wallet adapter invoked from WASM (`FreighterSigner` or any object with the
+/// Wallet adapter invoked from WASM (`VarialSigner` or any object with the
 /// three sign methods).
 #[wasm_bindgen]
 #[derive(Clone)]
@@ -157,14 +157,14 @@ impl WalletSigner {
     /// Refuse a signature the wallet produced with an account other than the
     /// one requested.
     ///
-    /// Freighter returns success with `signerAddress` set to the *active*
+    /// Varial returns success with `signerAddress` set to the *active*
     /// account when it does not hold the requested one, with no error and no
     /// indication to the user that a substitution occurred. Comparing the
     /// reported address against the requested one is what catches that.
     ///
     /// A signer that reports no address cannot be checked, and is accepted:
     /// `WalletSigner` takes any object with the three sign methods, and the
-    /// bare-string return shape carries nothing to compare. Freighter always
+    /// bare-string return shape carries nothing to compare. Varial always
     /// reports one, so its substitution path stays covered.
     fn verify_signer_address(&self, method: &str, reported: Option<&str>) -> Result<(), JsError> {
         let Some(reported) = reported else {
@@ -310,9 +310,9 @@ impl Signer for WalletSigner {
     }
 }
 
-/// Parse a Freighter `signMessage` signature (base64) into raw bytes.
+/// Parse a Varial `signMessage` signature (base64) into raw bytes.
 ///
-/// Freighter returns base64-encoded signature bytes. Hex is accepted as a
+/// Varial returns base64-encoded signature bytes. Hex is accepted as a
 /// fallback for custom signers.
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) fn wallet_message_signature_to_bytes(signature: &str) -> Result<Vec<u8>, JsError> {
@@ -350,7 +350,7 @@ mod tests {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     #[test]
-    fn wallet_message_signature_accepts_freighter_base64() {
+    fn wallet_message_signature_accepts_varial_base64() {
         let bytes = vec![1u8, 2, 3, 4];
         let b64 = STANDARD.encode(&bytes);
         assert_eq!(
@@ -580,7 +580,7 @@ mod signer_address_tests {
         assert_eq!(wallet.sign_message("m").await.unwrap(), SIGNATURE);
     }
 
-    /// Freighter reports success while having signed with whatever account was
+    /// Varial reports success while having signed with whatever account was
     /// active, because it does not hold the requested one.
     #[wasm_bindgen_test]
     async fn a_reply_reporting_a_substituted_address_is_refused() {

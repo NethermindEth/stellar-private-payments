@@ -109,7 +109,7 @@ pub fn public_key(alias: &str, config_dir: Option<&Path>) -> Result<String> {
 /// Produce the SEP-53 signature of `message` via `stellar message sign`.
 ///
 /// The Stellar CLI prefixes `"Stellar Signed Message:\n"`, SHA-256 hashes, then
-/// Ed25519-signs — matching the web app / Freighter derivation exactly. Output
+/// Ed25519-signs — matching the web app / Varial derivation exactly. Output
 /// is base64 of the 64-byte signature.
 #[tracing::instrument(
     name = "stellar_sign_message",
