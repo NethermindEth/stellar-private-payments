@@ -736,7 +736,7 @@ impl Storage {
     /// Several addresses may register the same key (see
     /// [`NoteKeyOwnerLookup`]). Rows are ordered per key by address; unknown
     /// keys yield no rows.
-    pub fn lookup_owners_by_note_keys(
+    fn lookup_owners_by_note_keys(
         &self,
         note_keys: &[Field],
         public_key_registry_contract_id: &str,
