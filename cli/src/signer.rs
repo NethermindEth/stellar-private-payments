@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use stellar_private_payments::{
     Error, PreparedTransaction, Signer,
-    chain::{Limits, PreparedSorobanTx, ReadXdr, TransactionEnvelope, WriteXdr},
+    chain::{Limits, PreparedSorobanTx, ReadXdr, TransactionEnvelope, WriteXdr, check_auth_roots},
     types::{KeyDerivationSignature, SignedTransaction, SignerAddress},
 };
 
@@ -25,10 +25,13 @@ pub struct AliasSigner {
 }
 
 impl AliasSigner {
+    /// Signs the envelope, which authorizes its source-account auth entries,
+    /// so it first refuses an entry rooted outside the transaction's own call.
     pub fn sign_prepared_transaction(
         &self,
         prepared: &PreparedSorobanTx,
     ) -> Result<TransactionEnvelope, Error> {
+        check_auth_roots(prepared)?;
         let signed_xdr = stellar_cli::sign_tx(
             &self.alias,
             &prepared.tx_xdr,

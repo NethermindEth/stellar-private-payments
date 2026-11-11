@@ -191,12 +191,79 @@ impl AuthSignStep {
     }
 }
 
+/// Refuses an auth entry whose root is not the transaction's own contract
+/// call.
+///
+/// [`crate::chain::tx_prepare`] checks each simulated entry against the call
+/// it built, but a [`PreparedSorobanTx`] can reach a signer from elsewhere.
+/// Every flow the SDK prepares authorizes the same call its transaction makes,
+/// so a root on any other call, such as a `token.transfer` added by the RPC,
+/// is refused before the wallet signs an entry or the envelope that authorizes
+/// source-account entries. The calls nested under the root are left to the
+/// preparation, which knows which ones its flow needs.
+///
+/// Checks both the prepared entries and the ones already in the envelope,
+/// since either can end up in the signed transaction.
+pub fn check_auth_roots(prepared: &PreparedSorobanTx) -> Result<()> {
+    let prepared_entries = prepared
+        .auth_entries
+        .iter()
+        .map(|entry_b64| {
+            SorobanAuthorizationEntry::from_xdr_base64(entry_b64, Limits::none())
+                .context("invalid auth entry xdr")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let envelope = TransactionEnvelope::from_xdr_base64(&prepared.tx_xdr, Limits::none())
+        .context("invalid prepared tx xdr")?;
+    let xdr::TransactionEnvelope::Tx(v1) = &envelope else {
+        bail!("unsupported transaction envelope (expected v1)");
+    };
+    let embedded_entries: Vec<&SorobanAuthorizationEntry> = v1
+        .tx
+        .operations
+        .iter()
+        .filter_map(|op| match &op.body {
+            OperationBody::InvokeHostFunction(invoke) => Some(invoke.auth.iter()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    if prepared_entries.is_empty() && embedded_entries.is_empty() {
+        return Ok(());
+    }
+
+    let [op] = v1.tx.operations.as_slice() else {
+        bail!(
+            "refusing to sign authorization for a transaction of {} operations, which takes one",
+            v1.tx.operations.len()
+        );
+    };
+    let OperationBody::InvokeHostFunction(xdr::InvokeHostFunctionOp {
+        host_function: xdr::HostFunction::InvokeContract(call),
+        ..
+    }) = &op.body
+    else {
+        bail!("refusing to sign authorization for a transaction that calls no contract");
+    };
+    let own_call = xdr::SorobanAuthorizedFunction::ContractFn(call.clone());
+    for entry in prepared_entries.iter().chain(embedded_entries) {
+        if entry.root_invocation.function != own_call {
+            bail!("refusing to sign authorization for a call other than the transaction's own");
+        }
+    }
+    Ok(())
+}
+
 /// Auth preimage steps required for `signer_address` on a prepared transaction.
+///
+/// Refuses any entry rooted outside the transaction's own call; see
+/// [`check_auth_roots`].
 pub fn auth_sign_steps(
     prepared: &PreparedSorobanTx,
     network_passphrase: &str,
     signer_address: &SignerAddress,
 ) -> Result<Vec<AuthSignStep>> {
+    check_auth_roots(prepared)?;
     let expiration = auth_expiration_ledger(prepared);
     let mut steps = Vec::new();
     for (entry_index, entry_b64) in prepared.auth_entries.iter().enumerate() {
@@ -213,11 +280,15 @@ pub fn auth_sign_steps(
 }
 
 /// Unsigned transaction envelope (base64) with signed auth entries attached.
+///
+/// Refuses any entry rooted outside the transaction's own call; see
+/// [`check_auth_roots`].
 pub fn unsigned_tx_for_signing(
     prepared: &PreparedSorobanTx,
     signer_address: &SignerAddress,
     auth_signatures: &[(usize, Signature)],
 ) -> Result<String> {
+    check_auth_roots(prepared)?;
     let expiration = auth_expiration_ledger(prepared);
     let public_key: ed25519::PublicKey = signer_address
         .as_str()
@@ -456,9 +527,10 @@ mod tests {
                 signature_expiration_ledger: 0,
                 signature: ScVal::Void,
             }),
+            // The call `empty_envelope` makes.
             root_invocation: SorobanAuthorizedInvocation {
                 function: SorobanAuthorizedFunction::ContractFn(InvokeContractArgs {
-                    contract_address: ScAddress::Contract(xdr::ContractId(xdr::Hash([2u8; 32]))),
+                    contract_address: ScAddress::Contract(xdr::ContractId(xdr::Hash([0u8; 32]))),
                     function_name: ScSymbol::try_from("transact").expect("symbol"),
                     args: VecM::default(),
                 }),
@@ -539,5 +611,86 @@ mod tests {
             creds.signature_expiration_ledger,
             prepared.latest_ledger + AUTH_EXPIRATION_LEDGERS
         );
+    }
+
+    /// A source-account entry rooted at a `token.transfer` rather than the
+    /// call `empty_envelope` makes.
+    fn foreign_entry() -> SorobanAuthorizationEntry {
+        SorobanAuthorizationEntry {
+            credentials: SorobanCredentials::SourceAccount,
+            root_invocation: xdr::SorobanAuthorizedInvocation {
+                function: xdr::SorobanAuthorizedFunction::ContractFn(xdr::InvokeContractArgs {
+                    contract_address: xdr::ScAddress::Contract(xdr::ContractId(Hash([2u8; 32]))),
+                    function_name: ScSymbol::try_from("transfer").expect("symbol"),
+                    args: VecM::default(),
+                }),
+                sub_invocations: VecM::default(),
+            },
+        }
+    }
+
+    const FOREIGN_ROOT: &str =
+        "refusing to sign authorization for a call other than the transaction's own";
+
+    #[test]
+    fn auth_sign_steps_refuses_an_entry_for_another_call() {
+        let signer_address = SignerAddress::new(test_signer().public_key());
+        let mut prepared = test_prepared_tx(&signer_address);
+        prepared.auth_entries.push(
+            foreign_entry()
+                .to_xdr_base64(Limits::none())
+                .expect("auth entry xdr"),
+        );
+        let refused = auth_sign_steps(&prepared, TEST_PASSPHRASE, &signer_address)
+            .expect_err("the foreign entry must be refused");
+        assert_eq!(refused.to_string(), FOREIGN_ROOT);
+    }
+
+    /// A source-account entry needs no signature step, only the envelope
+    /// signature, so the envelope itself must be refused.
+    #[test]
+    fn unsigned_tx_for_signing_refuses_a_source_account_entry_for_another_call() {
+        let signer_address = SignerAddress::new(test_signer().public_key());
+        let prepared = PreparedSorobanTx {
+            tx_xdr: test_fixtures::empty_envelope()
+                .to_xdr_base64(Limits::none())
+                .expect("tx xdr"),
+            auth_entries: vec![
+                foreign_entry()
+                    .to_xdr_base64(Limits::none())
+                    .expect("auth entry xdr"),
+            ],
+            latest_ledger: 100,
+        };
+        let refused = unsigned_tx_for_signing(&prepared, &signer_address, &[])
+            .expect_err("the foreign entry must be refused");
+        assert_eq!(refused.to_string(), FOREIGN_ROOT);
+    }
+
+    /// An entry already in the envelope is signed with it, even when the
+    /// prepared list is empty.
+    #[test]
+    fn check_auth_roots_refuses_an_entry_already_in_the_envelope() {
+        let mut envelope = test_fixtures::empty_envelope();
+        patch_auth_entries(&mut envelope, vec![foreign_entry()]).expect("attach entry");
+        let prepared = PreparedSorobanTx {
+            tx_xdr: envelope.to_xdr_base64(Limits::none()).expect("tx xdr"),
+            auth_entries: vec![],
+            latest_ledger: 100,
+        };
+        let refused = check_auth_roots(&prepared).expect_err("the foreign entry must be refused");
+        assert_eq!(refused.to_string(), FOREIGN_ROOT);
+    }
+
+    #[test]
+    fn check_auth_roots_accepts_a_transaction_without_entries() {
+        let prepared = PreparedSorobanTx {
+            tx_xdr: test_fixtures::empty_envelope()
+                .to_xdr_base64(Limits::none())
+                .expect("tx xdr"),
+            auth_entries: vec![],
+            latest_ledger: 100,
+        };
+        check_auth_roots(&prepared).expect("accepted");
     }
 }
