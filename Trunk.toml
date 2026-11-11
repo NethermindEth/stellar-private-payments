@@ -62,7 +62,7 @@ sed 's|^Source bundle: ./source-bundle.tar.gz$|Source bundle: ../../../../circui
     "$SDK/dist/circuits/NOTICE.txt" > "$SDK/dist/circuits/NOTICE.txt.tmp" \
     && mv "$SDK/dist/circuits/NOTICE.txt.tmp" "$SDK/dist/circuits/NOTICE.txt"
 
-# Bundle SDK JS; wasm stays external. Freighter is a separate opt-in entry.
+# Bundle SDK JS; wasm stays external. Varial is a separate opt-in entry.
 ./app/node_modules/.bin/esbuild sdk/web/js/index.js \
   --bundle --format=esm --minify \
   --outfile="$SDK/js/index.js" \
@@ -70,7 +70,7 @@ sed 's|^Source bundle: ./source-bundle.tar.gz$|Source bundle: ../../../../circui
 ./app/node_modules/.bin/esbuild sdk/web/js/freighter.js \
   --bundle --format=esm --minify \
   --outfile="$SDK/js/freighter.js" \
-  --alias:@stellar/freighter-api=./app/node_modules/@stellar/freighter-api/build/index.min.js
+  --alias:@stellar/varial-sdk=./app/node_modules/@stellar/varial-sdk/build/index.min.js
 
 # Static files
 cp app/admin.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true

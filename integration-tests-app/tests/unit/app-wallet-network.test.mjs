@@ -8,8 +8,8 @@ const source = await readFile(walletUrl, 'utf8');
 
 async function walletWith(reply, config = { network: 'custom', networkPassphrase: 'identity', rpcUrl: 'https://deployment.example/rpc' }) {
   // Deliberately expose only getNetwork for network queries: importing the
-  // Freighter-specific getNetworkDetails must fail this regression test.
-  const freighter = moduleUrl(`
+  // Varial-specific getNetworkDetails must fail this regression test.
+  const varial = moduleUrl(`
     export async function getNetwork() { return ${JSON.stringify(reply)}; }
     export const WatchWalletChanges = class {};
     export const getAddress = () => {};
@@ -22,10 +22,10 @@ async function walletWith(reply, config = { network: 'custom', networkPassphrase
     export const signMessage = () => {};
   `);
   return import(moduleUrl(source
-    .replace("'@stellar/freighter-api'", JSON.stringify(freighter))
-    .replace("'./wasm-facade.js'", JSON.stringify(moduleUrl(`export async function loadDeploymentConfig() { return ${JSON.stringify(config)}; }`)))
-    .replace("'./network-config.js'", JSON.stringify(new URL('../../../app/js/network-config.js', import.meta.url).href))
-    .replace("'./wallet-signer-guard.js'", JSON.stringify(new URL('../../../app/js/wallet-signer-guard.js', import.meta.url).href))));
+    .replace(/['"]@stellar\/varial-sdk['"]/, JSON.stringify(varial))
+    .replace(/['"]\.\/wasm-facade\.js['"]/, JSON.stringify(moduleUrl(`export async function loadDeploymentConfig() { return ${JSON.stringify(config)}; }`)))
+    .replace(/['"]\.\/network-config\.js['"]/, JSON.stringify(new URL('../../../app/js/network-config.js', import.meta.url).href))
+    .replace(/['"]\.\/wallet-signer-guard\.js['"]/, JSON.stringify(new URL('../../../app/js/wallet-signer-guard.js', import.meta.url).href))));
 }
 
 test('SEP network identity uses deployment RPC without requiring wallet URLs', async () => {
@@ -42,7 +42,7 @@ test('wallet endpoint settings cannot override the deployment RPC', async () => 
 
 test('a different wallet network is rejected before returning an endpoint', async () => {
   const wallet = await walletWith({ network: 'custom', networkPassphrase: 'wrong' });
-  await assert.rejects(wallet.getWalletNetwork(), /Switch Freighter to custom/);
+  await assert.rejects(wallet.getWalletNetwork(), /Switch Varial to custom/);
 });
 
 test('wallet network errors are surfaced', async () => {

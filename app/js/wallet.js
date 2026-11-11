@@ -1,14 +1,14 @@
-import { loadDeploymentConfig } from './wasm-facade.js';
-import { validateNetwork } from './network-config.js';
+import { loadDeploymentConfig } from "./wasm-facade.js";
+import { validateNetwork } from "./network-config.js";
 /**
- * Wallet adapter boundary for the Freighter browser extension.
+ * Wallet adapter boundary for the Varial browser extension.
  *
  * SEP-0043 v1.2.1 standardizes getAddress, signTransaction, signAuthEntry,
- * signMessage, and getNetwork. The additional Freighter-only symbols imported
+ * signMessage, and getNetwork. The additional Varial-only symbols imported
  * below (WatchWalletChanges, isConnected, isAllowed,
  * requestAccess, setAllowed) are intentional adapter extensions: SEP-0043 is
  * still Draft and defines no connect/permission-gating or watch/change API,
- * so the app relies on Freighter's extension for those capabilities.
+ * so the app relies on Varial's extension for those capabilities.
  *
  * Network identity comes from SEP-0043 getNetwork; the RPC endpoint comes
  * from deployment configuration, independently of wallet settings.
@@ -25,10 +25,10 @@ import {
     setAllowed,
     signAuthEntry,
     signTransaction,
-    signMessage
-} from '@stellar/freighter-api';
+    signMessage,
+} from "@stellar/varial-sdk";
 
-import { verifySignerAddress } from './wallet-signer-guard.js';
+import { verifySignerAddress } from "./wallet-signer-guard.js";
 
 /**
  * Request wallet access and return the active public key.
@@ -37,18 +37,23 @@ import { verifySignerAddress } from './wallet-signer-guard.js';
  *
  * @returns {Promise<void>}
  */
-async function assertFreighterInstalled() {
+async function assertVarialInstalled() {
     const conn = await isConnected();
     if (conn?.error) {
-        throw normalizeWalletError(conn.error, "Failed to check Freighter connection");
+        throw normalizeWalletError(
+            conn.error,
+            "Failed to check Varial connection",
+        );
     }
     if (!conn?.isConnected) {
-        throw new Error("Freighter not detected. Install from https://www.freighter.app/");
+        throw new Error(
+            "Varial not detected. Install from https://www.varial.app/",
+        );
     }
 }
 
 /**
- * Ensure Freighter is installed, connected, and allowed for this site.
+ * Ensure Varial is installed, connected, and allowed for this site.
  *
  * Optionally requests wallet access and returns the active public key.
  *
@@ -56,27 +61,36 @@ async function assertFreighterInstalled() {
  * @param {boolean} [opts.requestAddress=false] - Whether to request and return the active address.
  * @returns {Promise<string|void>} - Connected Stellar public key when requested.
  */
-async function ensureFreighterReady(opts = {}) {
+async function ensureVarialReady(opts = {}) {
     const { requestAddress = false } = opts;
 
-    await assertFreighterInstalled();
+    await assertVarialInstalled();
 
     const allowed = await isAllowed();
     if (allowed?.error) {
-        throw normalizeWalletError(allowed.error, "Failed to check Freighter allow-list");
+        throw normalizeWalletError(
+            allowed.error,
+            "Failed to check Varial allow-list",
+        );
     }
 
     if (!allowed?.isAllowed) {
         const set = await setAllowed();
         if (set?.error) {
-            throw normalizeWalletError(set.error, "Freighter access could not be granted");
+            throw normalizeWalletError(
+                set.error,
+                "Varial access could not be granted",
+            );
         }
     }
 
     if (requestAddress) {
         const access = await requestAccess();
         if (access?.error) {
-            throw normalizeWalletError(access.error, "Freighter access request failed");
+            throw normalizeWalletError(
+                access.error,
+                "Varial access request failed",
+            );
         }
         if (!access?.address) {
             throw new Error("No public key returned");
@@ -88,17 +102,17 @@ async function ensureFreighterReady(opts = {}) {
 /**
  * Request wallet access and return the active public key.
  *
- * Validates Freighter availability, prompts for access if needed,
+ * Validates Varial availability, prompts for access if needed,
  * and returns the connected Stellar address.
  *
  * @returns {Promise<string>} - Connected Stellar public key (G...).
  */
 export async function connectWallet() {
-    return await ensureFreighterReady({requestAddress: true});
+    return await ensureVarialReady({ requestAddress: true });
 }
 
 /**
- * Return the active address only if Freighter is already connected AND allowed
+ * Return the active address only if Varial is already connected AND allowed
  * for this origin, without prompting. Returns null otherwise. Lets a page
  * restore a session already established elsewhere in the app (same origin)
  * without showing a connection popup.
@@ -119,14 +133,17 @@ export async function getConnectedAddress() {
 }
 
 /**
- * Fetch the currently active public key from Freighter without prompting.
+ * Fetch the currently active public key from Varial without prompting.
  * @returns {Promise<string>}
  */
 export async function getWalletAddress() {
-    await ensureFreighterReady();
+    await ensureVarialReady();
     const res = await getAddress();
     if (res?.error) {
-        throw normalizeWalletError(res.error, "Failed to get active Freighter address");
+        throw normalizeWalletError(
+            res.error,
+            "Failed to get active Varial address",
+        );
     }
     if (!res?.address) {
         throw new Error("No public key returned");
@@ -135,11 +152,11 @@ export async function getWalletAddress() {
 }
 
 /**
- * Watch Freighter's active account.
+ * Watch Varial's active account.
  *
- * Freighter shares an account only with sites allowed for it, so the callback
+ * Varial shares an account only with sites allowed for it, so the callback
  * gets an empty address while the active account is not allowed here (or the
- * wallet is locked), and no address at all when Freighter could not be asked.
+ * wallet is locked), and no address at all when Varial could not be asked.
  *
  * @param {{intervalMs?: number, onChange: function({address: string|null}): void}} opts
  * @returns {function} stop watcher
@@ -150,19 +167,22 @@ export function startWalletWatcher(opts) {
     const res = watcher.watch((info) => {
         if (info?.error) return;
         try {
-            onChange?.({ address: typeof info?.address === 'string' ? info.address : null });
+            onChange?.({
+                address:
+                    typeof info?.address === "string" ? info.address : null,
+            });
         } catch (e) {
-            console.warn('[Wallet] watch callback failed:', e);
+            console.warn("[Wallet] watch callback failed:", e);
         }
     });
     if (res?.error) {
-        throw normalizeWalletError(res.error, 'Failed to start wallet watcher');
+        throw normalizeWalletError(res.error, "Failed to start wallet watcher");
     }
     return () => watcher.stop();
 }
 
 /**
- * Fetch current network details from Freighter.
+ * Fetch current network details from Varial.
  *
  * Useful for displaying network name and ensuring app/network alignment.
  *
@@ -174,33 +194,40 @@ export function startWalletWatcher(opts) {
 export async function getWalletNetwork() {
     const details = await getNetwork();
     if (details?.error) {
-        throw normalizeWalletError(details.error, "Failed to get Freighter network details");
+        throw normalizeWalletError(
+            details.error,
+            "Failed to get Varial network details",
+        );
     }
 
     const { network, networkPassphrase } = details;
     const config = await loadDeploymentConfig();
     validateNetwork(config, networkPassphrase);
-    if (typeof config.rpcUrl !== 'string' || !config.rpcUrl.trim()) {
-        throw new Error('Deployment config is missing rpcUrl');
+    if (typeof config.rpcUrl !== "string" || !config.rpcUrl.trim()) {
+        throw new Error("Deployment config is missing rpcUrl");
     }
     let rpcUrl;
     try {
         rpcUrl = new URL(config.rpcUrl);
     } catch {
-        throw new Error('Deployment config rpcUrl must be an absolute HTTP or HTTPS URL');
+        throw new Error(
+            "Deployment config rpcUrl must be an absolute HTTP or HTTPS URL",
+        );
     }
-    if (rpcUrl.protocol !== 'http:' && rpcUrl.protocol !== 'https:') {
-        throw new Error('Deployment config rpcUrl must be an absolute HTTP or HTTPS URL');
+    if (rpcUrl.protocol !== "http:" && rpcUrl.protocol !== "https:") {
+        throw new Error(
+            "Deployment config rpcUrl must be an absolute HTTP or HTTPS URL",
+        );
     }
     return { network, networkPassphrase, sorobanRpcUrl: config.rpcUrl };
 }
 
 /**
- * Normalize Freighter errors to a consistent shape.
+ * Normalize Varial errors to a consistent shape.
  *
  * Marks common rejection phrases as USER_REJECTED for UI handling.
  *
- * @param {Object} error - Raw Freighter error payload.
+ * @param {Object} error - Raw Varial error payload.
  * @param {string} fallbackMessage - Default message when none provided.
  * @returns {Error} - Error with `code` set to USER_REJECTED or WALLET_ERROR.
  */
@@ -217,18 +244,18 @@ function normalizeWalletError(error, fallbackMessage = "Wallet error") {
     // their fallback strings free of reject/declin/denied/cancel wording, or an
     // arbitrary wallet failure will be reported to the user as a cancellation.
     if (error?.code === -4) {
-        err.code = 'USER_REJECTED';
+        err.code = "USER_REJECTED";
     } else if (/reject|declin|denied|cancel/.test(lower)) {
-        err.code = 'USER_REJECTED';
+        err.code = "USER_REJECTED";
     } else {
-        err.code = 'WALLET_ERROR';
+        err.code = "WALLET_ERROR";
     }
     err.cause = error;
     return err;
 }
 
 /**
- * Request the user to sign a transaction XDR via Freighter.
+ * Request the user to sign a transaction XDR via Varial.
  *
  * Ensures wallet access, then returns the signed XDR and signer address.
  *
@@ -239,19 +266,22 @@ function normalizeWalletError(error, fallbackMessage = "Wallet error") {
  * @returns {Promise<{signedTxXdr: string, signerAddress: string}>}
  */
 export async function signWalletTransaction(transactionXdr, opts = {}) {
-    await ensureFreighterReady();
+    await ensureVarialReady();
 
-    const { signedTxXdr, signerAddress, error } = await signTransaction(transactionXdr, opts);
+    const { signedTxXdr, signerAddress, error } = await signTransaction(
+        transactionXdr,
+        opts,
+    );
     if (error) {
-        throw normalizeWalletError(error, 'Transaction signature failed');
+        throw normalizeWalletError(error, "Transaction signature failed");
     }
-    verifySignerAddress('signTransaction', opts.address, signerAddress);
+    verifySignerAddress("signTransaction", opts.address, signerAddress);
 
     return { signedTxXdr, signerAddress };
 }
 
 /**
- * Request the user to sign a Soroban auth preimage via Freighter.
+ * Request the user to sign a Soroban auth preimage via Varial.
  *
  * Takes HashIdPreimage XDR (base64); returns raw signature bytes for authorizeEntry.
  *
@@ -262,19 +292,22 @@ export async function signWalletTransaction(transactionXdr, opts = {}) {
  * @returns {Promise<{signedAuthEntry: string | null, signerAddress: string}>}
  */
 export async function signWalletAuthEntry(entryXdr, opts = {}) {
-    await ensureFreighterReady();
+    await ensureVarialReady();
 
-    const { signedAuthEntry, signerAddress, error } = await signAuthEntry(entryXdr, opts);
+    const { signedAuthEntry, signerAddress, error } = await signAuthEntry(
+        entryXdr,
+        opts,
+    );
     if (error) {
-        throw normalizeWalletError(error, 'Auth entry signature failed');
+        throw normalizeWalletError(error, "Auth entry signature failed");
     }
-    verifySignerAddress('signAuthEntry', opts.address, signerAddress);
+    verifySignerAddress("signAuthEntry", opts.address, signerAddress);
 
     return { signedAuthEntry, signerAddress };
 }
 
 /**
- * Request the user to sign an arbitrary message via Freighter.
+ * Request the user to sign an arbitrary message via Varial.
  *
  * Used for deriving encryption keys deterministically.
  *
@@ -285,14 +318,17 @@ export async function signWalletAuthEntry(entryXdr, opts = {}) {
  * @returns {Promise<{signedMessage: string | null, signerAddress: string}>}
  */
 export async function signWalletMessage(message, opts = {}) {
-    const { skipEnsureReady = false, ...freighterOpts } = opts || {};
+    const { skipEnsureReady = false, ...varialOpts } = opts || {};
     if (!skipEnsureReady) {
-        await ensureFreighterReady();
+        await ensureVarialReady();
     }
 
-    console.log('[Wallet] Requesting message signature for:', message.substring(0, 30) + '...');
-    const result = await signMessage(message, freighterOpts);
-    console.log('[Wallet] signMessage result:', {
+    console.log(
+        "[Wallet] Requesting message signature for:",
+        message.substring(0, 30) + "...",
+    );
+    const result = await signMessage(message, varialOpts);
+    console.log("[Wallet] signMessage result:", {
         hasSignedMessage: !!result?.signedMessage,
         hasError: !!result?.error,
         error: result?.error,
@@ -300,19 +336,19 @@ export async function signWalletMessage(message, opts = {}) {
 
     const { signedMessage, signerAddress, error } = result || {};
     if (error) {
-        throw normalizeWalletError(error, 'Message signature failed');
+        throw normalizeWalletError(error, "Message signature failed");
     }
-    // If SignMessage returns null. Older Freighter versions return a null
+    // If SignMessage returns null. Older Varial versions return a null
     // signature instead of an error payload when the user declines, so classify
     // this as a rejection via the structured code rather than by wording the
     // message so that a substring matcher happens to catch it.
     if (!signedMessage) {
-        const err = new Error('No signature returned by the wallet.');
-        err.code = 'USER_REJECTED';
+        const err = new Error("No signature returned by the wallet.");
+        err.code = "USER_REJECTED";
         throw err;
     }
 
-    verifySignerAddress('signMessage', freighterOpts.address, signerAddress);
+    verifySignerAddress("signMessage", varialOpts.address, signerAddress);
 
     return { signedMessage, signerAddress };
 }

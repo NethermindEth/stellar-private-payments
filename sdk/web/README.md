@@ -15,7 +15,7 @@ npm install stellar-private-payments
 
 ```js
 import init, { Storage, Client, bootnodeRequired } from 'stellar-private-payments';
-import { FreighterSigner } from 'stellar-private-payments/freighter';
+import { VarialSigner } from 'stellar-private-payments/varial';
 
 const networkPassphrase = 'Test SDF Network ; September 2015';
 const rpcUrl = 'https://soroban-testnet.stellar.org';
@@ -25,7 +25,7 @@ const circuitsBaseUrl = new URL('./circuits/', import.meta.url).href;
 import circuitLock from './trusted-deployment/circuits.json';
 // Fetching the lock beside the artifacts only detects corruption or mismatches;
 // it cannot authenticate artifacts if that server can replace both.
-const signer = new FreighterSigner();
+const signer = new VarialSigner();
 
 await init();
 
@@ -136,8 +136,11 @@ result instead, so the confirmed transaction's hash is not lost.
 
 Bound at `client.account()`. Must implement `signMessage`, `signTransaction`,
 and `signAuthEntry` (see [`js/types/signer.d.ts`](./js/types/signer.d.ts)).
-Optional Freighter adapter: `stellar-private-payments/freighter` (requires
-peer `@stellar/freighter-api`).
+Optional Varial adapter: `stellar-private-payments/varial` (requires
+peer `@stellar/varial-sdk@^7.0.0`). The previous
+`stellar-private-payments/freighter` entrypoint and `FreighterSigner` name remain
+available as compatibility aliases. Upstream repository URLs and SDK internals
+may still use the Freighter name.
 
 ## Logging & Diagnostics
 
@@ -245,7 +248,7 @@ The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scri
 
 In the default build, `Storage.open` requires a `keyProvider` before starting the storage worker. Passing `createNew: true` initializes a fresh encrypted database in OPFS (`spp.encrypted.db`), while `createNew: false` opens an existing one and fails if it is missing. Every table, including synced chain events and app settings, lives inside that encrypted database; there is no plaintext fallback or automatic browser migration.
 
-In the web app, `keyProvider` seals a random 32-byte database key in `localStorage` under `AES-256-GCM`, using a wrapping key derived via `HKDF-SHA-256` from a verified Freighter signature in a dedicated storage domain. Enrolling a new database requests two signatures over the unlock message to confirm the wallet signs deterministically before sealing the key; later opens need one signature. When the user locks storage manually or the inactivity timer expires, the app closes the storage worker and reloads the page so decrypted state in WASM and JavaScript memory is discarded.
+In the web app, `keyProvider` seals a random 32-byte database key in `localStorage` under `AES-256-GCM`, using a wrapping key derived via `HKDF-SHA-256` from a verified Varial signature in a dedicated storage domain. Enrolling a new database requests two signatures over the unlock message to confirm the wallet signs deterministically before sealing the key; later opens need one signature. When the user locks storage manually or the inactivity timer expires, the app closes the storage worker and reloads the page so decrypted state in WASM and JavaScript memory is discarded.
 
 ### Encrypted backups and recovery
 
@@ -253,7 +256,7 @@ Because the database key is random and only its wrapped envelope lives in `local
 
 Importing accepts backups from the same origin (`scheme`, `host`, and `port`). Rather than overwriting the live database in place, the app stages the archive into a fresh OPFS directory, asks the enrolled wallet to unlock it, and runs SQLite integrity and foreign-key checks against the staged files. Only after those checks pass does a single `localStorage` write switch the active envelope and directory pointer; if anything fails along the way, the existing storage remains untouched. After a successful import, the reloaded tab asks the wallet to unlock the restored storage. Restoring a backup replaces local state with the snapshot from export time and does not merge later local changes.
 
-If `localStorage` is cleared while encrypted OPFS files remain on disk, signing again with Freighter cannot reconstruct the lost random key. In that state, the app stops before enrollment so the user can either import a backup or wipe local storage cleanly. Separately, if an unencrypted `.opfs-sahpool` directory from an earlier build is still on disk, the app warns that legacy plaintext files are present and offers to remove them. **Reset local storage** (confirmed by typing `DELETE` with other app tabs closed) removes this origin's encrypted and legacy OPFS directories, key envelope, and legacy signer associations without affecting on-chain funds. The next wallet connection then enrolls new storage.
+If `localStorage` is cleared while encrypted OPFS files remain on disk, signing again with Varial cannot reconstruct the lost random key. In that state, the app stops before enrollment so the user can either import a backup or wipe local storage cleanly. Separately, if an unencrypted `.opfs-sahpool` directory from an earlier build is still on disk, the app warns that legacy plaintext files are present and offers to remove them. **Reset local storage** (confirmed by typing `DELETE` with other app tabs closed) removes this origin's encrypted and legacy OPFS directories, key envelope, and legacy signer associations without affecting on-chain funds. The next wallet connection then enrolls new storage.
 
 To run the browser backup round-trip test after building the SDK:
 
