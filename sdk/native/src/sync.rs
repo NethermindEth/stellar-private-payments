@@ -378,8 +378,15 @@ impl BackgroundSync {
     /// Returns how many rounds in a row a count has now differed; a count that
     /// still differs after [`EVENT_CHAIN_ROUNDS`] rounds is a fault too.
     async fn check_event_chains(&self, unsettled_rounds: u32) -> u32 {
+        let published = match read_event_chains(&self.rpc, &self.contract_config).await {
+            Ok(published) => published,
+            Err(e) => {
+                tracing::debug!("background sync could not read the event chains: {e:#}");
+                return unsettled_rounds;
+            }
+        };
         let _history = self.kick.history().lock().await;
-        match check_event_chains(&self.rpc, &self.storage, &self.contract_config).await {
+        match check_event_chains(&self.storage, &published).await {
             Ok(None) => {
                 self.kick.set_history_fault(None);
                 0
@@ -694,9 +701,10 @@ pub(crate) async fn catch_up(
     let mut rounds_left = EVENT_CHAIN_ROUNDS;
     loop {
         catch_up_events(rpc, storage, contract_config, bootnode_url, history).await?;
+        let published = read_event_chains(rpc, contract_config).await?;
         let checked = {
             let _history = history.lock().await;
-            check_event_chains(rpc, storage, contract_config).await?
+            check_event_chains(storage, &published).await?
         };
         let Some((contract, check)) = checked else {
             return Ok(());
@@ -736,7 +744,53 @@ fn chained_contracts(contract_config: &ContractConfig) -> impl Iterator<Item = &
         .chain([contract_config.public_key_registry.as_str()])
 }
 
-/// Compares each chained contract's event chain with the wallet's.
+/// Reads each chained contract's event chain.
+///
+/// # Errors
+///
+/// Returns an error when a chain cannot be read or decoded.
+async fn read_event_chains<'a>(
+    rpc: &RpcClient,
+    contract_config: &'a ContractConfig,
+) -> Result<Vec<(&'a str, EventChain)>, Error> {
+    let mut published = Vec::new();
+    for contract in chained_contracts(contract_config) {
+        let value = read_event_chain(rpc, &contract_config.deployer, contract).await?;
+        let chain = EventChain::from_scval(&value)
+            .with_context(|| format!("the event chain of {contract}"))?;
+        published.push((contract, chain));
+    }
+    Ok(published)
+}
+
+/// Reads what `contract`'s `event_chain()` returns, trying up to
+/// [`EVENT_CHAIN_ROUNDS`] times. An RPC node can fail a simulation it serves
+/// on the next try.
+async fn read_event_chain(
+    rpc: &RpcClient,
+    source: &str,
+    contract: &str,
+) -> Result<stellar_xdr::ScVal, Error> {
+    let mut tries_left = EVENT_CHAIN_ROUNDS;
+    loop {
+        match rpc
+            .read_contract(contract, source, "event_chain", Vec::new())
+            .await
+        {
+            Ok(value) => return Ok(value),
+            Err(e) => {
+                tries_left = tries_left.saturating_sub(1);
+                if tries_left == 0 {
+                    return Err(e.into());
+                }
+                tracing::debug!("reading the event chain of {contract} failed, retrying: {e}");
+                sleep(EVENT_CHAIN_RETRY_MS).await;
+            }
+        }
+    }
+}
+
+/// Compares each contract's `published` event chain with the wallet's.
 ///
 /// Returns the first contract whose event count differs from the wallet's,
 /// which may settle once the wallet catches up, or `None` when every chain
@@ -745,25 +799,14 @@ fn chained_contracts(contract_config: &ContractConfig) -> impl Iterator<Item = &
 /// # Errors
 ///
 /// Returns [`Error::EventHistoryMismatch`] when a contract published as many
-/// events as were synced but other ones, and an error when a chain cannot be
+/// events as were synced but other ones, and an error when storage cannot be
 /// read.
 async fn check_event_chains(
-    rpc: &RpcClient,
     storage: &StorageHandle,
-    contract_config: &ContractConfig,
+    published: &[(&str, EventChain)],
 ) -> Result<Option<(String, EventChainCheck)>, Error> {
     let mut unsettled = None;
-    for contract in chained_contracts(contract_config) {
-        let value = rpc
-            .read_contract(
-                contract,
-                &contract_config.deployer,
-                "event_chain",
-                Vec::new(),
-            )
-            .await?;
-        let published = EventChain::from_scval(&value)
-            .with_context(|| format!("the event chain of {contract}"))?;
+    for &(contract, published) in published {
         match storage.check_event_chain(contract, published).await? {
             EventChainCheck::Matches => {}
             check @ EventChainCheck::Differs { synced, published } if synced == published => {
@@ -1485,6 +1528,59 @@ mod tests {
     /// A reset that lands between two pages of a sync pass must still leave
     /// the contract to be fetched again from its deployment, not resumed from
     /// the pass's cursor past the events it forgot.
+    /// An RPC node fails a simulation now and then. A sync whose read of an
+    /// event chain fails once reads it again instead of failing.
+    #[tokio::test]
+    async fn a_failed_event_chain_read_is_retried() -> Result<(), Error> {
+        let rpc = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("simulateTransaction"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json_rpc_ok(json!({
+                "error": "setting ContractComputeV0 is not present in the snapshot",
+                "latestLedger": 3_000_000u32,
+            }))))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&rpc)
+            .await;
+        let empty = stellar_xdr::ScVal::Map(Some(stellar_xdr::ScMap(
+            vec![
+                stellar_xdr::ScMapEntry {
+                    key: stellar_xdr::ScVal::Symbol("count".try_into().expect("symbol")),
+                    val: stellar_xdr::ScVal::U64(0),
+                },
+                stellar_xdr::ScMapEntry {
+                    key: stellar_xdr::ScVal::Symbol("hash".try_into().expect("symbol")),
+                    val: stellar_xdr::ScVal::Bytes(vec![0; 32].try_into().expect("32 bytes")),
+                },
+            ]
+            .try_into()
+            .expect("map"),
+        )));
+        Mock::given(method("POST"))
+            .and(body_string_contains("simulateTransaction"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json_rpc_ok(json!({
+                "results": [{
+                    "auth": [],
+                    "xdr": stellar_xdr::WriteXdr::to_xdr_base64(&empty, stellar_xdr::Limits::none())
+                        .expect("xdr"),
+                }],
+                "latestLedger": 3_000_000u32,
+            }))))
+            .mount(&rpc)
+            .await;
+        mount_get_events(&rpc, vec![get_events_page("tip", json!([]), 3_000_000)]).await;
+
+        catch_up(
+            &RpcClient::new(&rpc.uri())?,
+            &temp_storage("chain-read-retry"),
+            test_config(),
+            None,
+            &HistoryLock::default(),
+        )
+        .await
+    }
+
     #[tokio::test]
     async fn a_reset_during_a_sync_pass_fetches_the_history_again() -> Result<(), Error> {
         let rpc = MockServer::start().await;
