@@ -1,25 +1,25 @@
 {
-  "name": "app",
-  "version": "0.1.0",
-  "description": "Private payments app on Stellar",
-  "main": "js/app.js",
-  "scripts": {},
-  "author": "",
-  "devDependencies": {
-    "esbuild": "^0.28.2",
-    "tailwindcss": "^4.3.3"
-  },
-  "dependencies": {
-    "@noble/ed25519": "^3.2.0",
-    "@noble/hashes": "^2.4.0",
-    "@stellar/freighter-api": "^6.0.1",
-    "@stellar/stellar-sdk": "^17.3.0",
-    "d3-axis": "^3.0.0",
-    "d3-brush": "^3.0.0",
-    "d3-format": "^3.1.2",
-    "d3-scale": "^4.0.2",
-    "d3-selection": "^3.0.0",
-    "d3-shape": "^3.2.0",
-    "stellar-private-payments": "file:../sdk/web"
-  }
+    "name": "app",
+    "version": "0.1.0",
+    "description": "Private payments app on Stellar",
+    "main": "js/app.js",
+    "scripts": {},
+    "author": "",
+    "devDependencies": {
+        "esbuild": "^0.28.2",
+        "tailwindcss": "^4.3.3"
+    },
+    "dependencies": {
+        "@noble/ed25519": "^3.2.0",
+        "@noble/hashes": "^2.4.0",
+        "@stellar/varial-sdk": "^7.0.0",
+        "@stellar/stellar-sdk": "^17.3.0",
+        "d3-axis": "^3.0.0",
+        "d3-brush": "^3.0.0",
+        "d3-format": "^3.1.2",
+        "d3-scale": "^4.0.2",
+        "d3-selection": "^3.0.0",
+        "d3-shape": "^3.2.0",
+        "stellar-private-payments": "file:../sdk/web"
+    }
 }

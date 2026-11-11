@@ -10,7 +10,7 @@ test('a wallet reporting the requested account is accepted', () => {
   assert.doesNotThrow(() => verifySignerAddress('signTransaction', REQUESTED, REQUESTED));
 });
 
-// Freighter returns success with signerAddress set to whichever account was
+// Varial returns success with signerAddress set to whichever account was
 // active when it does not hold the requested one, with nothing in the approval
 // prompt naming the address that was asked for.
 test('a wallet reporting a substituted account is refused', () => {
