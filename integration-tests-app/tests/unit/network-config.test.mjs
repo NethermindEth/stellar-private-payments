@@ -4,7 +4,7 @@ import { validateNetwork, networkPresentation } from '../../../app/js/network-co
 const config = { network: 'custom', networkPassphrase: 'identity', rpcUrl: 'https://testnet.example' };
 test('compares passphrase, independently of URL and network name', () => {
   assert.doesNotThrow(() => validateNetwork(config, 'identity'));
-  assert.throws(() => validateNetwork(config, 'wrong'), /Switch Freighter to custom/);
+  assert.throws(() => validateNetwork(config, 'wrong'), /Switch Varial to custom/);
 });
 test('legacy configs cannot silently bypass validation', () => {
   assert.throws(() => validateNetwork({ network: 'testnet' }, 'identity'), /missing networkPassphrase/);

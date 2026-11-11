@@ -9,7 +9,7 @@ cp "deployments/$network/deployments.json" "$TRUNK_STAGING_DIR/deployments.json"
 for entry in ui admin disclosure; do
     ./app/node_modules/.bin/esbuild "app/js/$entry.js" --bundle --minify \
         --alias:app-circuit-lock="./deployments/$network/circuits.json" \
-        --external:stellar-private-payments --external:stellar-private-payments/freighter \
+        --external:stellar-private-payments --external:stellar-private-payments/varial \
         --outfile="$TRUNK_STAGING_DIR/js/$entry.js" --format=esm
 done
 # The service worker must be served from the root for full-page scope.

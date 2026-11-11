@@ -45,7 +45,7 @@ function memoryStorage() {
   };
 }
 
-// Signing as another account makes it Freighter's active one, so the owner
+// Signing as another account makes it Varial's active one, so the owner
 // has to outlive that: it is remembered until the user disconnects.
 test('the connected owner is remembered until forgotten', () => {
   const storage = memoryStorage();

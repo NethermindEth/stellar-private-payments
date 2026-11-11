@@ -10,7 +10,7 @@ This document describes how the application manages local state, including persi
 |-------|----------|------|
 | **Rust SDK** | `sdk/native` | Rust `PrivatePool` — deposits, transfers, withdrawals, transact, disclose |
 | **Web SDK** | `sdk/web` | npm package `stellar-private-payments` — WASM bindings, workers, `Storage` / `Client` / `PrivatePool` JS API |
-| **App** | `app/js` | UI, Freighter connect UX, `wasm-facade.js` lifecycle, `app-storage.js` for app-only persistence |
+| **App** | `app/js` | UI, Varial connect UX, `wasm-facade.js` lifecycle, `app-storage.js` for app-only persistence |
 
 Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx builders, proving, SQLite schema). The browser SDK (`sdk/web`) compiles that logic to WASM and exposes a typed JavaScript API. The `app/` directory is the web UI and a thin runtime facade — it does not embed its own WASM crate.
 
@@ -18,7 +18,7 @@ Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx
 
 Local storage is SQLite (`sdk/native/src/state/storage.rs`, schema in `sdk/native/src/state/schema.sql`), shared across platforms. In the browser, `spp.encrypted.db` lives on OPFS behind the storage worker; on the command line, the CLI writes `spp.db` and its key record `spp.db.key` in the data directory.
 
-Persistent databases are encrypted with SQLite3MC under a random 32-byte key supplied when opening storage. Rather than deriving that key from a password, the web app and CLI seal it under a wallet signature in a dedicated storage domain: Freighter in the browser, or a Stellar CLI identity (`--storage-account`, defaulting to `--account`) on the command line. Keeping storage unlock in its own signing domain separates it from both privacy-key derivation and transaction authorization, and only the public signing context and encrypted key envelope are written to disk.
+Persistent databases are encrypted with SQLite3MC under a random 32-byte key supplied when opening storage. Rather than deriving that key from a password, the web app and CLI seal it under a wallet signature in a dedicated storage domain: Varial in the browser, or a Stellar CLI identity (`--storage-account`, defaulting to `--account`) on the command line. Keeping storage unlock in its own signing domain separates it from both privacy-key derivation and transaction authorization, and only the public signing context and encrypted key envelope are written to disk.
 
 On the command line, that envelope protects a copied database only if an attacker cannot sign with the enrolled identity. When the Stellar CLI stores that identity's secret key as a plaintext file on the same disk as `spp.db` and `spp.db.key`, someone who reads the disk gets both the ciphertext and the key that unwraps it. Real at-rest protection comes from keeping the signing key in the OS secure store or a hardware wallet, which in turn means each CLI command that opens storage may prompt for signer approval.
 
@@ -86,7 +86,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 - Wallet session: thin wrapper over native `Account`.
 - **Account-wide operations:**
-  - `derivePrivacyKeys()` — explicit call, Freighter `signMessage` when keys missing in local DB; the signature is verified against the note owner before keys are derived or saved.
+  - `derivePrivacyKeys()` — explicit call, Varial `signMessage` when keys missing in local DB; the signature is verified against the note owner before keys are derived or saved.
   - Reads: `portfolio`, `privacyKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`.
   - `registerPublicKeys`.
   - Per-pool sessions via `pool({ poolContract })`.
@@ -191,11 +191,11 @@ App-only persistence on top of `Storage.call`: explorer settings, bootnode confi
 
 **`app/js/wallet.js`**
 
-Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freighter.js` (`FreighterSigner`), which implements the SDK `WalletSigner` interface passed to `Client.account`. Both adapters intentionally use the SEP-0043 standardized sign/get methods where they exist; the remaining Freighter-only connect/permission and watch calls are isolated at this adapter boundary because SEP-0043 (Draft) does not yet define replacements. Network identity is read through SEP-0043 `getNetwork` and checked against the selected deployment. The RPC URL comes exclusively from deployment configuration, independently of Freighter endpoint settings.
+Varial connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/varial.js` (`VarialSigner`), which implements the SDK `WalletSigner` interface passed to `Client.account`. Both adapters intentionally use the SEP-0043 standardized sign/get methods where they exist; the remaining Varial-only connect/permission and watch calls are isolated at this adapter boundary because SEP-0043 (Draft) does not yet define replacements. Network identity is read through SEP-0043 `getNetwork` and checked against the selected deployment. The RPC URL comes exclusively from deployment configuration, independently of Varial endpoint settings.
 
 **Build (Trunk)**
 
-`Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` plus the opt-in `sdk/web/js/freighter.js` into `js/stellar-private-payments/`. App bundles (`ui.js`, etc.) import `stellar-private-payments` / `stellar-private-payments/freighter` as external packages via import maps in `index.html`.
+`Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` plus the opt-in `sdk/web/js/varial.js` into `js/stellar-private-payments/`. App bundles (`ui.js`, etc.) import `stellar-private-payments` / `stellar-private-payments/varial` as external packages via import maps in `index.html`.
 
 `SPP_NETWORK` (default `testnet`) selects `deployments/<network>/deployments.json` for staging. Trunk calls `deployments/scripts/bundle-app.sh`, which stages the deployment and uses the esbuild `app-circuit-lock` alias to embed that deployment's circuit lock in the app bundles. `wasm-facade.js` imports `app-circuit-lock` and passes it, together with the deployment configuration and artifact base URL, to the SDK for client creation and walletless disclosure verification. The app does not fetch `circuits.json` at runtime. Expected hashes are pinned to the app build, so this still requires trusting the app and its delivery.
 
@@ -203,7 +203,7 @@ Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.
 
 ## Keypair derivation
 
-Keys are derived deterministically from Freighter wallet signatures:
+Keys are derived deterministically from Varial wallet signatures:
 
 1. During onboarding the app calls `account.derivePrivacyKeys()` explicitly, and the wallet signs `key_derivation_message(kdf_domain)` from `sdk/native/src/zk/encryption.rs` using SEP-53, with `kdf_domain` taken from `deployments.json`. The message is `"Privacy Pool Key Derivation [v3] (<kdf_domain>)\nWARNING: signing this gives full control of your private funds. Only sign in the Stellar Private Payments app or CLI."`. Its second line warns the user because this signature is their whole privacy secret, and the keys derived from it can't be rotated.
 2. `Account::derive_privacy_keys` calls `verify_owner_signature` to strictly verify the 64-byte Ed25519 signature against the note owner's Stellar `G...` public key before trusting it. The signed digest is `SHA256("Stellar Signed Message:\n" + message)`, using UTF-8 bytes and a newline after the colon. Verification refuses signatures from another key, signatures over another message, invalid lengths or addresses, and small-order owner keys or signature `R` points.
@@ -232,7 +232,7 @@ All local data is lost. On next load:
 
 ### Account switch
 
-Freighter account change triggers disconnect. The user reconnects and re-runs onboarding if keys for the new account are not in local storage. Background indexing uses the connected account's derived keys for decryption.
+Varial account change triggers disconnect. The user reconnects and re-runs onboarding if keys for the new account are not in local storage. Background indexing uses the connected account's derived keys for decryption.
 
 ### RPC sync gap
 

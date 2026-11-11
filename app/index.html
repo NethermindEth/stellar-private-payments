@@ -1,821 +1,2272 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" class="scroll-smooth">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Stellar Private Payments — privacy-preserving institutional payments on Stellar.">
-    <meta name="keywords" content="Stellar, privacy, blockchain, zero-knowledge proofs, payments, treasury">
-    <meta name="author" content="Stellar Private Payments">
-    <meta name="robots" content="index, follow">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Stellar Private Payments — privacy-preserving institutional payments on Stellar."
+    />
+    <meta
+      name="keywords"
+      content="Stellar, privacy, blockchain, zero-knowledge proofs, payments, treasury"
+    />
+    <meta name="author" content="Stellar Private Payments" />
+    <meta name="robots" content="index, follow" />
 
-    <meta property="og:type" content="website">
-    <meta property="og:title" content="Stellar Private Payments">
-    <meta property="og:description" content="Private treasury operations on Stellar with zero-knowledge proofs.">
-    <meta property="og:image" content="/assets/og-image.png">
-    <meta name="twitter:card" content="summary_large_image">
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Stellar Private Payments" />
+    <meta
+      property="og:description"
+      content="Private treasury operations on Stellar with zero-knowledge proofs."
+    />
+    <meta property="og:image" content="/assets/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
 
-    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 
     <title>Stellar Private Payments</title>
 
-    <link data-trunk data-target-path="css" rel="tailwind-css" href="css/app.css" />
+    <link
+      data-trunk
+      data-target-path="css"
+      rel="tailwind-css"
+      href="css/app.css"
+    />
 
     <script type="importmap">
-    {
+      {
         "imports": {
-            "stellar-private-payments": "./js/stellar-private-payments/js/index.js",
-            "stellar-private-payments/freighter": "./js/stellar-private-payments/js/freighter.js"
+          "stellar-private-payments": "./js/stellar-private-payments/js/index.js",
+          "stellar-private-payments/varial": "./js/stellar-private-payments/js/varial.js"
         }
-    }
+      }
     </script>
 
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
 
     <link data-trunk rel="copy-dir" href="assets/" />
-</head>
-<body data-storage-state="locked" data-wallet-state="disconnected" class="min-h-screen bg-ink-950 font-sans text-slate-100 antialiased">
-    <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cyan-400 focus:px-4 focus:py-2 focus:font-semibold focus:text-ink-950">
-        Skip to main content
+  </head>
+  <body
+    data-storage-state="locked"
+    data-wallet-state="disconnected"
+    class="min-h-screen bg-ink-950 font-sans text-slate-100 antialiased"
+  >
+    <a
+      href="#main-content"
+      class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cyan-400 focus:px-4 focus:py-2 focus:font-semibold focus:text-ink-950"
+    >
+      Skip to main content
     </a>
 
     <div class="pointer-events-none fixed inset-0 overflow-hidden">
-        <div class="absolute inset-x-0 top-0 h-[32rem] bg-[radial-gradient(circle_at_top,rgba(88,166,255,0.28),transparent_58%)]"></div>
-        <div class="absolute -left-24 top-44 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl"></div>
-        <div class="absolute right-0 top-24 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl"></div>
+      <div
+        class="absolute inset-x-0 top-0 h-[32rem] bg-[radial-gradient(circle_at_top,rgba(88,166,255,0.28),transparent_58%)]"
+      ></div>
+      <div
+        class="absolute -left-24 top-44 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl"
+      ></div>
+      <div
+        class="absolute right-0 top-24 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl"
+      ></div>
     </div>
 
-    <div class="relative mx-auto flex min-h-screen max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
-        <header class="rounded-[28px] border border-white/8 bg-white/[0.03] px-5 py-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
-            <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                <div class="flex items-center gap-4 xl:flex-1">
-                    <h1 id="home-link" title="Go to Overview" class="cursor-pointer text-2xl font-semibold tracking-tight text-white">Stellar Private Payments</h1>
-                </div>
+    <div
+      class="relative mx-auto flex min-h-screen max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8 lg:py-6"
+    >
+      <header
+        class="rounded-[28px] border border-white/8 bg-white/[0.03] px-5 py-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl"
+      >
+        <div
+          class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"
+        >
+          <div class="flex items-center gap-4 xl:flex-1">
+            <h1
+              id="home-link"
+              title="Go to Overview"
+              class="cursor-pointer text-2xl font-semibold tracking-tight text-white"
+            >
+              Stellar Private Payments
+            </h1>
+          </div>
 
-                <div class="flex flex-col gap-3 md:flex-row md:items-center">
-                    <nav class="flex flex-wrap gap-2" aria-label="Primary views">
-                        <button type="button" data-view="dashboard" data-testid="nav-dashboard" data-state="active" aria-current="page" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Overview</button>
-                        <button type="button" data-view="move-funds" data-testid="nav-move-funds" data-state="inactive" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Move Funds</button>
-                        <button type="button" data-view="advanced" data-testid="nav-advanced" data-state="inactive" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Advanced</button>
-                        <button type="button" data-view="disclosure" data-testid="nav-disclosure" data-state="inactive" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Disclosure</button>
-                    </nav>
+          <div class="flex flex-col gap-3 md:flex-row md:items-center">
+            <nav class="flex flex-wrap gap-2" aria-label="Primary views">
+              <button
+                type="button"
+                data-view="dashboard"
+                data-testid="nav-dashboard"
+                data-state="active"
+                aria-current="page"
+                class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100"
+              >
+                Overview
+              </button>
+              <button
+                type="button"
+                data-view="move-funds"
+                data-testid="nav-move-funds"
+                data-state="inactive"
+                class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100"
+              >
+                Move Funds
+              </button>
+              <button
+                type="button"
+                data-view="advanced"
+                data-testid="nav-advanced"
+                data-state="inactive"
+                class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100"
+              >
+                Advanced
+              </button>
+              <button
+                type="button"
+                data-view="disclosure"
+                data-testid="nav-disclosure"
+                data-state="inactive"
+                class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100"
+              >
+                Disclosure
+              </button>
+            </nav>
 
-                    <div class="flex items-center gap-2">
-                        <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-100" title="Network & sync status">
-                            <span id="sync-dot" class="h-2 w-2 rounded-full bg-slate-500"></span>
-                            <span id="network-name">NETWORK</span>
-                            <span class="text-slate-600">·</span>
-                            <span id="sync-status" class="text-slate-400">Offline</span>
-                        </div>
-                        <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition data-[state=locked]:border-cyan-300/50 data-[state=locked]:bg-cyan-400/15 data-[state=locked]:text-cyan-100 data-[state=locked]:ring-2 data-[state=locked]:ring-cyan-300/30 data-[state=locked]:hover:bg-cyan-400/25 disabled:opacity-40">Unlock</button>
-                        <button id="wallet-btn" type="button" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">
-                            Connect Freighter
-                        </button>
-                        <button id="open-settings-btn" type="button" aria-label="Settings" title="Wallet & settings" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100">
-                            <span id="wallet-text" class="hidden font-mono text-sm text-slate-100"></span>
-                            <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                                <circle cx="12" cy="12" r="3"/>
-                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
+            <div class="flex items-center gap-2">
+              <div
+                class="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-100"
+                title="Network & sync status"
+              >
+                <span
+                  id="sync-dot"
+                  class="h-2 w-2 rounded-full bg-slate-500"
+                ></span>
+                <span id="network-name">NETWORK</span>
+                <span class="text-slate-600">·</span>
+                <span id="sync-status" class="text-slate-400">Offline</span>
+              </div>
+              <button
+                id="storage-lock-btn"
+                data-testid="storage-lock-btn"
+                type="button"
+                class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-200 transition data-[state=locked]:border-cyan-300/50 data-[state=locked]:bg-cyan-400/15 data-[state=locked]:text-cyan-100 data-[state=locked]:ring-2 data-[state=locked]:ring-cyan-300/30 data-[state=locked]:hover:bg-cyan-400/25 disabled:opacity-40"
+              >
+                Unlock
+              </button>
+              <button
+                id="wallet-btn"
+                type="button"
+                class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110"
+              >
+                Connect Varial
+              </button>
+              <button
+                id="open-settings-btn"
+                type="button"
+                aria-label="Settings"
+                title="Wallet & settings"
+                class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100"
+              >
+                <span
+                  id="wallet-text"
+                  class="hidden font-mono text-sm text-slate-100"
+                ></span>
+                <svg
+                  class="h-5 w-5 shrink-0"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  aria-hidden="true"
+                >
+                  <circle cx="12" cy="12" r="3" />
+                  <path
+                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+                  />
+                </svg>
+              </button>
             </div>
-        </header>
+          </div>
+        </div>
+      </header>
 
-        <section id="storage-locked-notice" role="status" class="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-slate-200">
-            Local data is locked. Use Unlock to view your private data and make payments. Your wallet can remain connected. Disclosure verification is available while locked.
+      <section
+        id="storage-locked-notice"
+        role="status"
+        class="rounded-[28px] border border-white/10 bg-white/[0.03] p-6 text-slate-200"
+      >
+        Local data is locked. Use Unlock to view your private data and make
+        payments. Your wallet can remain connected. Disclosure verification is
+        available while locked.
+      </section>
+
+      <main id="main-content" class="flex-1">
+        <section
+          class="view-panel"
+          data-view-panel="dashboard"
+          data-testid="view-dashboard"
+          data-state="active"
+          aria-hidden="false"
+        >
+          <div class="space-y-6">
+            <section
+              class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl"
+            >
+              <p
+                class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+              >
+                Portfolio
+              </p>
+              <div
+                id="dashboard-balance-grid"
+                class="mt-6 grid gap-4 md:grid-cols-2 2xl:grid-cols-3"
+              ></div>
+            </section>
+
+            <section
+              class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl"
+            >
+              <p
+                class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+              >
+                Feed
+              </p>
+              <div id="dashboard-feed" class="mt-6 grid gap-4"></div>
+            </section>
+          </div>
         </section>
 
-        <main id="main-content" class="flex-1">
-            <section class="view-panel" data-view-panel="dashboard" data-testid="view-dashboard" data-state="active" aria-hidden="false">
-                <div class="space-y-6">
-                    <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Portfolio</p>
-                        <div id="dashboard-balance-grid" class="mt-6 grid gap-4 md:grid-cols-2 2xl:grid-cols-3"></div>
-                    </section>
-
-                    <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Feed</p>
-                        <div id="dashboard-feed" class="mt-6 grid gap-4"></div>
-                    </section>
+        <section
+          class="view-panel hidden"
+          data-view-panel="move-funds"
+          data-testid="view-move-funds"
+          data-state="inactive"
+          aria-hidden="true"
+        >
+          <div class="grid gap-6">
+            <section
+              class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl"
+            >
+              <div
+                class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between"
+              >
+                <div>
+                  <p
+                    class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+                  >
+                    Primary Operations
+                  </p>
+                  <h2
+                    class="mt-2 text-2xl font-semibold tracking-tight text-white"
+                  >
+                    Move funds
+                  </h2>
+                  <p class="mt-2 max-w-2xl text-sm text-slate-400">
+                    Choose the target pool once, then move through the standard
+                    treasury motions with minimal branching.
+                  </p>
                 </div>
-            </section>
-
-            <section class="view-panel hidden" data-view-panel="move-funds" data-testid="view-move-funds" data-state="inactive" aria-hidden="true">
-                <div class="grid gap-6">
-                    <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                        <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-                            <div>
-                                <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Primary Operations</p>
-                                <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Move funds</h2>
-                                <p class="mt-2 max-w-2xl text-sm text-slate-400">Choose the target pool once, then move through the standard treasury motions with minimal branching.</p>
-                            </div>
-                            <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4 lg:min-w-[300px]">
-                                <label for="primary-pool-select" class="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Available Token</label>
-                                <select id="primary-pool-select" data-pool-select class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
-                                </select>
-                                <p class="mt-3 flex items-baseline justify-between gap-2 text-sm">
-                                    <span class="text-slate-500">Balance</span>
-                                    <span id="move-funds-balance" class="font-mono font-medium text-white">—</span>
-                                </p>
-                                <p data-max-spend class="mt-2 hidden flex items-baseline justify-between gap-2 text-sm">
-                                    <span class="text-slate-500">Max to send after pool fees</span>
-                                    <span id="move-funds-max-spend" class="font-mono font-medium text-white">—</span>
-                                </p>
-                                <!-- Rendered by pool-controls.js. w-0 min-w-full: fill the card without widening it to fit an explanation. -->
-                                <section data-pool-controls="move" aria-labelledby="move-pool-controls-heading" class="mt-4 w-0 min-w-full border-t border-white/8 pt-4" hidden>
-                                    <div class="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
-                                        <h3 id="move-pool-controls-heading" class="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Pool controls</h3>
-                                        <span class="whitespace-nowrap text-xs text-slate-500">Select a tag for details</span>
-                                    </div>
-                                    <div data-pool-controls-tags class="mt-3 flex flex-wrap gap-2"></div>
-                                    <div data-pool-controls-panels class="mt-3"></div>
-                                </section>
-                                <div data-signing-account="move" class="mt-5 hidden">
-                                    <label for="signing-account-select" class="block text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Sign and pay with</label>
-                                    <select id="signing-account-select" data-signing-select data-testid="signing-account-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
-                                    </select>
-                                    <p data-signing-warning data-testid="signing-account-warning" role="status" class="hidden mt-3 text-xs text-amber-200"></p>
-                                    <div data-signing-other class="mt-3 hidden">
-                                        <div class="flex gap-2">
-                                            <input id="signing-account-input" data-signing-input data-testid="signing-account-input" type="text" placeholder="G..." aria-label="Account to sign and pay with" class="min-w-0 flex-1 rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                            <button data-signing-use data-testid="signing-account-use" type="button" class="rounded-2xl border border-white/10 px-4 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
-                                        </div>
-                                        <p data-signing-error data-testid="signing-account-error" class="mt-2 text-xs text-amber-200"></p>
-                                    </div>
-                                    <p class="mt-3 text-xs text-slate-500">Notes stay with the connected wallet. The chosen account must be in Freighter, or signing fails.</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="mt-8 flex flex-wrap gap-2">
-                            <button type="button" data-move-flow="deposit" data-testid="move-flow-deposit" data-state="active" aria-pressed="true" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Deposit</button>
-                            <button type="button" data-move-flow="transfer" data-testid="move-flow-transfer" data-state="inactive" aria-pressed="false" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Transfer</button>
-                            <button type="button" data-move-flow="withdraw" data-testid="move-flow-withdraw" data-state="inactive" aria-pressed="false" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Withdraw</button>
-                            <button type="button" id="move-funds-history" aria-label="History of operations" title="History of operations" class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
-                                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                                    <circle cx="12" cy="12" r="9"/>
-                                    <path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
-                            </button>
-                        </div>
-
-                        <div class="mt-8 space-y-6">
-                            <section class="move-flow-panel" data-move-panel="deposit" data-testid="move-panel-deposit" data-state="active" aria-hidden="false">
-                                <div class="rounded-[24px] border border-white/8 bg-ink-900/70 p-6">
-                                    <div class="flex items-start justify-between gap-4">
-                                        <div>
-                                            <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Deposit</p>
-                                            <h3 class="mt-2 text-xl font-semibold text-white">Shield treasury funds into <span data-current-token>selected pool</span></h3>
-                                        </div>
-                                    </div>
-                                    <label for="deposit-amount" class="mt-6 block text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Amount</label>
-                                    <input id="deposit-amount" type="text" inputmode="decimal" placeholder="0.0" aria-describedby="deposit-limits" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                    <p id="deposit-limits" class="mt-2 text-xs text-slate-400"></p>
-                                    <button id="btn-deposit" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
-                                        <span class="btn-text">Deposit</span>
-                                        <span class="btn-loading hidden"></span>
-                                    </button>
-                                </div>
-                            </section>
-
-                            <section class="move-flow-panel hidden" data-move-panel="transfer" data-testid="move-panel-transfer" data-state="inactive" aria-hidden="true">
-                                <div class="rounded-[24px] border border-white/8 bg-ink-900/70 p-6">
-                                    <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Transfer</p>
-                                    <h3 class="mt-2 text-xl font-semibold text-white">Send private funds by Stellar address</h3>
-                                    <p class="mt-2 text-sm text-slate-400">We first search the local registry. If the address is not available locally, the manual note and encryption keys open below.</p>
-
-                                    <div class="mt-6">
-                                        <label for="transfer-address" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Recipient Stellar Address</label>
-                                        <input id="transfer-address" type="text" placeholder="G..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                    </div>
-
-                                    <p id="transfer-lookup-status" class="mt-3 text-sm text-cyan-100"></p>
-                                    <p id="transfer-lookup-warning" class="mt-2 text-sm text-amber-200"></p>
-
-                                    <div id="transfer-manual-fields" class="mt-6 hidden space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4">
-                                        <div>
-                                            <label for="transfer-note-key" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Recipient Note Public Key</label>
-                                            <input id="transfer-note-key" type="text" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                        </div>
-                                        <div>
-                                            <label for="transfer-enc-key" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Recipient Encryption Public Key</label>
-                                            <input id="transfer-enc-key" type="text" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                        </div>
-                                    </div>
-
-                                    <div class="mt-6">
-                                        <label for="transfer-amount" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Amount</label>
-                                        <input id="transfer-amount" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                    </div>
-
-                                    <button id="btn-transfer" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
-                                        <span class="btn-text">Transfer</span>
-                                        <span class="btn-loading hidden"></span>
-                                    </button>
-                                </div>
-                            </section>
-
-                            <section class="move-flow-panel hidden" data-move-panel="withdraw" data-testid="move-panel-withdraw" data-state="inactive" aria-hidden="true">
-                                <div class="rounded-[24px] border border-white/8 bg-ink-900/70 p-6">
-                                    <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Withdraw</p>
-                                    <h3 class="mt-2 text-xl font-semibold text-white">Release funds back to a public Stellar address</h3>
-                                    <div class="mt-6 space-y-4">
-                                        <div data-recipient-account="withdraw">
-                                            <label for="withdraw-recipient-select" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Recipient Address</label>
-                                            <select id="withdraw-recipient-select" data-recipient-select data-testid="withdraw-recipient-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"><option value="">Choose a recipient…</option></select>
-                                            <input id="withdraw-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Enter recipient address (G…)" class="hidden mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                        </div>
-                                        <div>
-                                            <label for="withdraw-amount" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Amount</label>
-                                            <input id="withdraw-amount" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                        </div>
-                                    </div>
-                                    <button id="btn-withdraw" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
-                                        <span class="btn-text">Withdraw</span>
-                                        <span class="btn-loading hidden"></span>
-                                    </button>
-                                </div>
-                            </section>
-                        </div>
-                    </section>
-                </div>
-            </section>
-
-            <section class="view-panel hidden" data-view-panel="advanced" data-testid="view-advanced" data-state="inactive" aria-hidden="true">
-                <div class="grid gap-6 xl:grid-cols-[minmax(380px,0.92fr)_minmax(0,1.08fr)]">
-                    <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                        <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                            <div>
-                                <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Advanced Workspace</p>
-                                <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Notes inventory</h2>
-                                <p class="mt-2 max-w-xl text-sm text-slate-400">Selective disclosure lives on each note row, and picked notes flow directly into transact inputs on the right.</p>
-                            </div>
-                            <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4 md:min-w-[280px]">
-                                <label for="advanced-pool-select" class="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Available Token</label>
-                                <select id="advanced-pool-select" data-pool-select class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"></select>
-                                <section data-pool-controls="advanced" aria-labelledby="advanced-pool-controls-heading" class="mt-4 w-0 min-w-full border-t border-white/8 pt-4" hidden>
-                                    <div class="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
-                                        <h3 id="advanced-pool-controls-heading" class="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Pool controls</h3>
-                                        <span class="whitespace-nowrap text-xs text-slate-500">Select a tag for details</span>
-                                    </div>
-                                    <div data-pool-controls-tags class="mt-3 flex flex-wrap gap-2"></div>
-                                    <div data-pool-controls-panels class="mt-3"></div>
-                                </section>
-                            </div>
-                        </div>
-
-                        <div class="mt-6 flex flex-wrap gap-2">
-                            <button type="button" data-note-filter="all" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">All Notes</button>
-                            <button type="button" data-note-filter="unspent" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Available</button>
-                            <button type="button" data-note-filter="spent" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Spent</button>
-                        </div>
-
-                        <div class="mt-6 overflow-hidden rounded-[24px] border border-white/8 bg-ink-950/80">
-                            <div class="overflow-x-auto">
-                                <table class="min-w-full text-left text-sm">
-                                    <thead class="border-b border-white/8 bg-white/[0.03] text-[11px] uppercase tracking-[0.22em] text-slate-500">
-                                        <tr>
-                                            <th class="px-3 py-3 font-medium">Token</th>
-                                            <th class="px-3 py-3 font-medium">Note</th>
-                                            <th class="px-3 py-3 font-medium">Amount</th>
-                                            <th class="px-3 py-3 font-medium">Status</th>
-                                            <th class="px-3 py-3 font-medium text-right">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="advanced-notes-tbody" data-testid="advanced-notes-table" data-state="idle" data-refresh-sequence="0" data-note-count="0"></tbody>
-                                </table>
-                            </div>
-                            <div id="advanced-notes-empty" class="hidden border-t border-white/8 px-4 py-12 text-center text-sm text-slate-500">No notes available for the current filter.</div>
-                        </div>
-                    </section>
-
-                    <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Advanced Transact</p>
-                        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Compose explicit inputs and outputs</h2>
-                        <p class="mt-2 max-w-2xl text-sm text-slate-400">Use selected notes as inputs, assign private outputs, and optionally enter a public deposit or public withdraw amount. <span id="advanced-pool-fee"></span></p>
-
-                        <div class="mt-8 grid gap-6 xl:grid-cols-2">
-                            <div class="rounded-[24px] border border-white/8 bg-ink-900/70 p-5">
-                                <div>
-                                    <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Inputs</p>
-                                    <h3 class="mt-2 text-lg font-semibold text-white">Selected notes</h3>
-                                </div>
-                                <div id="advanced-inputs" class="mt-5 space-y-4"></div>
-                                <div class="mt-5 border-t border-white/8 pt-5">
-                                    <label for="advanced-public-deposit" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Public deposit</label>
-                                    <input id="advanced-public-deposit" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                    <p class="mt-2 text-[11px] text-slate-500">Public funds added into the transaction.</p>
-                                </div>
-                            </div>
-
-                            <div class="rounded-[24px] border border-white/8 bg-ink-900/70 p-5">
-                                <div>
-                                    <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Outputs</p>
-                                    <h3 class="mt-2 text-lg font-semibold text-white">Private outputs</h3>
-                                </div>
-                                <div id="advanced-outputs" class="mt-5 space-y-4"></div>
-                                <div class="mt-5 space-y-4 border-t border-white/8 pt-5">
-                                    <div>
-                                        <label for="advanced-public-withdraw" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Public withdraw</label>
-                                        <input id="advanced-public-withdraw" type="text" inputmode="decimal" placeholder="0.0" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                    </div>
-                                    <div data-recipient-account="advanced">
-                                        <label for="advanced-public-recipient-select" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Public recipient</label>
-                                        <select id="advanced-public-recipient-select" data-recipient-select data-testid="advanced-public-recipient-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"><option value="">Choose a recipient…</option></select>
-                                        <input id="advanced-public-recipient" data-recipient-input type="text" aria-label="Another recipient address" disabled placeholder="Required for public withdrawals (G…)" class="hidden mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                    </div>
-                                    <p class="text-[11px] text-slate-500">Public funds withdrawn to the recipient.</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div data-signing-account="advanced" class="mt-6 rounded-[24px] border border-white/8 bg-ink-900/70 p-5">
-                            <div>
-                                <label for="advanced-signing-account-select" class="block text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Sign and pay with</label>
-                                <select id="advanced-signing-account-select" data-signing-select data-testid="advanced-signing-account-select" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
-                                </select>
-                                    <p data-signing-warning data-testid="advanced-signing-account-warning" role="status" class="hidden mt-3 text-xs text-amber-200"></p>
-                                <div data-signing-other class="mt-3 hidden">
-                                    <div class="flex gap-2">
-                                        <input id="advanced-signing-account-input" data-signing-input data-testid="advanced-signing-account-input" type="text" placeholder="G..." aria-label="Account to sign and pay with" class="min-w-0 flex-1 rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                                        <button data-signing-use data-testid="advanced-signing-account-use" type="button" class="rounded-2xl border border-white/10 px-4 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
-                                    </div>
-                                    <p data-signing-error data-testid="advanced-signing-account-error" class="mt-2 text-xs text-amber-200"></p>
-                                </div>
-                                <p class="mt-3 text-xs text-slate-500">Notes stay with the connected wallet. The chosen account must be in Freighter, or signing fails.</p>
-                            </div>
-                        </div>
-
-                        <button id="btn-advanced-transact" data-testid="advanced-transact-submit" type="button" class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60">
-                            <span class="btn-text">Execute Advanced Transaction</span>
-                            <span class="btn-loading hidden"></span>
+                <div
+                  class="rounded-2xl border border-white/8 bg-ink-900/70 p-4 lg:min-w-[300px]"
+                >
+                  <label
+                    for="primary-pool-select"
+                    class="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500"
+                    >Available Token</label
+                  >
+                  <select
+                    id="primary-pool-select"
+                    data-pool-select
+                    class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                  ></select>
+                  <p
+                    class="mt-3 flex items-baseline justify-between gap-2 text-sm"
+                  >
+                    <span class="text-slate-500">Balance</span>
+                    <span
+                      id="move-funds-balance"
+                      class="font-mono font-medium text-white"
+                      >—</span
+                    >
+                  </p>
+                  <p
+                    data-max-spend
+                    class="mt-2 hidden flex items-baseline justify-between gap-2 text-sm"
+                  >
+                    <span class="text-slate-500"
+                      >Max to send after pool fees</span
+                    >
+                    <span
+                      id="move-funds-max-spend"
+                      class="font-mono font-medium text-white"
+                      >—</span
+                    >
+                  </p>
+                  <!-- Rendered by pool-controls.js. w-0 min-w-full: fill the card without widening it to fit an explanation. -->
+                  <section
+                    data-pool-controls="move"
+                    aria-labelledby="move-pool-controls-heading"
+                    class="mt-4 w-0 min-w-full border-t border-white/8 pt-4"
+                    hidden
+                  >
+                    <div
+                      class="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1"
+                    >
+                      <h3
+                        id="move-pool-controls-heading"
+                        class="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500"
+                      >
+                        Pool controls
+                      </h3>
+                      <span class="whitespace-nowrap text-xs text-slate-500"
+                        >Select a tag for details</span
+                      >
+                    </div>
+                    <div
+                      data-pool-controls-tags
+                      class="mt-3 flex flex-wrap gap-2"
+                    ></div>
+                    <div data-pool-controls-panels class="mt-3"></div>
+                  </section>
+                  <div data-signing-account="move" class="mt-5 hidden">
+                    <label
+                      for="signing-account-select"
+                      class="block text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500"
+                      >Sign and pay with</label
+                    >
+                    <select
+                      id="signing-account-select"
+                      data-signing-select
+                      data-testid="signing-account-select"
+                      class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                    ></select>
+                    <p
+                      data-signing-warning
+                      data-testid="signing-account-warning"
+                      role="status"
+                      class="hidden mt-3 text-xs text-amber-200"
+                    ></p>
+                    <div data-signing-other class="mt-3 hidden">
+                      <div class="flex gap-2">
+                        <input
+                          id="signing-account-input"
+                          data-signing-input
+                          data-testid="signing-account-input"
+                          type="text"
+                          placeholder="G..."
+                          aria-label="Account to sign and pay with"
+                          class="min-w-0 flex-1 rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                        <button
+                          data-signing-use
+                          data-testid="signing-account-use"
+                          type="button"
+                          class="rounded-2xl border border-white/10 px-4 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                        >
+                          Use
                         </button>
-                    </section>
+                      </div>
+                      <p
+                        data-signing-error
+                        data-testid="signing-account-error"
+                        class="mt-2 text-xs text-amber-200"
+                      ></p>
+                    </div>
+                    <p class="mt-3 text-xs text-slate-500">
+                      Notes stay with the connected wallet. The chosen account
+                      must be in Varial, or signing fails.
+                    </p>
+                  </div>
                 </div>
+              </div>
+
+              <div class="mt-8 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  data-move-flow="deposit"
+                  data-testid="move-flow-deposit"
+                  data-state="active"
+                  aria-pressed="true"
+                  class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                >
+                  Deposit
+                </button>
+                <button
+                  type="button"
+                  data-move-flow="transfer"
+                  data-testid="move-flow-transfer"
+                  data-state="inactive"
+                  aria-pressed="false"
+                  class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                >
+                  Transfer
+                </button>
+                <button
+                  type="button"
+                  data-move-flow="withdraw"
+                  data-testid="move-flow-withdraw"
+                  data-state="inactive"
+                  aria-pressed="false"
+                  class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                >
+                  Withdraw
+                </button>
+                <button
+                  type="button"
+                  id="move-funds-history"
+                  aria-label="History of operations"
+                  title="History of operations"
+                  class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                >
+                  <svg
+                    class="h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="9" />
+                    <path
+                      d="M12 7v5l3 2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+
+              <div class="mt-8 space-y-6">
+                <section
+                  class="move-flow-panel"
+                  data-move-panel="deposit"
+                  data-testid="move-panel-deposit"
+                  data-state="active"
+                  aria-hidden="false"
+                >
+                  <div
+                    class="rounded-[24px] border border-white/8 bg-ink-900/70 p-6"
+                  >
+                    <div class="flex items-start justify-between gap-4">
+                      <div>
+                        <p
+                          class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+                        >
+                          Deposit
+                        </p>
+                        <h3 class="mt-2 text-xl font-semibold text-white">
+                          Shield treasury funds into
+                          <span data-current-token>selected pool</span>
+                        </h3>
+                      </div>
+                    </div>
+                    <label
+                      for="deposit-amount"
+                      class="mt-6 block text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                      >Amount</label
+                    >
+                    <input
+                      id="deposit-amount"
+                      type="text"
+                      inputmode="decimal"
+                      placeholder="0.0"
+                      aria-describedby="deposit-limits"
+                      class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 outline-none transition focus:border-cyan-300/40"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <p
+                      id="deposit-limits"
+                      class="mt-2 text-xs text-slate-400"
+                    ></p>
+                    <button
+                      id="btn-deposit"
+                      type="button"
+                      class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60"
+                    >
+                      <span class="btn-text">Deposit</span>
+                      <span class="btn-loading hidden"></span>
+                    </button>
+                  </div>
+                </section>
+
+                <section
+                  class="move-flow-panel hidden"
+                  data-move-panel="transfer"
+                  data-testid="move-panel-transfer"
+                  data-state="inactive"
+                  aria-hidden="true"
+                >
+                  <div
+                    class="rounded-[24px] border border-white/8 bg-ink-900/70 p-6"
+                  >
+                    <p
+                      class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+                    >
+                      Transfer
+                    </p>
+                    <h3 class="mt-2 text-xl font-semibold text-white">
+                      Send private funds by Stellar address
+                    </h3>
+                    <p class="mt-2 text-sm text-slate-400">
+                      We first search the local registry. If the address is not
+                      available locally, the manual note and encryption keys
+                      open below.
+                    </p>
+
+                    <div class="mt-6">
+                      <label
+                        for="transfer-address"
+                        class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                        >Recipient Stellar Address</label
+                      >
+                      <input
+                        id="transfer-address"
+                        type="text"
+                        placeholder="G..."
+                        class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </div>
+
+                    <p
+                      id="transfer-lookup-status"
+                      class="mt-3 text-sm text-cyan-100"
+                    ></p>
+                    <p
+                      id="transfer-lookup-warning"
+                      class="mt-2 text-sm text-amber-200"
+                    ></p>
+
+                    <div
+                      id="transfer-manual-fields"
+                      class="mt-6 hidden space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4"
+                    >
+                      <div>
+                        <label
+                          for="transfer-note-key"
+                          class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                          >Recipient Note Public Key</label
+                        >
+                        <input
+                          id="transfer-note-key"
+                          type="text"
+                          class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          for="transfer-enc-key"
+                          class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                          >Recipient Encryption Public Key</label
+                        >
+                        <input
+                          id="transfer-enc-key"
+                          type="text"
+                          class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </div>
+                    </div>
+
+                    <div class="mt-6">
+                      <label
+                        for="transfer-amount"
+                        class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                        >Amount</label
+                      >
+                      <input
+                        id="transfer-amount"
+                        type="text"
+                        inputmode="decimal"
+                        placeholder="0.0"
+                        class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 outline-none transition focus:border-cyan-300/40"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </div>
+
+                    <button
+                      id="btn-transfer"
+                      type="button"
+                      class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60"
+                    >
+                      <span class="btn-text">Transfer</span>
+                      <span class="btn-loading hidden"></span>
+                    </button>
+                  </div>
+                </section>
+
+                <section
+                  class="move-flow-panel hidden"
+                  data-move-panel="withdraw"
+                  data-testid="move-panel-withdraw"
+                  data-state="inactive"
+                  aria-hidden="true"
+                >
+                  <div
+                    class="rounded-[24px] border border-white/8 bg-ink-900/70 p-6"
+                  >
+                    <p
+                      class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+                    >
+                      Withdraw
+                    </p>
+                    <h3 class="mt-2 text-xl font-semibold text-white">
+                      Release funds back to a public Stellar address
+                    </h3>
+                    <div class="mt-6 space-y-4">
+                      <div data-recipient-account="withdraw">
+                        <label
+                          for="withdraw-recipient-select"
+                          class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                          >Recipient Address</label
+                        >
+                        <select
+                          id="withdraw-recipient-select"
+                          data-recipient-select
+                          data-testid="withdraw-recipient-select"
+                          class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                        >
+                          <option value="">Choose a recipient…</option>
+                        </select>
+                        <input
+                          id="withdraw-recipient"
+                          data-recipient-input
+                          type="text"
+                          aria-label="Another recipient address"
+                          disabled
+                          placeholder="Enter recipient address (G…)"
+                          class="hidden mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </div>
+                      <div>
+                        <label
+                          for="withdraw-amount"
+                          class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                          >Amount</label
+                        >
+                        <input
+                          id="withdraw-amount"
+                          type="text"
+                          inputmode="decimal"
+                          placeholder="0.0"
+                          class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-4 font-mono text-base text-slate-100 outline-none transition focus:border-cyan-300/40"
+                          autocomplete="off"
+                          spellcheck="false"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      id="btn-withdraw"
+                      type="button"
+                      class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60"
+                    >
+                      <span class="btn-text">Withdraw</span>
+                      <span class="btn-loading hidden"></span>
+                    </button>
+                  </div>
+                </section>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section
+          class="view-panel hidden"
+          data-view-panel="advanced"
+          data-testid="view-advanced"
+          data-state="inactive"
+          aria-hidden="true"
+        >
+          <div
+            class="grid gap-6 xl:grid-cols-[minmax(380px,0.92fr)_minmax(0,1.08fr)]"
+          >
+            <section
+              class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl"
+            >
+              <div
+                class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between"
+              >
+                <div>
+                  <p
+                    class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+                  >
+                    Advanced Workspace
+                  </p>
+                  <h2
+                    class="mt-2 text-2xl font-semibold tracking-tight text-white"
+                  >
+                    Notes inventory
+                  </h2>
+                  <p class="mt-2 max-w-xl text-sm text-slate-400">
+                    Selective disclosure lives on each note row, and picked
+                    notes flow directly into transact inputs on the right.
+                  </p>
+                </div>
+                <div
+                  class="rounded-2xl border border-white/8 bg-ink-900/70 p-4 md:min-w-[280px]"
+                >
+                  <label
+                    for="advanced-pool-select"
+                    class="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500"
+                    >Available Token</label
+                  >
+                  <select
+                    id="advanced-pool-select"
+                    data-pool-select
+                    class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                  ></select>
+                  <section
+                    data-pool-controls="advanced"
+                    aria-labelledby="advanced-pool-controls-heading"
+                    class="mt-4 w-0 min-w-full border-t border-white/8 pt-4"
+                    hidden
+                  >
+                    <div
+                      class="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1"
+                    >
+                      <h3
+                        id="advanced-pool-controls-heading"
+                        class="whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500"
+                      >
+                        Pool controls
+                      </h3>
+                      <span class="whitespace-nowrap text-xs text-slate-500"
+                        >Select a tag for details</span
+                      >
+                    </div>
+                    <div
+                      data-pool-controls-tags
+                      class="mt-3 flex flex-wrap gap-2"
+                    ></div>
+                    <div data-pool-controls-panels class="mt-3"></div>
+                  </section>
+                </div>
+              </div>
+
+              <div class="mt-6 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  data-note-filter="all"
+                  class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                >
+                  All Notes
+                </button>
+                <button
+                  type="button"
+                  data-note-filter="unspent"
+                  class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                >
+                  Available
+                </button>
+                <button
+                  type="button"
+                  data-note-filter="spent"
+                  class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                >
+                  Spent
+                </button>
+              </div>
+
+              <div
+                class="mt-6 overflow-hidden rounded-[24px] border border-white/8 bg-ink-950/80"
+              >
+                <div class="overflow-x-auto">
+                  <table class="min-w-full text-left text-sm">
+                    <thead
+                      class="border-b border-white/8 bg-white/[0.03] text-[11px] uppercase tracking-[0.22em] text-slate-500"
+                    >
+                      <tr>
+                        <th class="px-3 py-3 font-medium">Token</th>
+                        <th class="px-3 py-3 font-medium">Note</th>
+                        <th class="px-3 py-3 font-medium">Amount</th>
+                        <th class="px-3 py-3 font-medium">Status</th>
+                        <th class="px-3 py-3 font-medium text-right">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody
+                      id="advanced-notes-tbody"
+                      data-testid="advanced-notes-table"
+                      data-state="idle"
+                      data-refresh-sequence="0"
+                      data-note-count="0"
+                    ></tbody>
+                  </table>
+                </div>
+                <div
+                  id="advanced-notes-empty"
+                  class="hidden border-t border-white/8 px-4 py-12 text-center text-sm text-slate-500"
+                >
+                  No notes available for the current filter.
+                </div>
+              </div>
             </section>
 
-            <section class="view-panel hidden" data-view-panel="disclosure" data-testid="view-disclosure" data-state="inactive" aria-hidden="true">
-                <div class="space-y-6">
-                    <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                        <div class="flex flex-col gap-4">
-                            <div>
-                                <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Disclosure Workspace</p>
-                                <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Selective Disclosure</h2>
-                                <p class="mt-2 max-w-xl text-sm text-slate-400">Generate and verify selective disclosure receipts.</p>
-                            </div>
-                        </div>
-                        <div class="mt-8 space-y-6">
-                            <!-- Generate Section -->
-                            <section id="disclosure-generate" data-testid="disclosure-generate" class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="generate-heading">
-                                <h2 id="generate-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400 mb-4">Generate Disclosure Receipt</h2>
-                                <!-- Rendered by disclosure.js -->
-                            </section>
+            <section
+              class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl"
+            >
+              <p
+                class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+              >
+                Advanced Transact
+              </p>
+              <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">
+                Compose explicit inputs and outputs
+              </h2>
+              <p class="mt-2 max-w-2xl text-sm text-slate-400">
+                Use selected notes as inputs, assign private outputs, and
+                optionally enter a public deposit or public withdraw amount.
+                <span id="advanced-pool-fee"></span>
+              </p>
 
-                            <!-- Verify Section -->
-                            <section id="disclosure-verify" data-testid="disclosure-verify" class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="verify-heading">
-                                <h2 id="verify-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400 mb-4">Verify Disclosure Receipt</h2>
-                                <!-- Rendered by disclosure.js -->
-                            </section>
-                        </div>
-                    </section>
+              <div class="mt-8 grid gap-6 xl:grid-cols-2">
+                <div
+                  class="rounded-[24px] border border-white/8 bg-ink-900/70 p-5"
+                >
+                  <div>
+                    <p
+                      class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+                    >
+                      Inputs
+                    </p>
+                    <h3 class="mt-2 text-lg font-semibold text-white">
+                      Selected notes
+                    </h3>
+                  </div>
+                  <div id="advanced-inputs" class="mt-5 space-y-4"></div>
+                  <div class="mt-5 border-t border-white/8 pt-5">
+                    <label
+                      for="advanced-public-deposit"
+                      class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                      >Public deposit</label
+                    >
+                    <input
+                      id="advanced-public-deposit"
+                      type="text"
+                      inputmode="decimal"
+                      placeholder="0.0"
+                      class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <p class="mt-2 text-[11px] text-slate-500">
+                      Public funds added into the transaction.
+                    </p>
+                  </div>
                 </div>
-            </section>
-        </main>
 
-        <footer class="mt-8 border-t border-dark-800/80">
-            <div class="py-6 text-xs text-dark-400 space-y-2">
-                <p class="leading-relaxed">
-                    Terms &amp; Conditions:
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="DISCLAIMER.txt" target="_blank" rel="noreferrer noopener">Read the full disclaimer</a>.
-                </p>
-                <p class="leading-relaxed">
-                    Distribution notice:
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="NOTICE.txt" target="_blank" rel="noreferrer noopener">NOTICE</a> &middot;
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="circuits/NOTICE.txt" target="_blank" rel="noreferrer noopener">Circuits NOTICE</a> &middot;
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="licenses/LGPL-3.0.txt" target="_blank" rel="noreferrer noopener">LGPL-3.0</a> &middot;
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="licenses/GPL-3.0.txt" target="_blank" rel="noreferrer noopener">GPL-3.0</a> &middot;
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="LICENSE.txt" target="_blank" rel="noreferrer noopener">Apache-2.0</a> &middot;
-                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="circuits/source-bundle.tar.gz" download="circuits-source-bundle.tar.gz">Circuits source bundle</a>
-                </p>
-            </div>
-        </footer>
+                <div
+                  class="rounded-[24px] border border-white/8 bg-ink-900/70 p-5"
+                >
+                  <div>
+                    <p
+                      class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+                    >
+                      Outputs
+                    </p>
+                    <h3 class="mt-2 text-lg font-semibold text-white">
+                      Private outputs
+                    </h3>
+                  </div>
+                  <div id="advanced-outputs" class="mt-5 space-y-4"></div>
+                  <div class="mt-5 space-y-4 border-t border-white/8 pt-5">
+                    <div>
+                      <label
+                        for="advanced-public-withdraw"
+                        class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                        >Public withdraw</label
+                      >
+                      <input
+                        id="advanced-public-withdraw"
+                        type="text"
+                        inputmode="decimal"
+                        placeholder="0.0"
+                        class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </div>
+                    <div data-recipient-account="advanced">
+                      <label
+                        for="advanced-public-recipient-select"
+                        class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                        >Public recipient</label
+                      >
+                      <select
+                        id="advanced-public-recipient-select"
+                        data-recipient-select
+                        data-testid="advanced-public-recipient-select"
+                        class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                      >
+                        <option value="">Choose a recipient…</option>
+                      </select>
+                      <input
+                        id="advanced-public-recipient"
+                        data-recipient-input
+                        type="text"
+                        aria-label="Another recipient address"
+                        disabled
+                        placeholder="Required for public withdrawals (G…)"
+                        class="hidden mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                    </div>
+                    <p class="text-[11px] text-slate-500">
+                      Public funds withdrawn to the recipient.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                data-signing-account="advanced"
+                class="mt-6 rounded-[24px] border border-white/8 bg-ink-900/70 p-5"
+              >
+                <div>
+                  <label
+                    for="advanced-signing-account-select"
+                    class="block text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500"
+                    >Sign and pay with</label
+                  >
+                  <select
+                    id="advanced-signing-account-select"
+                    data-signing-select
+                    data-testid="advanced-signing-account-select"
+                    class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 pl-4 pr-10 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                  ></select>
+                  <p
+                    data-signing-warning
+                    data-testid="advanced-signing-account-warning"
+                    role="status"
+                    class="hidden mt-3 text-xs text-amber-200"
+                  ></p>
+                  <div data-signing-other class="mt-3 hidden">
+                    <div class="flex gap-2">
+                      <input
+                        id="advanced-signing-account-input"
+                        data-signing-input
+                        data-testid="advanced-signing-account-input"
+                        type="text"
+                        placeholder="G..."
+                        aria-label="Account to sign and pay with"
+                        class="min-w-0 flex-1 rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40"
+                        autocomplete="off"
+                        spellcheck="false"
+                      />
+                      <button
+                        data-signing-use
+                        data-testid="advanced-signing-account-use"
+                        type="button"
+                        class="rounded-2xl border border-white/10 px-4 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                      >
+                        Use
+                      </button>
+                    </div>
+                    <p
+                      data-signing-error
+                      data-testid="advanced-signing-account-error"
+                      class="mt-2 text-xs text-amber-200"
+                    ></p>
+                  </div>
+                  <p class="mt-3 text-xs text-slate-500">
+                    Notes stay with the connected wallet. The chosen account
+                    must be in Varial, or signing fails.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                id="btn-advanced-transact"
+                data-testid="advanced-transact-submit"
+                type="button"
+                class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60"
+              >
+                <span class="btn-text">Execute Advanced Transaction</span>
+                <span class="btn-loading hidden"></span>
+              </button>
+            </section>
+          </div>
+        </section>
+
+        <section
+          class="view-panel hidden"
+          data-view-panel="disclosure"
+          data-testid="view-disclosure"
+          data-state="inactive"
+          aria-hidden="true"
+        >
+          <div class="space-y-6">
+            <section
+              class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl"
+            >
+              <div class="flex flex-col gap-4">
+                <div>
+                  <p
+                    class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+                  >
+                    Disclosure Workspace
+                  </p>
+                  <h2
+                    class="mt-2 text-2xl font-semibold tracking-tight text-white"
+                  >
+                    Selective Disclosure
+                  </h2>
+                  <p class="mt-2 max-w-xl text-sm text-slate-400">
+                    Generate and verify selective disclosure receipts.
+                  </p>
+                </div>
+              </div>
+              <div class="mt-8 space-y-6">
+                <!-- Generate Section -->
+                <section
+                  id="disclosure-generate"
+                  data-testid="disclosure-generate"
+                  class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6"
+                  aria-labelledby="generate-heading"
+                >
+                  <h2
+                    id="generate-heading"
+                    class="text-sm uppercase tracking-[0.25em] text-brand-400 mb-4"
+                  >
+                    Generate Disclosure Receipt
+                  </h2>
+                  <!-- Rendered by disclosure.js -->
+                </section>
+
+                <!-- Verify Section -->
+                <section
+                  id="disclosure-verify"
+                  data-testid="disclosure-verify"
+                  class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6"
+                  aria-labelledby="verify-heading"
+                >
+                  <h2
+                    id="verify-heading"
+                    class="text-sm uppercase tracking-[0.25em] text-brand-400 mb-4"
+                  >
+                    Verify Disclosure Receipt
+                  </h2>
+                  <!-- Rendered by disclosure.js -->
+                </section>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <footer class="mt-8 border-t border-dark-800/80">
+        <div class="py-6 text-xs text-dark-400 space-y-2">
+          <p class="leading-relaxed">
+            Terms &amp; Conditions:
+            <a
+              class="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+              href="DISCLAIMER.txt"
+              target="_blank"
+              rel="noreferrer noopener"
+              >Read the full disclaimer</a
+            >.
+          </p>
+          <p class="leading-relaxed">
+            Distribution notice:
+            <a
+              class="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+              href="NOTICE.txt"
+              target="_blank"
+              rel="noreferrer noopener"
+              >NOTICE</a
+            >
+            &middot;
+            <a
+              class="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+              href="circuits/NOTICE.txt"
+              target="_blank"
+              rel="noreferrer noopener"
+              >Circuits NOTICE</a
+            >
+            &middot;
+            <a
+              class="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+              href="licenses/LGPL-3.0.txt"
+              target="_blank"
+              rel="noreferrer noopener"
+              >LGPL-3.0</a
+            >
+            &middot;
+            <a
+              class="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+              href="licenses/GPL-3.0.txt"
+              target="_blank"
+              rel="noreferrer noopener"
+              >GPL-3.0</a
+            >
+            &middot;
+            <a
+              class="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+              href="LICENSE.txt"
+              target="_blank"
+              rel="noreferrer noopener"
+              >Apache-2.0</a
+            >
+            &middot;
+            <a
+              class="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+              href="circuits/source-bundle.tar.gz"
+              download="circuits-source-bundle.tar.gz"
+              >Circuits source bundle</a
+            >
+          </p>
+        </div>
+      </footer>
     </div>
 
-    <div id="settings-overlay" class="fixed inset-0 z-40 hidden bg-ink-950/65 backdrop-blur-sm"></div>
-    <aside id="settings-drawer" class="fixed inset-y-0 right-0 z-50 hidden w-full max-w-xl overflow-y-auto border-l border-white/8 bg-[linear-gradient(180deg,rgba(8,14,29,0.98),rgba(4,9,20,1))] px-6 py-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)]">
-        <div class="flex items-center justify-between gap-4">
+    <div
+      id="settings-overlay"
+      class="fixed inset-0 z-40 hidden bg-ink-950/65 backdrop-blur-sm"
+    ></div>
+    <aside
+      id="settings-drawer"
+      class="fixed inset-y-0 right-0 z-50 hidden w-full max-w-xl overflow-y-auto border-l border-white/8 bg-[linear-gradient(180deg,rgba(8,14,29,0.98),rgba(4,9,20,1))] px-6 py-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)]"
+    >
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p
+            class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+          >
+            Profile & Settings
+          </p>
+        </div>
+        <button
+          id="settings-close-btn"
+          type="button"
+          aria-label="Close"
+          title="Close"
+          class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+        >
+          <svg
+            class="h-5 w-5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            aria-hidden="true"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      <div class="mt-8 space-y-6">
+        <section
+          class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5"
+        >
+          <p
+            class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+          >
+            Identity
+          </p>
+          <p class="mt-1 text-xs text-slate-500">Click any value to copy it.</p>
+          <dl class="mt-4 space-y-4 text-sm">
             <div>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Profile & Settings</p>
+              <dt class="text-slate-500">Wallet</dt>
+              <dd
+                id="settings-wallet-address"
+                data-copy
+                class="mt-1 cursor-pointer break-all font-mono text-slate-100 transition hover:text-cyan-100"
+                title="Click to copy"
+              >
+                Not connected
+              </dd>
             </div>
-            <button id="settings-close-btn" type="button" aria-label="Close" title="Close" class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
-                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
+            <div>
+              <dt class="text-slate-500">Note Public Key</dt>
+              <dd
+                id="settings-note-key"
+                data-copy
+                class="mt-1 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100"
+                title="Click to copy"
+              >
+                —
+              </dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Encryption Public Key</dt>
+              <dd
+                id="settings-enc-key"
+                data-copy
+                class="mt-1 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100"
+                title="Click to copy"
+              >
+                —
+              </dd>
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <dt class="text-slate-500">ASP Secret</dt>
+                <button
+                  id="settings-reveal-secret"
+                  type="button"
+                  data-revealed="false"
+                  aria-label="Reveal ASP secret"
+                  title="Reveal ASP secret"
+                  class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                >
+                  <svg
+                    class="settings-eye h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    aria-hidden="true"
+                  >
+                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  <svg
+                    class="settings-eye-off hidden h-4 w-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"
+                    />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                </button>
+              </div>
+              <dd
+                id="settings-asp-secret"
+                data-copy
+                class="mt-2 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100"
+                title="Click to copy"
+              >
+                —
+              </dd>
+            </div>
+          </dl>
+          <div
+            id="settings-owner-switch"
+            data-testid="settings-owner-switch"
+            class="mt-5 hidden rounded-2xl border border-cyan-300/15 bg-cyan-400/5 p-4"
+          >
+            <p class="text-sm text-slate-300">
+              Varial's active account is
+              <span
+                id="settings-owner-switch-address"
+                class="font-mono text-slate-100"
+              ></span
+              >, not the note owner.
+            </p>
+            <button
+              id="settings-owner-switch-btn"
+              data-testid="settings-owner-switch-btn"
+              type="button"
+              class="mt-3 rounded-full bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-400/20"
+            >
+              Make it the note owner
             </button>
-        </div>
+          </div>
+        </section>
 
-        <div class="mt-8 space-y-6">
-            <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Identity</p>
-                <p class="mt-1 text-xs text-slate-500">Click any value to copy it.</p>
-                <dl class="mt-4 space-y-4 text-sm">
-                    <div>
-                        <dt class="text-slate-500">Wallet</dt>
-                        <dd id="settings-wallet-address" data-copy class="mt-1 cursor-pointer break-all font-mono text-slate-100 transition hover:text-cyan-100" title="Click to copy">Not connected</dd>
-                    </div>
-                    <div>
-                        <dt class="text-slate-500">Note Public Key</dt>
-                        <dd id="settings-note-key" data-copy class="mt-1 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
-                    </div>
-                    <div>
-                        <dt class="text-slate-500">Encryption Public Key</dt>
-                        <dd id="settings-enc-key" data-copy class="mt-1 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
-                    </div>
-                    <div>
-                        <div class="flex items-center gap-2">
-                            <dt class="text-slate-500">ASP Secret</dt>
-                            <button id="settings-reveal-secret" type="button" data-revealed="false" aria-label="Reveal ASP secret" title="Reveal ASP secret" class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
-                                <svg class="settings-eye h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/>
-                                    <circle cx="12" cy="12" r="3"/>
-                                </svg>
-                                <svg class="settings-eye-off hidden h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-                                    <line x1="1" y1="1" x2="23" y2="23"/>
-                                </svg>
-                            </button>
-                        </div>
-                        <dd id="settings-asp-secret" data-copy class="mt-2 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
-                    </div>
-                </dl>
-                <div id="settings-owner-switch" data-testid="settings-owner-switch" class="mt-5 hidden rounded-2xl border border-cyan-300/15 bg-cyan-400/5 p-4">
-                    <p class="text-sm text-slate-300">Freighter's active account is <span id="settings-owner-switch-address" class="font-mono text-slate-100"></span>, not the note owner.</p>
-                    <button id="settings-owner-switch-btn" data-testid="settings-owner-switch-btn" type="button" class="mt-3 rounded-full bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-400/20">Make it the note owner</button>
+        <section
+          class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p
+                class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+              >
+                Address Book
+              </p>
+              <p
+                id="settings-registration-status"
+                class="mt-2 text-sm text-slate-100"
+              >
+                Not registered
+              </p>
+            </div>
+            <button
+              id="settings-register-btn"
+              type="button"
+              class="rounded-full bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-400/20"
+            >
+              Register now
+            </button>
+          </div>
+          <p class="mt-3 text-sm text-slate-400">
+            Register your public keys so other users can transfer using only
+            your Stellar address. Your wallet asks you to sign a message that
+            proves this account holds the keys, and then the transaction. Once
+            registered, the keys can't be changed.
+          </p>
+        </section>
+
+        <section
+          class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5"
+        >
+          <p
+            class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+          >
+            Signing Accounts
+          </p>
+          <p class="mt-2 text-sm text-slate-400">
+            Signing accounts are saved in this browser for this wallet's notes.
+            Removing one forgets it here without changing Varial.
+          </p>
+          <ul
+            id="settings-signing-accounts"
+            data-testid="settings-signing-accounts"
+            class="mt-4 space-y-2"
+          ></ul>
+          <p
+            id="settings-signing-accounts-empty"
+            data-testid="settings-signing-accounts-empty"
+            class="mt-4 text-sm text-slate-500"
+          ></p>
+        </section>
+
+        <section
+          class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5"
+        >
+          <p
+            class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+          >
+            Runtime Settings
+          </p>
+          <div class="mt-5 space-y-5">
+            <div>
+              <label
+                for="settings-explorer-input"
+                class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                >Explorer Base URL</label
+              >
+              <input
+                id="settings-explorer-input"
+                type="text"
+                class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+            <label class="flex items-center justify-between gap-4">
+              <span>
+                <span
+                  class="block text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                  >Bootnode Archive</span
+                >
+                <span class="mt-2 block text-sm text-slate-400"
+                  >Keep disabled unless you need retention bypass for historical
+                  event sync.</span
+                >
+              </span>
+              <input
+                id="settings-bootnode-enabled"
+                type="checkbox"
+                class="h-5 w-5 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300"
+              />
+            </label>
+            <div>
+              <label
+                for="settings-bootnode-url"
+                class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                >Bootnode RPC URL</label
+              >
+              <input
+                id="settings-bootnode-url"
+                type="text"
+                placeholder="https://..."
+                class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+            <div class="border-t border-white/10 pt-5">
+              <p
+                class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500 mb-4"
+              >
+                Diagnostics & Telemetry
+              </p>
+              <div class="space-y-4">
+                <div>
+                  <label
+                    for="settings-log-level"
+                    class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                    >Log Level</label
+                  >
+                  <select
+                    id="settings-log-level"
+                    class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+                  >
+                    <option value="info">Info (Default)</option>
+                    <option value="debug">Debug (Verbose)</option>
+                    <option value="trace">Trace (Diagnostic)</option>
+                  </select>
                 </div>
-            </section>
-
-            <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
-                <div class="flex items-start justify-between gap-4">
-                    <div>
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Address Book</p>
-                        <p id="settings-registration-status" class="mt-2 text-sm text-slate-100">Not registered</p>
-                    </div>
-                    <button id="settings-register-btn" type="button" class="rounded-full bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-400/20">Register now</button>
+                <label class="flex items-center justify-between gap-4">
+                  <span>
+                    <span
+                      class="block text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+                      >Reveal Sensitive Info</span
+                    >
+                    <span class="mt-2 block text-sm text-slate-400"
+                      >Reveal Tier-1 values (amounts, addresses) in debug logs
+                      (always gated by compile profile).</span
+                    >
+                  </span>
+                  <input
+                    id="settings-reveal-sensitive"
+                    type="checkbox"
+                    class="h-5 w-5 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300"
+                  />
+                </label>
+                <div class="flex gap-3 mt-4">
+                  <button
+                    id="settings-copy-logs-btn"
+                    type="button"
+                    class="flex-1 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/10 hover:border-cyan-300/20 transition"
+                  >
+                    Copy Logs
+                  </button>
+                  <button
+                    id="settings-download-logs-btn"
+                    type="button"
+                    class="flex-1 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/10 hover:border-cyan-300/20 transition"
+                  >
+                    Download Logs
+                  </button>
                 </div>
-                <p class="mt-3 text-sm text-slate-400">Register your public keys so other users can transfer using only your Stellar address. Your wallet asks you to sign a message that proves this account holds the keys, and then the transaction. Once registered, the keys can't be changed.</p>
-            </section>
+              </div>
+            </div>
+          </div>
 
-            <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Signing Accounts</p>
-                <p class="mt-2 text-sm text-slate-400">Signing accounts are saved in this browser for this wallet's notes. Removing one forgets it here without changing Freighter.</p>
-                <ul id="settings-signing-accounts" data-testid="settings-signing-accounts" class="mt-4 space-y-2"></ul>
-                <p id="settings-signing-accounts-empty" data-testid="settings-signing-accounts-empty" class="mt-4 text-sm text-slate-500"></p>
-            </section>
+          <label
+            class="mt-6 block text-sm text-slate-200"
+            for="settings-auto-lock"
+            >Automatically lock local data after inactivity</label
+          >
+          <select
+            disabled
+            id="settings-auto-lock"
+            data-testid="storage-auto-lock"
+            class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 p-3 text-slate-200"
+          >
+            <option value="" disabled>Unlock to change</option>
+            <option value="5">5 minutes</option>
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="0">Never</option>
+          </select>
+          <p id="settings-auto-lock-hint" class="mt-2 text-xs text-slate-400">
+            Unlock to change the inactivity timeout.
+          </p>
+          <p class="mt-2 text-xs text-slate-400">
+            Locking closes local storage. Approve the storage unlock message in
+            the enrolled Varial account to unlock it again.
+          </p>
 
-            <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Runtime Settings</p>
-                <div class="mt-5 space-y-5">
-                    <div>
-                        <label for="settings-explorer-input" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Explorer Base URL</label>
-                        <input id="settings-explorer-input" type="text" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                    </div>
-                    <label class="flex items-center justify-between gap-4">
-                        <span>
-                            <span class="block text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Bootnode Archive</span>
-                            <span class="mt-2 block text-sm text-slate-400">Keep disabled unless you need retention bypass for historical event sync.</span>
-                        </span>
-                        <input id="settings-bootnode-enabled" type="checkbox" class="h-5 w-5 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300">
-                    </label>
-                    <div>
-                        <label for="settings-bootnode-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Bootnode RPC URL</label>
-                        <input id="settings-bootnode-url" type="text" placeholder="https://..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                    </div>
-                    <div class="border-t border-white/10 pt-5">
-                        <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500 mb-4">Diagnostics & Telemetry</p>
-                        <div class="space-y-4">
-                            <div>
-                                <label for="settings-log-level" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Log Level</label>
-                                <select id="settings-log-level" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
-                                    <option value="info">Info (Default)</option>
-                                    <option value="debug">Debug (Verbose)</option>
-                                    <option value="trace">Trace (Diagnostic)</option>
-                                </select>
-                            </div>
-                            <label class="flex items-center justify-between gap-4">
-                                <span>
-                                    <span class="block text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Reveal Sensitive Info</span>
-                                    <span class="mt-2 block text-sm text-slate-400">Reveal Tier-1 values (amounts, addresses) in debug logs (always gated by compile profile).</span>
-                                </span>
-                                <input id="settings-reveal-sensitive" type="checkbox" class="h-5 w-5 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300">
-                            </label>
-                            <div class="flex gap-3 mt-4">
-                                <button id="settings-copy-logs-btn" type="button" class="flex-1 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/10 hover:border-cyan-300/20 transition">Copy Logs</button>
-                                <button id="settings-download-logs-btn" type="button" class="flex-1 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/10 hover:border-cyan-300/20 transition">Download Logs</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+          <div class="mt-6 flex flex-col gap-3 sm:flex-row">
+            <button
+              id="settings-save-btn"
+              type="button"
+              class="inline-flex flex-1 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110"
+            >
+              Save settings
+            </button>
+            <button
+              id="wallet-disconnect-btn"
+              type="button"
+              class="inline-flex items-center justify-center rounded-2xl border border-rose-400/25 px-5 py-3 text-sm font-medium text-rose-100 transition hover:border-rose-400/40 hover:bg-rose-400/10"
+            >
+              Disconnect wallet
+            </button>
+          </div>
+        </section>
 
-                <label class="mt-6 block text-sm text-slate-200" for="settings-auto-lock">Automatically lock local data after inactivity</label>
-                <select disabled id="settings-auto-lock" data-testid="storage-auto-lock" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 p-3 text-slate-200">
-                    <option value="" disabled>Unlock to change</option>
-                    <option value="5">5 minutes</option>
-                    <option value="15">15 minutes</option>
-                    <option value="30">30 minutes</option>
-                    <option value="60">1 hour</option>
-                    <option value="0">Never</option>
-                </select>
-                <p id="settings-auto-lock-hint" class="mt-2 text-xs text-slate-400">Unlock to change the inactivity timeout.</p>
-                <p class="mt-2 text-xs text-slate-400">Locking closes local storage. Approve the storage unlock message in the enrolled Freighter account to unlock it again.</p>
-
-                <div class="mt-6 flex flex-col gap-3 sm:flex-row">
-                    <button id="settings-save-btn" type="button" class="inline-flex flex-1 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">Save settings</button>
-                    <button id="wallet-disconnect-btn" type="button" class="inline-flex items-center justify-center rounded-2xl border border-rose-400/25 px-5 py-3 text-sm font-medium text-rose-100 transition hover:border-rose-400/40 hover:bg-rose-400/10">Disconnect wallet</button>
-                </div>
-            </section>
-
-            <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5" aria-labelledby="storage-backup-title">
-                <h2 id="storage-backup-title" class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Local storage backup and recovery</h2>
-                <p id="storage-recovery-message" role="status" class="mt-2 text-sm text-slate-300">Backups remain encrypted and require the original unlocking account. Exporting, importing or resetting while unlocked locks local data first.</p>
-                <div id="storage-legacy-notice" data-testid="storage-legacy-notice" hidden class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 px-4 py-3 text-sm text-amber-100">
-                    <span>Unencrypted browser data from an earlier version (<code class="font-mono text-xs">.opfs-sahpool</code>) is still stored on disk. Derived keys and notes can be recovered via Freighter, while older local settings and history are not migrated automatically.</span>
-                    <button id="storage-delete-legacy" type="button" class="rounded-xl border border-amber-300/30 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-300/10 disabled:opacity-40">Delete legacy unencrypted data</button>
-                </div>
-                <div class="mt-4 flex flex-wrap gap-3">
-                    <button id="storage-export" type="button" class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-200 disabled:opacity-40">Export encrypted backup</button>
-                    <button id="storage-import" type="button" class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-200 disabled:opacity-40">Import backup</button>
-                    <button id="storage-reset" type="button" class="rounded-xl border border-rose-400/25 px-4 py-2 text-sm text-rose-100 disabled:opacity-40">Reset local storage</button>
-                    <input id="storage-backup-file" type="file" accept=".json,application/json" hidden>
-                </div>
-            </section>
-        </div>
+        <section
+          class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5"
+          aria-labelledby="storage-backup-title"
+        >
+          <h2
+            id="storage-backup-title"
+            class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+          >
+            Local storage backup and recovery
+          </h2>
+          <p
+            id="storage-recovery-message"
+            role="status"
+            class="mt-2 text-sm text-slate-300"
+          >
+            Backups remain encrypted and require the original unlocking account.
+            Exporting, importing or resetting while unlocked locks local data
+            first.
+          </p>
+          <div
+            id="storage-legacy-notice"
+            data-testid="storage-legacy-notice"
+            hidden
+            class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 px-4 py-3 text-sm text-amber-100"
+          >
+            <span
+              >Unencrypted browser data from an earlier version (<code
+                class="font-mono text-xs"
+                >.opfs-sahpool</code
+              >) is still stored on disk. Derived keys and notes can be
+              recovered via Varial, while older local settings and history are
+              not migrated automatically.</span
+            >
+            <button
+              id="storage-delete-legacy"
+              type="button"
+              class="rounded-xl border border-amber-300/30 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-300/10 disabled:opacity-40"
+            >
+              Delete legacy unencrypted data
+            </button>
+          </div>
+          <div class="mt-4 flex flex-wrap gap-3">
+            <button
+              id="storage-export"
+              type="button"
+              class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-200 disabled:opacity-40"
+            >
+              Export encrypted backup
+            </button>
+            <button
+              id="storage-import"
+              type="button"
+              class="rounded-xl border border-white/10 px-4 py-2 text-sm text-slate-200 disabled:opacity-40"
+            >
+              Import backup
+            </button>
+            <button
+              id="storage-reset"
+              type="button"
+              class="rounded-xl border border-rose-400/25 px-4 py-2 text-sm text-rose-100 disabled:opacity-40"
+            >
+              Reset local storage
+            </button>
+            <input
+              id="storage-backup-file"
+              type="file"
+              accept=".json,application/json"
+              hidden
+            />
+          </div>
+        </section>
+      </div>
     </aside>
 
-    <div id="bootnode-consent-modal" class="fixed inset-0 z-50 hidden bg-ink-950/75 px-4 py-8 backdrop-blur-sm">
-        <div class="mx-auto max-w-2xl rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)]">
-            <div class="flex items-start justify-between gap-4">
-                <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Retention Bypass</p>
-                    <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Bootnode required to finish sync</h2>
-                </div>
-                <button id="bootnode-consent-close" type="button" class="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Close</button>
-            </div>
-            <div class="mt-6 space-y-4 text-sm text-slate-300">
-                <p>Your current RPC could not serve enough historical events to rebuild local state.</p>
-                <p>Wallet RPC: <span id="bootnode-consent-rpc-url" class="font-mono text-xs text-slate-100"></span></p>
-                <p id="bootnode-consent-details" class="rounded-2xl border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-amber-100"></p>
-                <div class="rounded-[24px] border border-white/8 bg-ink-900/80 p-5">
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Trust Assumptions</p>
-                    <ul class="mt-3 space-y-2 text-sm text-slate-300">
-                        <li>Integrity risk: a bootnode can omit or forge event history.</li>
-                        <li>Availability risk: it can be down or rate limit requests.</li>
-                        <li>Privacy risk: the operator can observe IP address and sync timing.</li>
-                        <li>Handoff risk: it can provide an incorrect ledger handoff point.</li>
-                    </ul>
-                    <p class="mt-4 text-xs text-slate-500">You can change this later in settings or self-host a bootnode for stronger trust guarantees.</p>
-                </div>
-                <div>
-                    <label for="bootnode-consent-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Bootnode RPC URL</label>
-                    <input id="bootnode-consent-url" type="text" placeholder="https://..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                </div>
-                <p id="bootnode-consent-error" class="hidden text-sm text-rose-200"></p>
-            </div>
-            <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
-                <button id="bootnode-consent-cancel" type="button" class="rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Cancel</button>
-                <button id="bootnode-consent-accept" type="button" class="rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">Use bootnode</button>
-            </div>
+    <div
+      id="bootnode-consent-modal"
+      class="fixed inset-0 z-50 hidden bg-ink-950/75 px-4 py-8 backdrop-blur-sm"
+    >
+      <div
+        class="mx-auto max-w-2xl rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)]"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p
+              class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+            >
+              Retention Bypass
+            </p>
+            <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">
+              Bootnode required to finish sync
+            </h2>
+          </div>
+          <button
+            id="bootnode-consent-close"
+            type="button"
+            class="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+          >
+            Close
+          </button>
         </div>
+        <div class="mt-6 space-y-4 text-sm text-slate-300">
+          <p>
+            Your current RPC could not serve enough historical events to rebuild
+            local state.
+          </p>
+          <p>
+            Wallet RPC:
+            <span
+              id="bootnode-consent-rpc-url"
+              class="font-mono text-xs text-slate-100"
+            ></span>
+          </p>
+          <p
+            id="bootnode-consent-details"
+            class="rounded-2xl border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-amber-100"
+          ></p>
+          <div class="rounded-[24px] border border-white/8 bg-ink-900/80 p-5">
+            <p
+              class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500"
+            >
+              Trust Assumptions
+            </p>
+            <ul class="mt-3 space-y-2 text-sm text-slate-300">
+              <li>
+                Integrity risk: a bootnode can omit or forge event history.
+              </li>
+              <li>Availability risk: it can be down or rate limit requests.</li>
+              <li>
+                Privacy risk: the operator can observe IP address and sync
+                timing.
+              </li>
+              <li>
+                Handoff risk: it can provide an incorrect ledger handoff point.
+              </li>
+            </ul>
+            <p class="mt-4 text-xs text-slate-500">
+              You can change this later in settings or self-host a bootnode for
+              stronger trust guarantees.
+            </p>
+          </div>
+          <div>
+            <label
+              for="bootnode-consent-url"
+              class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+              >Bootnode RPC URL</label
+            >
+            <input
+              id="bootnode-consent-url"
+              type="text"
+              placeholder="https://..."
+              class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <p
+            id="bootnode-consent-error"
+            class="hidden text-sm text-rose-200"
+          ></p>
+        </div>
+        <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <button
+            id="bootnode-consent-cancel"
+            type="button"
+            class="rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+          >
+            Cancel
+          </button>
+          <button
+            id="bootnode-consent-accept"
+            type="button"
+            class="rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110"
+          >
+            Use bootnode
+          </button>
+        </div>
+      </div>
     </div>
 
-    <div id="onboarding-modal" class="fixed inset-0 z-50 hidden overflow-y-auto bg-ink-950/80 px-4 py-8 backdrop-blur-sm">
-        <div class="mx-auto max-w-4xl rounded-[32px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)] sm:p-8">
-            <div class="flex items-start justify-between gap-4">
-                <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Onboarding</p>
-                </div>
-                <button id="onboarding-close-btn" type="button" aria-label="Close" title="Close" class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
-                    <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                </button>
-            </div>
-
-            <div id="onboarding-steps" class="mt-8 grid gap-3 md:grid-cols-6">
-                <div data-step="disclaimer" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Disclaimer</div>
-                <div data-step="retention" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Retention</div>
-                <div data-step="storage" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Storage</div>
-                <div data-step="keys" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Keys</div>
-                <div data-step="explorer" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Explorer</div>
-                <div data-step="registration" class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm">Registration</div>
-            </div>
-
-            <div class="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
-                <div class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6">
-                    <div id="onboarding-content" class="space-y-4 text-sm text-slate-300"></div>
-                    <p id="onboarding-error" class="mt-4 hidden text-sm text-rose-200"></p>
-                </div>
-                <aside class="rounded-[28px] border border-cyan-300/12 bg-cyan-300/[0.04] p-6">
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Why This Exists</p>
-                    <div id="onboarding-why" class="mt-3">
-                        <div data-why="disclaimer" class="hidden text-sm text-slate-300">Review the risks and terms before using this deployment. Disclaimer acceptance is required on every network.</div>
-                        <div data-why="storage" class="hidden space-y-3 text-sm text-slate-300">
-                            <p>The private payment material is stored locally in your browser.</p>
-                            <p>Without granting permanent storage, the browser can delete your local data under storage pressure or across updates.</p>
-                            <p>Most of the data (all critical one like keys, secrets and notes) can be restored if it is lost.</p>
-                        </div>
-                        <div data-why="keys" class="hidden text-sm text-slate-300">The ASP provider needs your note public key and ASP secret to include you in the allowed list.</div>
-                        <div data-why="retention" class="hidden space-y-3 text-sm text-slate-300">
-                            <p>If you rely only on a public RPC and miss the event retention window, the app may need either a browser reminder to reopen the tab in time or a bootnode archive URL to rebuild history later.</p>
-                            <p>You should understand the risks of using a bootnode (similar to the ones when using a 3d-party-hosted RPC:</p>
-                            <ul class="list-disc space-y-2 pl-5">
-                                <li>Integrity risk: a bootnode can omit or forge event history.</li>
-                                <li>Availability risk: a bootnode can be unavailable or rate limit you.</li>
-                                <li>Privacy risk: the operator can observe IP address and timing.</li>
-                                <li>Handoff risk: it can provide an incorrect ledger handoff point.</li>
-                            </ul>
-                        </div>
-                        <div data-why="explorer" class="hidden text-sm text-slate-300">The UI uses a single explorer base URL across transaction feedback and address shortcuts.</div>
-                        <div data-why="registration" class="hidden text-sm text-slate-300">Registration lets others transfer to your Stellar address without exchanging note and encryption public keys out of band.</div>
-                    </div>
-                </aside>
-            </div>
-
-            <div id="onboarding-actions" class="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-end"></div>
+    <div
+      id="onboarding-modal"
+      class="fixed inset-0 z-50 hidden overflow-y-auto bg-ink-950/80 px-4 py-8 backdrop-blur-sm"
+    >
+      <div
+        class="mx-auto max-w-4xl rounded-[32px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)] sm:p-8"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p
+              class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+            >
+              Onboarding
+            </p>
+          </div>
+          <button
+            id="onboarding-close-btn"
+            type="button"
+            aria-label="Close"
+            title="Close"
+            class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+          >
+            <svg
+              class="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              aria-hidden="true"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </div>
+
+        <div id="onboarding-steps" class="mt-8 grid gap-3 md:grid-cols-6">
+          <div
+            data-step="disclaimer"
+            class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm"
+          >
+            Disclaimer
+          </div>
+          <div
+            data-step="retention"
+            class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm"
+          >
+            Retention
+          </div>
+          <div
+            data-step="storage"
+            class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm"
+          >
+            Storage
+          </div>
+          <div
+            data-step="keys"
+            class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm"
+          >
+            Keys
+          </div>
+          <div
+            data-step="explorer"
+            class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm"
+          >
+            Explorer
+          </div>
+          <div
+            data-step="registration"
+            class="rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3 text-sm"
+          >
+            Registration
+          </div>
+        </div>
+
+        <div class="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+          <div class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6">
+            <div
+              id="onboarding-content"
+              class="space-y-4 text-sm text-slate-300"
+            ></div>
+            <p
+              id="onboarding-error"
+              class="mt-4 hidden text-sm text-rose-200"
+            ></p>
+          </div>
+          <aside
+            class="rounded-[28px] border border-cyan-300/12 bg-cyan-300/[0.04] p-6"
+          >
+            <p
+              class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+            >
+              Why This Exists
+            </p>
+            <div id="onboarding-why" class="mt-3">
+              <div data-why="disclaimer" class="hidden text-sm text-slate-300">
+                Review the risks and terms before using this deployment.
+                Disclaimer acceptance is required on every network.
+              </div>
+              <div
+                data-why="storage"
+                class="hidden space-y-3 text-sm text-slate-300"
+              >
+                <p>
+                  The private payment material is stored locally in your
+                  browser.
+                </p>
+                <p>
+                  Without granting permanent storage, the browser can delete
+                  your local data under storage pressure or across updates.
+                </p>
+                <p>
+                  Most of the data (all critical one like keys, secrets and
+                  notes) can be restored if it is lost.
+                </p>
+              </div>
+              <div data-why="keys" class="hidden text-sm text-slate-300">
+                The ASP provider needs your note public key and ASP secret to
+                include you in the allowed list.
+              </div>
+              <div
+                data-why="retention"
+                class="hidden space-y-3 text-sm text-slate-300"
+              >
+                <p>
+                  If you rely only on a public RPC and miss the event retention
+                  window, the app may need either a browser reminder to reopen
+                  the tab in time or a bootnode archive URL to rebuild history
+                  later.
+                </p>
+                <p>
+                  You should understand the risks of using a bootnode (similar
+                  to the ones when using a 3d-party-hosted RPC:
+                </p>
+                <ul class="list-disc space-y-2 pl-5">
+                  <li>
+                    Integrity risk: a bootnode can omit or forge event history.
+                  </li>
+                  <li>
+                    Availability risk: a bootnode can be unavailable or rate
+                    limit you.
+                  </li>
+                  <li>
+                    Privacy risk: the operator can observe IP address and
+                    timing.
+                  </li>
+                  <li>
+                    Handoff risk: it can provide an incorrect ledger handoff
+                    point.
+                  </li>
+                </ul>
+              </div>
+              <div data-why="explorer" class="hidden text-sm text-slate-300">
+                The UI uses a single explorer base URL across transaction
+                feedback and address shortcuts.
+              </div>
+              <div
+                data-why="registration"
+                class="hidden text-sm text-slate-300"
+              >
+                Registration lets others transfer to your Stellar address
+                without exchanging note and encryption public keys out of band.
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        <div
+          id="onboarding-actions"
+          class="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-end"
+        ></div>
+      </div>
     </div>
 
     <template id="tpl-onboarding-keys">
-        <div class="rounded-[24px] border border-white/8 bg-ink-950/75 p-5">
-            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Derived Material</p>
-            <p class="mt-3 text-sm text-slate-300">Share these with your ASP provider so they can add you to the allowed list. Everything is derived locally from your wallet signature.</p>
-            <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                <div class="flex items-center justify-between gap-3">
-                    <p class="text-xs text-slate-500">Note public key</p>
-                    <button data-copy="note" type="button" class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
-                </div>
-                <p data-field="note" class="mt-2 break-all font-mono text-xs text-slate-100"></p>
-            </div>
-            <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                <div class="flex items-center justify-between gap-3">
-                    <p class="text-xs text-slate-500">ASP secret</p>
-                    <button data-copy="asp" type="button" class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
-                </div>
-                <p data-field="asp" class="mt-2 break-all font-mono text-xs text-slate-100"></p>
-            </div>
+      <div class="rounded-[24px] border border-white/8 bg-ink-950/75 p-5">
+        <p
+          class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500"
+        >
+          Derived Material
+        </p>
+        <p class="mt-3 text-sm text-slate-300">
+          Share these with your ASP provider so they can add you to the allowed
+          list. Everything is derived locally from your wallet signature.
+        </p>
+        <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+          <div class="flex items-center justify-between gap-3">
+            <p class="text-xs text-slate-500">Note public key</p>
+            <button
+              data-copy="note"
+              type="button"
+              class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+            >
+              Copy
+            </button>
+          </div>
+          <p
+            data-field="note"
+            class="mt-2 break-all font-mono text-xs text-slate-100"
+          ></p>
         </div>
+        <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+          <div class="flex items-center justify-between gap-3">
+            <p class="text-xs text-slate-500">ASP secret</p>
+            <button
+              data-copy="asp"
+              type="button"
+              class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+            >
+              Copy
+            </button>
+          </div>
+          <p
+            data-field="asp"
+            class="mt-2 break-all font-mono text-xs text-slate-100"
+          ></p>
+        </div>
+      </div>
     </template>
 
     <template id="tpl-wizard-bootnode">
-        <div class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
-            <label class="flex items-start gap-3">
-                <input id="wizard-bootnode-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300">
-                <span>
-                    <span class="block text-sm font-medium text-white">Store a bootnode URL now</span>
-                    <span class="mt-1 block text-sm text-slate-400">Use this if you want an explicit retention bypass path instead of relying only on reminders.</span>
-                </span>
-            </label>
-            <div class="mt-4">
-                <label for="wizard-bootnode-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Bootnode RPC URL</label>
-                <input id="wizard-bootnode-url" type="text" placeholder="https://..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
-            </div>
+      <div class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
+        <label class="flex items-start gap-3">
+          <input
+            id="wizard-bootnode-enabled"
+            type="checkbox"
+            class="mt-1 h-4 w-4 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300"
+          />
+          <span>
+            <span class="block text-sm font-medium text-white"
+              >Store a bootnode URL now</span
+            >
+            <span class="mt-1 block text-sm text-slate-400"
+              >Use this if you want an explicit retention bypass path instead of
+              relying only on reminders.</span
+            >
+          </span>
+        </label>
+        <div class="mt-4">
+          <label
+            for="wizard-bootnode-url"
+            class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+            >Bootnode RPC URL</label
+          >
+          <input
+            id="wizard-bootnode-url"
+            type="text"
+            placeholder="https://..."
+            class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+          />
         </div>
+      </div>
     </template>
 
     <template id="tpl-wizard-explorer">
-        <div class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
-            <label for="wizard-explorer-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Explorer Base URL</label>
-            <input id="wizard-explorer-url" type="text" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
-            <p class="mt-3 text-sm text-slate-400">This controls explorer links shown after transactions and in the shell. You can update it later in settings.</p>
-        </div>
+      <div class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
+        <label
+          for="wizard-explorer-url"
+          class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+          >Explorer Base URL</label
+        >
+        <input
+          id="wizard-explorer-url"
+          type="text"
+          class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+        />
+        <p class="mt-3 text-sm text-slate-400">
+          This controls explorer links shown after transactions and in the
+          shell. You can update it later in settings.
+        </p>
+      </div>
     </template>
 
     <template id="tpl-balance-card">
-        <article class="rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,30,56,0.96),rgba(10,17,31,0.98))] p-5 shadow-[0_14px_40px_rgba(2,6,23,0.35)]">
-            <div class="flex items-start justify-between gap-4">
-                <div class="min-w-0">
-                    <a class="balance-token text-sm font-semibold text-white transition hover:text-cyan-100 hover:underline" target="_blank" rel="noopener noreferrer"></a>
-                    <p class="mt-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">Pool address</p>
-                    <a class="balance-pool mt-1 block font-mono text-[11px] text-cyan-200/80 transition hover:text-cyan-100 hover:underline" target="_blank" rel="noopener noreferrer"></a>
-                </div>
-                <button type="button" data-view-notes title="View notes for this token" class="balance-notes shrink-0 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[11px] font-medium text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-300/20"></button>
-            </div>
-            <p class="balance-amount mt-8 text-3xl font-semibold tracking-tight text-white"></p>
-            <div class="mt-6 flex flex-wrap gap-2">
-                <button type="button" data-quick-flow="deposit" class="rounded-full border border-white/10 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Deposit</button>
-                <button type="button" data-quick-flow="transfer" class="rounded-full border border-white/10 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Transfer</button>
-                <button type="button" data-quick-flow="withdraw" class="rounded-full border border-white/10 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Withdraw</button>
-                <button type="button" data-view-history aria-label="History of operations" title="History of operations" class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                        <circle cx="12" cy="12" r="9"/>
-                        <path d="M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
-                </button>
-            </div>
-        </article>
+      <article
+        class="rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,30,56,0.96),rgba(10,17,31,0.98))] p-5 shadow-[0_14px_40px_rgba(2,6,23,0.35)]"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div class="min-w-0">
+            <a
+              class="balance-token text-sm font-semibold text-white transition hover:text-cyan-100 hover:underline"
+              target="_blank"
+              rel="noopener noreferrer"
+            ></a>
+            <p
+              class="mt-2 text-[10px] uppercase tracking-[0.18em] text-slate-500"
+            >
+              Pool address
+            </p>
+            <a
+              class="balance-pool mt-1 block font-mono text-[11px] text-cyan-200/80 transition hover:text-cyan-100 hover:underline"
+              target="_blank"
+              rel="noopener noreferrer"
+            ></a>
+          </div>
+          <button
+            type="button"
+            data-view-notes
+            title="View notes for this token"
+            class="balance-notes shrink-0 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[11px] font-medium text-cyan-100 transition hover:border-cyan-300/50 hover:bg-cyan-300/20"
+          ></button>
+        </div>
+        <p
+          class="balance-amount mt-8 text-3xl font-semibold tracking-tight text-white"
+        ></p>
+        <div class="mt-6 flex flex-wrap gap-2">
+          <button
+            type="button"
+            data-quick-flow="deposit"
+            class="rounded-full border border-white/10 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+          >
+            Deposit
+          </button>
+          <button
+            type="button"
+            data-quick-flow="transfer"
+            class="rounded-full border border-white/10 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+          >
+            Transfer
+          </button>
+          <button
+            type="button"
+            data-quick-flow="withdraw"
+            class="rounded-full border border-white/10 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+          >
+            Withdraw
+          </button>
+          <button
+            type="button"
+            data-view-history
+            aria-label="History of operations"
+            title="History of operations"
+            class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+          >
+            <svg
+              class="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path
+                d="M12 7v5l3 2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </article>
     </template>
 
     <template id="tpl-feed-card">
-        <article class="rounded-[24px] border border-white/8 bg-ink-900/80 p-5">
-            <div class="flex items-start justify-between gap-4">
-                <h3 class="feed-title text-lg font-semibold text-white"></h3>
-                <a class="feed-meta rounded-full border border-white/8 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-500 transition hover:border-cyan-300/30 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50" target="_blank" rel="noopener noreferrer"></a>
-            </div>
-            <p class="feed-body mt-3 text-sm leading-6 text-slate-300"></p>
-        </article>
+      <article class="rounded-[24px] border border-white/8 bg-ink-900/80 p-5">
+        <div class="flex items-start justify-between gap-4">
+          <h3 class="feed-title text-lg font-semibold text-white"></h3>
+          <a
+            class="feed-meta rounded-full border border-white/8 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-500 transition hover:border-cyan-300/30 hover:text-cyan-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/50"
+            target="_blank"
+            rel="noopener noreferrer"
+          ></a>
+        </div>
+        <p class="feed-body mt-3 text-sm leading-6 text-slate-300"></p>
+      </article>
     </template>
 
     <template id="tpl-note-row">
-        <tr data-testid="advanced-note" class="border-t border-white/8 align-top text-slate-200">
-            <td class="px-3 py-3 text-sm">
-                <span class="note-token block font-medium text-white"></span>
-                <span class="note-pool mt-1 block font-mono text-[11px] text-slate-500"></span>
-            </td>
-            <td class="px-3 py-3">
-                <span class="note-id block font-mono text-xs"></span>
-                <span class="note-ledger mt-1 block text-[11px] text-slate-400"></span>
-            </td>
-            <td class="note-amount px-3 py-3 font-mono text-sm"></td>
-            <td class="px-3 py-3"><span class="note-status inline-flex rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-100"></span></td>
-            <td class="px-3 py-3">
-                <div class="flex flex-nowrap justify-end gap-0.5">
-                    <button type="button" data-testid="advanced-note-use" class="note-use rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
-                    <button type="button" class="note-copy rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
-                    <button type="button" class="note-disclose rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100" data-view="disclosure" title="Selective disclosure">Disclose</button>
-                </div>
-            </td>
-        </tr>
+      <tr
+        data-testid="advanced-note"
+        class="border-t border-white/8 align-top text-slate-200"
+      >
+        <td class="px-3 py-3 text-sm">
+          <span class="note-token block font-medium text-white"></span>
+          <span
+            class="note-pool mt-1 block font-mono text-[11px] text-slate-500"
+          ></span>
+        </td>
+        <td class="px-3 py-3">
+          <span class="note-id block font-mono text-xs"></span>
+          <span
+            class="note-ledger mt-1 block text-[11px] text-slate-400"
+          ></span>
+        </td>
+        <td class="note-amount px-3 py-3 font-mono text-sm"></td>
+        <td class="px-3 py-3">
+          <span
+            class="note-status inline-flex rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-100"
+          ></span>
+        </td>
+        <td class="px-3 py-3">
+          <div class="flex flex-nowrap justify-end gap-0.5">
+            <button
+              type="button"
+              data-testid="advanced-note-use"
+              class="note-use rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+            >
+              Use
+            </button>
+            <button
+              type="button"
+              class="note-copy rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+            >
+              Copy
+            </button>
+            <button
+              type="button"
+              class="note-disclose rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+              data-view="disclosure"
+              title="Selective disclosure"
+            >
+              Disclose
+            </button>
+          </div>
+        </td>
+      </tr>
     </template>
 
     <template id="tpl-note-input-row">
-        <div class="rounded-2xl border border-white/8 bg-ink-950/80 p-4">
-            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Input Note ID</label>
-            <input type="text" class="note-input mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" placeholder="Paste or use a note from the table" autocomplete="off" spellcheck="false">
-            <p class="note-input-amount mt-2 text-xs text-cyan-200/80"></p>
-        </div>
+      <div class="rounded-2xl border border-white/8 bg-ink-950/80 p-4">
+        <label
+          class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+          >Input Note ID</label
+        >
+        <input
+          type="text"
+          class="note-input mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40"
+          placeholder="Paste or use a note from the table"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <p class="note-input-amount mt-2 text-xs text-cyan-200/80"></p>
+      </div>
     </template>
 
     <template id="tpl-output-row">
-        <div data-testid="advanced-output" class="advanced-output-row rounded-2xl border border-white/8 bg-ink-950/80 p-4">
-            <div>
-                <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Recipient Stellar Address</label>
-                <input data-testid="advanced-output-address" type="text" class="output-address mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" placeholder="Leave blank for connected wallet" autocomplete="off" spellcheck="false">
-            </div>
-            <p data-testid="advanced-output-lookup-status" class="lookup-status mt-3 text-sm text-cyan-100"></p>
-            <p class="lookup-warning mt-2 text-sm text-amber-200"></p>
-            <div class="manual-fields mt-4 hidden space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4">
-                <div>
-                    <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Note Public Key</label>
-                    <input type="text" class="output-note-key mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                </div>
-                <div>
-                    <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Encryption Public Key</label>
-                    <input type="text" class="output-enc-key mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
-                </div>
-            </div>
-            <div class="mt-4">
-                <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Private Output Amount</label>
-                <input data-testid="advanced-output-amount" type="text" class="output-amount mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" placeholder="0.0" inputmode="decimal" autocomplete="off" spellcheck="false">
-            </div>
+      <div
+        data-testid="advanced-output"
+        class="advanced-output-row rounded-2xl border border-white/8 bg-ink-950/80 p-4"
+      >
+        <div>
+          <label
+            class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+            >Recipient Stellar Address</label
+          >
+          <input
+            data-testid="advanced-output-address"
+            type="text"
+            class="output-address mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40"
+            placeholder="Leave blank for connected wallet"
+            autocomplete="off"
+            spellcheck="false"
+          />
         </div>
+        <p
+          data-testid="advanced-output-lookup-status"
+          class="lookup-status mt-3 text-sm text-cyan-100"
+        ></p>
+        <p class="lookup-warning mt-2 text-sm text-amber-200"></p>
+        <div
+          class="manual-fields mt-4 hidden space-y-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4"
+        >
+          <div>
+            <label
+              class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+              >Note Public Key</label
+            >
+            <input
+              type="text"
+              class="output-note-key mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <div>
+            <label
+              class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+              >Encryption Public Key</label
+            >
+            <input
+              type="text"
+              class="output-enc-key mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+        </div>
+        <div class="mt-4">
+          <label
+            class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500"
+            >Private Output Amount</label
+          >
+          <input
+            data-testid="advanced-output-amount"
+            type="text"
+            class="output-amount mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40"
+            placeholder="0.0"
+            inputmode="decimal"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+      </div>
     </template>
 
-    <div id="pool-history-modal" class="fixed inset-0 z-[70] hidden items-center justify-center bg-ink-950/80 px-4 backdrop-blur-sm">
-        <div class="mx-auto w-full max-w-md rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)]">
-            <div class="flex items-start justify-between gap-4">
-                <div>
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">History</p>
-                    <h2 id="pool-history-title" class="mt-2 text-xl font-semibold tracking-tight text-white">Operations</h2>
-                </div>
-                <button id="pool-history-close" type="button" aria-label="Close" title="Close" class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
-                    <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                </button>
-            </div>
-            <p class="mt-1 text-xs text-slate-500">Last 10 operations performed in this app.</p>
-            <div id="pool-history-list" class="mt-5 max-h-[60vh] space-y-2 overflow-y-auto"></div>
-            <p id="pool-history-empty" class="mt-5 hidden text-sm text-slate-500">No operations recorded yet for this token.</p>
+    <div
+      id="pool-history-modal"
+      class="fixed inset-0 z-[70] hidden items-center justify-center bg-ink-950/80 px-4 backdrop-blur-sm"
+    >
+      <div
+        class="mx-auto w-full max-w-md rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)]"
+      >
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p
+              class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70"
+            >
+              History
+            </p>
+            <h2
+              id="pool-history-title"
+              class="mt-2 text-xl font-semibold tracking-tight text-white"
+            >
+              Operations
+            </h2>
+          </div>
+          <button
+            id="pool-history-close"
+            type="button"
+            aria-label="Close"
+            title="Close"
+            class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+          >
+            <svg
+              class="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              aria-hidden="true"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </div>
+        <p class="mt-1 text-xs text-slate-500">
+          Last 10 operations performed in this app.
+        </p>
+        <div
+          id="pool-history-list"
+          class="mt-5 max-h-[60vh] space-y-2 overflow-y-auto"
+        ></div>
+        <p id="pool-history-empty" class="mt-5 hidden text-sm text-slate-500">
+          No operations recorded yet for this token.
+        </p>
+      </div>
     </div>
 
-    <div id="toast-container" class="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-3"></div>
+    <div
+      id="toast-container"
+      class="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-3"
+    ></div>
 
     <template id="tpl-toast">
-        <div data-testid="toast" class="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(7,12,23,1))] px-4 py-3 text-sm text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.45)]">
-            <div class="toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-cyan-300"></div>
-            <div class="min-w-0 flex-1">
-                <p class="toast-message break-words" data-testid="toast-message"></p>
-                <a class="toast-link mt-2 hidden text-xs font-medium text-cyan-100 underline underline-offset-4" data-testid="toast-link" target="_blank" rel="noreferrer">Open explorer</a>
-            </div>
+      <div
+        data-testid="toast"
+        class="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(7,12,23,1))] px-4 py-3 text-sm text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.45)]"
+      >
+        <div
+          class="toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-cyan-300"
+        ></div>
+        <div class="min-w-0 flex-1">
+          <p class="toast-message break-words" data-testid="toast-message"></p>
+          <a
+            class="toast-link mt-2 hidden text-xs font-medium text-cyan-100 underline underline-offset-4"
+            data-testid="toast-link"
+            target="_blank"
+            rel="noreferrer"
+            >Open explorer</a
+          >
         </div>
+      </div>
     </template>
 
     <script type="module" src="./js/ui.js"></script>
-</body>
+  </body>
 </html>

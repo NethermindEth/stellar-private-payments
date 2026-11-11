@@ -69,8 +69,8 @@ test('claimLine names who a claim pays, and its amount once the pool is read', (
   const admin = Keypair.random().publicKey();
   const other = Keypair.random().publicKey();
   const amount = (value) => `${value} units`;
-  assert.equal(claimLine({ source: admin, args: [admin, 3000n] }, amount), 'Claim 3000 units (3000 in the token\'s smallest unit, as Arguments and Freighter show it) to the admin account (Source)');
-  assert.equal(claimLine({ source: admin, args: [other, 3000n] }, amount), `Claim 3000 units (3000 in the token's smallest unit, as Arguments and Freighter show it) to ${other}, not the admin account`);
+  assert.equal(claimLine({ source: admin, args: [admin, 3000n] }, amount), 'Claim 3000 units (3000 in the token\'s smallest unit, as Arguments and Varial show it) to the admin account (Source)');
+  assert.equal(claimLine({ source: admin, args: [other, 3000n] }, amount), `Claim 3000 units (3000 in the token's smallest unit, as Arguments and Varial show it) to ${other}, not the admin account`);
   assert.equal(claimLine({ source: admin, args: [other, 3000n] }, undefined), `Claim to ${other}, not the admin account`);
 });
 

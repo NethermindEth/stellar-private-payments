@@ -2,11 +2,11 @@
  * Core UI utilities and shared state.
  */
 
-import { StrKey } from '@stellar/stellar-sdk';
-import { formatAmount } from './notes-view.js';
-import { friendlyErrorMessage } from '../facade-errors.js';
+import { StrKey } from "@stellar/stellar-sdk";
+import { formatAmount } from "./notes-view.js";
+import { friendlyErrorMessage } from "../facade-errors.js";
 
-import { deploymentDefaults } from '../network-config.js';
+import { deploymentDefaults } from "../network-config.js";
 
 export const App = {
     state: {
@@ -18,11 +18,11 @@ export const App = {
             // able to choose one, connecting sets it to the owner.
             signingAddress: null,
             // Accounts the user added to sign with, besides the owner,
-            // remembered per owner across sessions. Freighter switching to one
+            // remembered per owner across sessions. Varial switching to one
             // of them is expected.
             signers: [],
-            // Freighter's active account as the watcher last saw it: an
-            // address, '' while Freighter keeps it from this site, or null
+            // Varial's active account as the watcher last saw it: an
+            // address, '' while Varial keeps it from this site, or null
             // before the watcher reported.
             activeAddress: null,
             sorobanRpcUrl: null,
@@ -34,8 +34,8 @@ export const App = {
             encryptionPublicKey: null,
         },
         views: {
-            active: 'dashboard',
-            moveFlow: 'deposit',
+            active: "dashboard",
+            moveFlow: "deposit",
         },
         pools: [],
         selectedPoolId: null,
@@ -50,7 +50,7 @@ export const App = {
             explorerBaseUrl: deploymentDefaults.explorerUrl,
             bootnode: {
                 enabled: false,
-                url: '',
+                url: "",
             },
         },
         ui: {
@@ -63,7 +63,9 @@ export const App = {
 };
 
 export const Utils = {
-    get defaultExplorerBaseUrl() { return deploymentDefaults.explorerUrl; },
+    get defaultExplorerBaseUrl() {
+        return deploymentDefaults.explorerUrl;
+    },
 
     truncateHex(hex, start = 8, end = 8) {
         if (!hex || hex.length <= start + end + 3) return hex;
@@ -71,7 +73,7 @@ export const Utils = {
     },
 
     formatNumber(num) {
-        return Number(num || 0).toLocaleString('en-US');
+        return Number(num || 0).toLocaleString("en-US");
     },
 
     shortAddress(address, start = 7, end = 6) {
@@ -79,22 +81,34 @@ export const Utils = {
     },
 
     poolLabel(pool) {
-        if (!pool) return 'Token';
+        if (!pool) return "Token";
         const asset = pool.asset || {};
-        if (asset.kind === 'native') return 'XLM';
-        if (asset.kind === 'classic') return asset.code || 'Asset';
-        if (asset.kind === 'contract') return asset.symbol || 'Token';
-        return 'Token';
+        if (asset.kind === "native") return "XLM";
+        if (asset.kind === "classic") return asset.code || "Asset";
+        if (asset.kind === "contract") return asset.symbol || "Token";
+        return "Token";
     },
 
     selectedPool() {
-        return App.state.pools.find(pool => pool.poolContractId === App.state.selectedPoolId) || App.state.pools[0] || null;
+        return (
+            App.state.pools.find(
+                (pool) => pool.poolContractId === App.state.selectedPoolId,
+            ) ||
+            App.state.pools[0] ||
+            null
+        );
     },
 
     formatPoolAmount(amount, poolId) {
-        const pool = App.state.pools.find(pool => pool.poolContractId === poolId);
+        const pool = App.state.pools.find(
+            (pool) => pool.poolContractId === poolId,
+        );
         if (pool?.decimals == null) return `${amount} base units`;
-        return this.formatTokenAmount(amount, this.poolLabel(pool), pool.decimals);
+        return this.formatTokenAmount(
+            amount,
+            this.poolLabel(pool),
+            pool.decimals,
+        );
     },
 
     formatTokenAmount: formatAmount,
@@ -104,74 +118,92 @@ export const Utils = {
         if (!configured) return deploymentDefaults.explorerUrl;
         try {
             const protocol = new URL(configured).protocol;
-            return (protocol === 'http:' || protocol === 'https:') ? configured : deploymentDefaults.explorerUrl;
+            return protocol === "http:" || protocol === "https:"
+                ? configured
+                : deploymentDefaults.explorerUrl;
         } catch {
             return deploymentDefaults.explorerUrl;
         }
     },
 
     explorerTxUrl(hash) {
-        if (!this.explorerBaseUrl() || !/^[0-9a-f]{64}$/i.test(hash)) return '#';
+        if (!this.explorerBaseUrl() || !/^[0-9a-f]{64}$/i.test(hash))
+            return "#";
         return `${this.explorerBaseUrl()}/tx/${hash}`;
     },
 
     explorerLedgerUrl(ledger) {
-        if (!this.explorerBaseUrl() || !/^\d+$/.test(String(ledger))) return '#';
+        if (!this.explorerBaseUrl() || !/^\d+$/.test(String(ledger)))
+            return "#";
         return `${this.explorerBaseUrl()}/ledger/${ledger}`;
     },
 
     explorerAddressUrl(address) {
-        if (!this.explorerBaseUrl() || !StrKey.isValidEd25519PublicKey(address)) return '#';
+        if (!this.explorerBaseUrl() || !StrKey.isValidEd25519PublicKey(address))
+            return "#";
         return `${this.explorerBaseUrl()}/account/${address}`;
     },
 
     explorerContractUrl(contractId) {
-        if (!this.explorerBaseUrl() || !StrKey.isValidContract(contractId)) return '#';
-        return `${this.explorerBaseUrl()}/contract/${encodeURIComponent(contractId)}`;
+        if (!this.explorerBaseUrl() || !StrKey.isValidContract(contractId))
+            return "#";
+        return `${this.explorerBaseUrl()}/contract/${encodeURIComponent(
+            contractId,
+        )}`;
     },
 
     explorerContractStorageUrl(contractId) {
         const base = this.explorerContractUrl(contractId);
-        return base === '#' ? '#' : `${base}/storage`;
+        return base === "#" ? "#" : `${base}/storage`;
     },
 
     async copyToClipboard(text) {
         try {
             await navigator.clipboard.writeText(text);
-            Toast.show('Copied to clipboard', 'success');
+            Toast.show("Copied to clipboard", "success");
             return true;
         } catch {
-            Toast.show('Failed to copy', 'error');
+            Toast.show("Failed to copy", "error");
             return false;
         }
     },
 };
 
 export const Toast = {
-    show(message, type = 'success', duration = 4000, opts = {}) {
-        const container = document.getElementById('toast-container');
+    show(message, type = "success", duration = 4000, opts = {}) {
+        const container = document.getElementById("toast-container");
         const template = App.templates.toast;
         if (!container || !template) return;
 
         const toast = template.content.cloneNode(true).firstElementChild;
-        const icon = toast.querySelector('.toast-icon');
-        const msgEl = toast.querySelector('.toast-message');
-        const link = toast.querySelector('.toast-link');
+        const icon = toast.querySelector(".toast-icon");
+        const msgEl = toast.querySelector(".toast-message");
+        const link = toast.querySelector(".toast-link");
 
         const friendlyMessage = friendlyErrorMessage(message);
-        msgEl.textContent = String(friendlyMessage ?? '');
-        msgEl.title = String(friendlyMessage ?? '');
+        msgEl.textContent = String(friendlyMessage ?? "");
+        msgEl.title = String(friendlyMessage ?? "");
         toast.dataset.status = type;
-        toast.dataset.state = 'visible';
+        toast.dataset.state = "visible";
 
-        const dot = type === 'info' ? 'bg-slate-300' : type === 'error' ? 'bg-rose-400' : 'bg-cyan-300';
-        const border = type === 'info' ? 'border-slate-400/40' : type === 'error' ? 'border-rose-400/40' : 'border-cyan-400/40';
-        icon?.classList.remove('bg-cyan-300');
+        const dot =
+            type === "info"
+                ? "bg-slate-300"
+                : type === "error"
+                ? "bg-rose-400"
+                : "bg-cyan-300";
+        const border =
+            type === "info"
+                ? "border-slate-400/40"
+                : type === "error"
+                ? "border-rose-400/40"
+                : "border-cyan-400/40";
+        icon?.classList.remove("bg-cyan-300");
         icon?.classList.add(dot);
         toast.classList.add(border);
 
         if (opts.origin) {
-            toast.setAttribute('data-toast-origin', opts.origin);
+            toast.setAttribute("data-toast-origin", opts.origin);
         }
         if (opts.transactionHash) {
             toast.dataset.transactionHash = opts.transactionHash;
@@ -179,16 +211,17 @@ export const Toast = {
 
         if (opts.linkUrl && link) {
             link.href = opts.linkUrl;
-            if (opts.linkAriaLabel) link.setAttribute('aria-label', opts.linkAriaLabel);
-            link.classList.remove('hidden');
+            if (opts.linkAriaLabel)
+                link.setAttribute("aria-label", opts.linkAriaLabel);
+            link.classList.remove("hidden");
         }
 
         container.appendChild(toast);
 
         setTimeout(() => {
-            toast.dataset.state = 'dismissing';
-            toast.style.opacity = '0';
-            toast.style.transform = 'translateY(8px)';
+            toast.dataset.state = "dismissing";
+            toast.style.opacity = "0";
+            toast.style.transform = "translateY(8px)";
             setTimeout(() => toast.remove(), 200);
         }, duration);
     },

@@ -7,9 +7,9 @@ Zero-knowledge proof generation for private Stellar payments. This application a
 ## Features of the web application
 - Support for deposits, transfers, and withdrawals
 - Real-time synchronization with on-chain state
-- Freighter wallet integration for Stellar transactions
+- Varial wallet integration for Stellar transactions
 - Client-side Groth16 proof generation via WebAssembly
-- Encrypted local state in SQLite (OPFS), unlocked via Freighter
+- Encrypted local state in SQLite (OPFS), unlocked via Varial
 - Note encryption/decryption
 - Simulation of ASP providers for testing (`/admin.html`)
 
