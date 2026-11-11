@@ -1,10 +1,10 @@
-// Freighter extension operations. This module owns approval discovery and
+// Varial extension operations. This module owns approval discovery and
 // interaction; runner.mjs remains responsible for browser-context lifecycle.
 
 import { createLogger } from './logger.mjs';
 import { WaitTimeoutError, waitForCondition } from './waits.mjs';
 
-const FREIGHTER_EXTENSION_ID = 'bcacfldlkkdogcmkkibnjlakofdplcbk';
+const VARIAL_EXTENSION_ID = 'bcacfldlkkdogcmkkibnjlakofdplcbk';
 
 const log = createLogger('wallet');
 const APPROVAL_ROUTES = {
@@ -20,33 +20,33 @@ const APPROVE_BUTTON_TEXT = {
   signAuthEntry: 'Confirm',
 };
 
-function isFreighterApprovalUrl(url, kind) {
-  if (!url.startsWith(`chrome-extension://${FREIGHTER_EXTENSION_ID}/`)) return false;
+function isVarialApprovalUrl(url, kind) {
+  if (!url.startsWith(`chrome-extension://${VARIAL_EXTENSION_ID}/`)) return false;
   const route = APPROVAL_ROUTES[kind];
-  if (!route) throw new Error(`isFreighterApprovalUrl: unknown approval kind '${kind}'`);
+  if (!route) throw new Error(`isVarialApprovalUrl: unknown approval kind '${kind}'`);
   return url.includes(`#/${route}`);
 }
 
-function isFreighterExtensionPage(url) {
-  return url.startsWith(`chrome-extension://${FREIGHTER_EXTENSION_ID}/`);
+function isVarialExtensionPage(url) {
+  return url.startsWith(`chrome-extension://${VARIAL_EXTENSION_ID}/`);
 }
 
 function extensionPages(context) {
   return context.pages()
     .map((page) => page.url())
-    .filter(isFreighterExtensionPage);
+    .filter(isVarialExtensionPage);
 }
 
 async function extensionHomePage(context) {
-  const homeUrl = `chrome-extension://${FREIGHTER_EXTENSION_ID}/index.html`;
-  const existing = context.pages().find((page) => isFreighterExtensionPage(page.url()));
+  const homeUrl = `chrome-extension://${VARIAL_EXTENSION_ID}/index.html`;
+  const existing = context.pages().find((page) => isVarialExtensionPage(page.url()));
   const page = existing || (await context.newPage());
   if (page.url() !== homeUrl) await page.goto(homeUrl);
   return page;
 }
 
-export async function unlockFreighter(context, password = process.env.E2E_FREIGHTER_PASSWORD) {
-  if (!password) throw new Error('unlockFreighter: E2E_FREIGHTER_PASSWORD not set');
+export async function unlockVarial(context, password = process.env.E2E_VARIAL_PASSWORD) {
+  if (!password) throw new Error('unlockVarial: E2E_VARIAL_PASSWORD not set');
   const page = await extensionHomePage(context);
   // The extension router may redirect from bare index.html to its account
   // screen after navigation resolves. Wait for a routed URL when it appears;
@@ -58,13 +58,13 @@ export async function unlockFreighter(context, password = process.env.E2E_FREIGH
   await unlockInput.fill(password);
   await page.getByText('Unlock', { exact: true }).click();
   await waitForCondition({
-    operation: 'freighter:unlock',
+    operation: 'varial:unlock',
     timeoutMs: 15_000,
     observe: async () => ({ url: page.url(), unlockVisible: await unlockInput.isVisible().catch(() => false) }),
     isReady: ({ unlockVisible }) => !unlockVisible,
   }).catch((error) => {
     throw new Error(
-      `unlockFreighter: still on the unlock screen after entering E2E_FREIGHTER_PASSWORD; ` +
+      `unlockVarial: still on the unlock screen after entering E2E_VARIAL_PASSWORD; ` +
       `the profile snapshot may be stale or corrupted — rebuild it with ` +
       `'bash integration-tests-app/scripts/setup.sh --force'. ${error.message}`,
     );
@@ -90,7 +90,7 @@ async function submitSecretKeyImport(page, secret, password) {
 // Imports `secret` as a new wallet. Assumes the profile has exactly one
 // wallet so far (the throwaway from provisioning) — true for every restored
 // snapshot, since accounts are never baked into it.
-export async function importAccount(context, secret, password = process.env.E2E_FREIGHTER_PASSWORD) {
+export async function importAccount(context, secret, password = process.env.E2E_VARIAL_PASSWORD) {
   const page = await extensionHomePage(context);
   await page.getByText('Account 1', { exact: true }).click();
   await submitSecretKeyImport(page, secret, password);
@@ -101,7 +101,7 @@ export async function importAccount(context, secret, password = process.env.E2E_
 // Unlike importAccount, the header no longer reads "Account 1" once another
 // account is active, so this opens the switcher via its testid instead of
 // hardcoded text.
-export async function importAdditionalAccount(context, secret, password = process.env.E2E_FREIGHTER_PASSWORD) {
+export async function importAdditionalAccount(context, secret, password = process.env.E2E_VARIAL_PASSWORD) {
   const page = await extensionHomePage(context);
   await page.click(ACCOUNT_NAME_HEADER, { force: true });
   await submitSecretKeyImport(page, secret, password);
@@ -110,10 +110,10 @@ export async function importAdditionalAccount(context, secret, password = proces
 
 const shortAddress = (address) => `${address.slice(0, 4)}…${address.slice(-4)}`;
 
-// The row for `address` in Freighter's account list, which it opens, or null.
-// Freighter keeps account keys encrypted, so this list, which names each
+// The row for `address` in Varial's account list, which it opens, or null.
+// Varial keeps account keys encrypted, so this list, which names each
 // account by its shortened address, is where a held account shows.
-async function freighterAccountRow(context, address) {
+async function varialAccountRow(context, address) {
   const page = await extensionHomePage(context);
   await page.click(ACCOUNT_NAME_HEADER, { force: true });
   const rows = page.locator('.detail-name');
@@ -128,12 +128,12 @@ async function freighterAccountRow(context, address) {
   return null;
 }
 
-// Makes `address` Freighter's active account, and proves it took.
-export async function selectFreighterAccount(context, address) {
+// Makes `address` Varial's active account, and proves it took.
+export async function selectVarialAccount(context, address) {
   const short = shortAddress(address);
   const page = await extensionHomePage(context);
-  const row = await freighterAccountRow(context, address);
-  if (!row) throw new Error(`no Freighter account row shows ${short}`);
+  const row = await varialAccountRow(context, address);
+  if (!row) throw new Error(`no Varial account row shows ${short}`);
   await row.click({ force: true });
 
   const deadline = Date.now() + 10_000;
@@ -145,7 +145,7 @@ export async function selectFreighterAccount(context, address) {
     if (active === address) return;
     await page.waitForTimeout(200);
   }
-  throw new Error(`could not make ${short} the active Freighter account; active is ${active || '(none)'}`);
+  throw new Error(`could not make ${short} the active Varial account; active is ${active || '(none)'}`);
 }
 
 async function pageShowsApprovalButton(page, buttonText) {
@@ -153,13 +153,13 @@ async function pageShowsApprovalButton(page, buttonText) {
   return page.getByRole('button', { name: buttonText, exact: true }).isVisible().catch(() => false);
 }
 
-async function findFreighterApproval(context, kinds) {
+async function findVarialApproval(context, kinds) {
   for (const page of context.pages()) {
     const url = page.url();
     for (const kind of kinds) {
-      if (isFreighterApprovalUrl(url, kind)) return { page, kind };
+      if (isVarialApprovalUrl(url, kind)) return { page, kind };
     }
-    if (!isFreighterExtensionPage(url)) continue;
+    if (!isVarialExtensionPage(url)) continue;
     for (const kind of kinds) {
       const buttonText = APPROVE_BUTTON_TEXT[kind];
       if (buttonText && await pageShowsApprovalButton(page, buttonText)) return { page, kind };
@@ -174,12 +174,12 @@ async function waitForApproval(context, kinds, {
   waitOptions = {},
 } = {}) {
   const result = await waitForCondition({
-    operation: `freighter-approval:${kinds.join('|')}`,
+    operation: `varial-approval:${kinds.join('|')}`,
     timeoutMs,
     intervalMs,
     ...waitOptions,
     observe: async () => ({
-      approval: await findFreighterApproval(context, kinds),
+      approval: await findVarialApproval(context, kinds),
       extensionPages: extensionPages(context),
       requestedKinds: kinds,
     }),
@@ -188,19 +188,19 @@ async function waitForApproval(context, kinds, {
   return result.value.approval;
 }
 
-export async function waitForFreighterApproval(context, kind, options) {
+export async function waitForVarialApproval(context, kind, options) {
   return (await waitForApproval(context, [kind], options)).page;
 }
 
-export function waitForAnyFreighterApproval(context, kinds, options) {
+export function waitForAnyVarialApproval(context, kinds, options) {
   return waitForApproval(context, kinds, options);
 }
 
-/** Prove a pre-signing operation did not open any Freighter approval. */
-export async function expectNoFreighterApproval(context, kinds, options) {
+/** Prove a pre-signing operation did not open any Varial approval. */
+export async function expectNoVarialApproval(context, kinds, options) {
   try {
-    const approval = await waitForAnyFreighterApproval(context, kinds, options);
-    throw new Error(`unexpected Freighter approval: ${approval.kind}`);
+    const approval = await waitForAnyVarialApproval(context, kinds, options);
+    throw new Error(`unexpected Varial approval: ${approval.kind}`);
   } catch (error) {
     if (error instanceof WaitTimeoutError) return true;
     throw error;
@@ -220,7 +220,7 @@ async function clickByText(page, text) {
 async function waitForApprovalResolution(page, kind, { timeoutMs = 5_000 } = {}) {
   const buttonText = APPROVE_BUTTON_TEXT[kind] || 'Confirm';
   await waitForCondition({
-    operation: `freighter-approval-resolve:${kind}`,
+    operation: `varial-approval-resolve:${kind}`,
     timeoutMs,
     intervalMs: 100,
     observe: async () => ({
@@ -229,7 +229,7 @@ async function waitForApprovalResolution(page, kind, { timeoutMs = 5_000 } = {})
       buttonVisible: await pageShowsApprovalButton(page, buttonText),
     }),
     isReady: ({ closed, url, buttonVisible }) => (
-      closed || !isFreighterApprovalUrl(url, kind) || !buttonVisible
+      closed || !isVarialApprovalUrl(url, kind) || !buttonVisible
     ),
   });
 }
@@ -266,7 +266,7 @@ export async function approveOrWatch(context, kind, {
   pageCloseOptions,
 } = {}) {
   const startedAt = Date.now();
-  const page = await waitForFreighterApproval(context, kind, { timeoutMs, waitOptions });
+  const page = await waitForVarialApproval(context, kind, { timeoutMs, waitOptions });
   log.info(`APPROVE: '${label}' approval page found after ${Date.now() - startedAt}ms`);
 
   if (mode === 'human') {
@@ -288,8 +288,8 @@ export async function approveOrWatch(context, kind, {
   return { kind, mode, ...result };
 }
 
-export async function rejectInFreighter(context, kind, options = {}) {
-  const page = await waitForFreighterApproval(context, kind, options);
+export async function rejectInVarial(context, kind, options = {}) {
+  const page = await waitForVarialApproval(context, kind, options);
   try {
     await page.getByText('Cancel', { exact: true }).first().waitFor({ state: 'visible', timeout: 10_000 });
   } catch (error) {

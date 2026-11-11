@@ -1,7 +1,7 @@
 // Ephemeral per-test accounts against the local network: generate, fund via
-// friendbot, and (for accounts Freighter never signs for, i.e. passive
+// friendbot, and (for accounts Varial never signs for, i.e. passive
 // transfer recipients) register public keys through the app's own SDK
-// bundle, driven with a local secret-key signer instead of Freighter.
+// bundle, driven with a local secret-key signer instead of Varial.
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -41,7 +41,7 @@ async function waitForAccountVisible(address) {
 }
 
 // Exposes page-context bridges to sign with `keypair` via the app's
-// WalletSigner interface — Freighter is one implementation, this is another.
+// WalletSigner interface — Varial is one implementation, this is another.
 // Wrap signatures in a real Buffer before toString('hex'/'base64'): a bare
 // Uint8Array silently ignores the encoding argument.
 export async function exposeSigner(page, keypair) {
@@ -195,7 +195,7 @@ export async function register(keypair) {
 }
 
 // Creates, funds, and registers a passive recipient — one never connected to
-// Freighter, only ever looked up by address.
+// Varial, only ever looked up by address.
 export async function createRegisteredAccount() {
   const account = createAccount();
   await fund(account);

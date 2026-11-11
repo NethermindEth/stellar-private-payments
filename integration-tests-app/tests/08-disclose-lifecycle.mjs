@@ -31,11 +31,11 @@ function receiptStates(receipt, verification) {
 }
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForVarialApproval, approveOrWatch } = helpers;
   const logTag = '08-disclose-lifecycle';
   const rpcUrl = RPC_URL;
 
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
 
   const deposits = [];

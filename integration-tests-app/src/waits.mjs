@@ -1,4 +1,4 @@
-// Bounded polling primitives shared by Freighter E2E operations.
+// Bounded polling primitives shared by Varial E2E operations.
 //
 // Playwright's own assertions are ideal when a single locator is enough. This
 // helper covers operation-level readiness that needs several observable values

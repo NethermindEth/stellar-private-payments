@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Provision and snapshot a Freighter profile for e2e tests.
+# Provision and snapshot a Varial profile for e2e tests.
 #
 # Usage: provision.sh [--snapshot|--restore|--verify] [--force]
 #
@@ -29,7 +29,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: provision.sh [OPTIONS]
 
-Provision, snapshot, restore, or verify the Freighter Chrome profile for e2e tests.
+Provision, snapshot, restore, or verify the Varial Chrome profile for e2e tests.
 
 Options:
   --snapshot       Tar the working profile into profile-snapshot.tar.gz (default)
@@ -102,7 +102,7 @@ case "$MODE" in
     rm -rf "$PROFILE_DIR"
 
     # Provision the profile
-    step "provisioning the Freighter profile"
+    step "provisioning the Varial profile"
     node "$SCRIPT_DIR/provision.mjs"
 
     # Snapshot the profile.
@@ -114,7 +114,7 @@ case "$MODE" in
     # The two crx caches are the load-bearing exclusions. They hold Chrome's
     # machine-specific view of installed extensions; restoring them into a
     # fresh profile that is simultaneously being given --load-extension leaves
-    # the extension undetectable to the page ("Freighter not detected").
+    # the extension undetectable to the page ("Varial not detected").
     #
     # Singleton* are Chrome's single-instance locks. A stale one makes Chrome
     # treat the restored profile as already in use and quietly fall back to a
@@ -127,11 +127,11 @@ case "$MODE" in
     # exclude that exactly.
     step "creating snapshot: $SNAPSHOT_FILE"
     need tar
-    # Do NOT add "Service Worker/ScriptCache" or "CacheStorage" here. Freighter
+    # Do NOT add "Service Worker/ScriptCache" or "CacheStorage" here. Varial
     # is MV3: its background service worker script lives in ScriptCache, and
     # excluding it leaves the worker unable to start in a restored profile.
     # The extension then answers "Could not establish connection. Receiving end
-    # does not exist.", injects no provider, and the app reports Freighter as
+    # does not exist.", injects no provider, and the app reports Varial as
     # not detected — with the wallet sitting intact in storage the whole time.
     tar -czf "$SNAPSHOT_FILE" \
       --exclude='GPUCache' \

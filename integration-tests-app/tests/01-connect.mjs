@@ -1,7 +1,7 @@
 // Wallet connect smoke test.
 //
-// By the time run() is called, the runner has already unlocked Freighter
-// and called connectApp() — which itself exercises Freighter's grant-access
+// By the time run() is called, the runner has already unlocked Varial
+// and called connectApp() — which itself exercises Varial's grant-access
 // approval path (auto-approved when APPROVE=auto; the popup is optional).
 // This test's job is
 // just to assert the connected end state is what it actually looks like in
@@ -25,7 +25,7 @@ export async function run({ page }) {
     .locator('#wallet-btn')
     .isVisible()
     .catch(() => false);
-  assert(!connectBtnVisible, '"Connect Freighter" button is still visible after connecting');
+  assert(!connectBtnVisible, '"Connect Varial" button is still visible after connecting');
 
   const walletText = await page
     .locator('#wallet-text')

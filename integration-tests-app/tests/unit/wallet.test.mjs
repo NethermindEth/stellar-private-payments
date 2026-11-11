@@ -3,10 +3,10 @@ import test from 'node:test';
 
 import {
   approveOrWatch,
-  expectNoFreighterApproval,
-  rejectInFreighter,
-  waitForAnyFreighterApproval,
-  waitForFreighterApproval,
+  expectNoVarialApproval,
+  rejectInVarial,
+  waitForAnyVarialApproval,
+  waitForVarialApproval,
 } from '../../src/wallet.mjs';
 
 const extensionUrl = (route = '') => `chrome-extension://bcacfldlkkdogcmkkibnjlakofdplcbk/index.html${route}`;
@@ -70,18 +70,18 @@ function advancingWaitOptions(onSleep = () => {}) {
 test('discovers approvals in a dedicated popup and in an extension tab', async () => {
   const popup = fakePage({ route: '#/sign-transaction?request=1' });
   const popupContext = fakeContext([popup]);
-  assert.equal(await waitForFreighterApproval(popupContext, 'signTransaction'), popup);
+  assert.equal(await waitForVarialApproval(popupContext, 'signTransaction'), popup);
 
   const tab = fakePage({ buttons: ['Confirm'] });
   const tabContext = fakeContext([tab]);
-  const found = await waitForAnyFreighterApproval(tabContext, ['signAuthEntry']);
+  const found = await waitForAnyVarialApproval(tabContext, ['signAuthEntry']);
   assert.deepEqual(found, { page: tab, kind: 'signAuthEntry' });
 });
 
 test('supports sequential approval kinds as extension pages change', async () => {
   const context = fakeContext();
   let firstSleep = true;
-  const first = await waitForAnyFreighterApproval(context, ['signMessage', 'signTransaction'], {
+  const first = await waitForAnyVarialApproval(context, ['signMessage', 'signTransaction'], {
     timeoutMs: 20,
     intervalMs: 5,
     waitOptions: advancingWaitOptions(() => {
@@ -94,20 +94,20 @@ test('supports sequential approval kinds as extension pages change', async () =>
   assert.equal(first.kind, 'signMessage');
 
   context.allPages.splice(0, 1, fakePage({ route: '#/sign-transaction?request=2' }));
-  const second = await waitForAnyFreighterApproval(context, ['signMessage', 'signTransaction']);
+  const second = await waitForAnyVarialApproval(context, ['signMessage', 'signTransaction']);
   assert.equal(second.kind, 'signTransaction');
 });
 
 test('approval timeout includes requested kinds and final extension pages', async () => {
   const context = fakeContext();
   await assert.rejects(
-    waitForFreighterApproval(context, 'connect', {
+    waitForVarialApproval(context, 'connect', {
       timeoutMs: 10,
       intervalMs: 5,
       waitOptions: advancingWaitOptions(),
     }),
     (error) => {
-      assert.equal(error.operation, 'freighter-approval:connect');
+      assert.equal(error.operation, 'varial-approval:connect');
       assert.deepEqual(error.lastObservedState, {
         approval: null,
         extensionPages: [],
@@ -118,16 +118,16 @@ test('approval timeout includes requested kinds and final extension pages', asyn
   );
 });
 
-test('expectNoFreighterApproval succeeds only when the bounded approval wait times out', async () => {
-  await assert.doesNotReject(expectNoFreighterApproval(fakeContext(), ['signTransaction'], {
+test('expectNoVarialApproval succeeds only when the bounded approval wait times out', async () => {
+  await assert.doesNotReject(expectNoVarialApproval(fakeContext(), ['signTransaction'], {
     timeoutMs: 10,
     intervalMs: 5,
     waitOptions: advancingWaitOptions(),
   }));
 
   await assert.rejects(
-    expectNoFreighterApproval(fakeContext([fakePage({ route: '#/sign-transaction' })]), ['signTransaction']),
-    /unexpected Freighter approval: signTransaction/,
+    expectNoVarialApproval(fakeContext([fakePage({ route: '#/sign-transaction' })]), ['signTransaction']),
+    /unexpected Varial approval: signTransaction/,
   );
 });
 
@@ -138,7 +138,7 @@ test('auto approval and rejection click the expected extension controls', async 
   assert.deepEqual(approvePage.clicks, ['Confirm']);
 
   const rejectPage = fakePage({ route: '#/sign-transaction', buttons: ['Cancel'] });
-  const rejected = await rejectInFreighter(fakeContext([rejectPage]), 'signTransaction');
+  const rejected = await rejectInVarial(fakeContext([rejectPage]), 'signTransaction');
   assert.equal(rejected.pageClosed, false);
   assert.deepEqual(rejectPage.clicks, ['Cancel']);
 });

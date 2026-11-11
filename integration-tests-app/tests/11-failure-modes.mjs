@@ -19,7 +19,7 @@ import {
 import { gotoMoveFlow, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
-import { expectNoFreighterApproval } from '../src/wallet.mjs';
+import { expectNoVarialApproval } from '../src/wallet.mjs';
 import { waitForCondition } from '../src/waits.mjs';
 import { RPC_URL, createRegisteredAccount } from '../src/testAccount.mjs';
 import { formatAmount } from '../../app/js/ui/notes-view.js';
@@ -70,8 +70,8 @@ function randomUnregisteredAddress() {
 }
 
 async function assertNoApproval(context, label) {
-  await expectNoFreighterApproval(context, APPROVAL_KINDS, { timeoutMs: 5_000 });
-  log.info(`${label}: no Freighter approval appeared (pre-signing failure confirmed)`);
+  await expectNoVarialApproval(context, APPROVAL_KINDS, { timeoutMs: 5_000 });
+  log.info(`${label}: no Varial approval appeared (pre-signing failure confirmed)`);
 }
 
 // Submits a spend on the withdraw or transfer form and expects a refusal toast
@@ -90,14 +90,14 @@ async function expectSpendRefused(page, context, flow, amount, predicate) {
 }
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForVarialApproval, approveOrWatch } = helpers;
   const logTag = '11-failure-modes';
   const rpcUrl = RPC_URL;
 
   const recipientAccount = await createRegisteredAccount();
   const recipient = recipientAccount.publicKey();
 
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
 
   const initialSync = await waitForSyncedLedger(page);

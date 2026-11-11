@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command first-time setup for the real-Freighter e2e suite.
+# One-command first-time setup for the real-Varial e2e suite.
 #
 # Delegates to the consolidated provision.sh, which handles the full
 # provisioning, snapshot, and verification pipeline.
@@ -24,8 +24,8 @@ Usage: setup.sh [--force]
 First-time setup for the integration-tests-app suite, in one command:
 
   1. npm ci (skipped when node_modules exists)
-  2. fetch the pinned Freighter extension (if not cached)
-  3. provision the Freighter profile (extension, localnet, sidebar mode)
+  2. fetch the pinned Varial extension (if not cached)
+  3. provision the Varial profile (extension, localnet, sidebar mode)
   4. verify with a seeded ephemeral account (no wizard, deposit form reachable)
   5. snapshot the result
 
@@ -39,7 +39,7 @@ esac
 
 # A server left running across branch switches can serve an older dist/ while
 # APP_URL still points to it. Reject that before provision.sh clears a working
-# Freighter profile and drives the wrong storage/onboarding flow.
+# Varial profile and drives the wrong storage/onboarding flow.
 # Asset names do not change between builds (Trunk.toml sets filehash = false),
 # so compare contents: the app code, SDK and storage worker must match this
 # checkout's build byte for byte.
@@ -69,7 +69,7 @@ if [ ! -d "$PKG_ROOT/node_modules" ]; then
   ( cd "$PKG_ROOT" && npm ci )
 fi
 
-# Step 2, same story: vendor/freighter is git-ignored (third-party build
+# Step 2, same story: vendor/varial is git-ignored (third-party build
 # output), so a fresh checkout has no extension at all until this runs.
 # Without it, runner.mjs's --load-extension points at a directory with no
 # valid manifest, Chromium never derives the pinned extension id, and
@@ -78,7 +78,7 @@ fi
 # problem but is actually just a missing fetch step. fetch-extension.sh is
 # itself idempotent (skips cleanly if the pinned version is already
 # vendored), so this is safe to run unconditionally.
-step "ensuring the pinned Freighter extension is vendored"
+step "ensuring the pinned Varial extension is vendored"
 bash "$SCRIPT_DIR/fetch-extension.sh"
 
 if [ "${1:-}" = "--force" ]; then

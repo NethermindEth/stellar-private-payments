@@ -1,6 +1,6 @@
 // Shared transaction operation for deposit, withdrawal, transfer, and the
 // advanced transaction composer. It fills the form, confirms the
-// flow-specific dialog, handles Freighter approvals, captures the
+// flow-specific dialog, handles Varial approvals, captures the
 // transaction hash, and confirms it on-chain.
 
 import { createLogger } from './logger.mjs';
@@ -146,10 +146,10 @@ export async function waitForSubmittedTransaction(page, {
 }
 
 // Fill amount, click submit, handle the runtime confirmation dialog, drive
-// every sequential Freighter approval, capture the submitted tx hash from
+// every sequential Varial approval, capture the submitted tx hash from
 // the toast's explorer link, then confirm SUCCESS on-chain.
 async function submitAndConfirmOperation(
-  { page, context, waitForAnyFreighterApproval, approveOrWatch },
+  { page, context, waitForAnyVarialApproval, approveOrWatch },
   {
     logTag,
     flowName,
@@ -198,7 +198,7 @@ async function submitAndConfirmOperation(
     await confirmDialog.getByRole('button', { name: confirmButtonLabel, exact: true }).click();
   }
 
-  log.info(`${flowName}: driving Freighter approvals (deadline ${progressTimeoutMs}ms)`);
+  log.info(`${flowName}: driving Varial approvals (deadline ${progressTimeoutMs}ms)`);
   const seenStages = new Set();
   let sawSubmitting = (await submitBtn.getAttribute('data-status').catch(() => 'unknown')) === 'submitting';
   let firstApprovalElapsed = null;
@@ -224,7 +224,7 @@ async function submitAndConfirmOperation(
     while (Date.now() < progressDeadline) {
       const buttonState = await submitBtn.getAttribute('data-status').catch(() => 'unknown');
       if (buttonState === 'submitting') sawSubmitting = true;
-      const pending = await waitForAnyFreighterApproval(context, ['signMessage', 'signAuthEntry', 'signTransaction'], {
+      const pending = await waitForAnyVarialApproval(context, ['signMessage', 'signAuthEntry', 'signTransaction'], {
         timeoutMs: APPROVAL_GRACE_MS,
       }).catch(() => null);
 
@@ -240,9 +240,9 @@ async function submitAndConfirmOperation(
 
       if (firstApprovalElapsed === null) {
         firstApprovalElapsed = Date.now() - pollStart;
-        log.info(`${flowName}: first Freighter approval detected after ${firstApprovalElapsed}ms: ${pending.kind}`);
+        log.info(`${flowName}: first Varial approval detected after ${firstApprovalElapsed}ms: ${pending.kind}`);
       }
-      log.info(`${flowName}: driving Freighter approval: ${pending.kind}`);
+      log.info(`${flowName}: driving Varial approval: ${pending.kind}`);
       await approve(pending.kind, { timeoutMs: 15000, label: pending.kind });
     }
   } finally {

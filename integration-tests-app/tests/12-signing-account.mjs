@@ -1,4 +1,4 @@
-// Another account signs and pays for the owner's notes. Freighter holds the
+// Another account signs and pays for the owner's notes. Varial holds the
 // owner (the connected driver) and a second ephemeral signer, chosen in the
 // app's picker; deposits still come from the owner, withdrawals from the signer.
 
@@ -12,7 +12,7 @@ import { waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { waitForCondition } from '../src/waits.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 import { RPC_URL, createAccount, fund } from '../src/testAccount.mjs';
-import { importAdditionalAccount, selectFreighterAccount } from '../src/wallet.mjs';
+import { importAdditionalAccount, selectVarialAccount } from '../src/wallet.mjs';
 
 const log = createLogger('12-signing-account');
 
@@ -29,7 +29,7 @@ async function readConfirmation(page, { submitSelector, title }) {
   return { text, warning };
 }
 
-// Import a second account into Freighter. No app-level "connect" needed:
+// Import a second account into Varial. No app-level "connect" needed:
 // signTransaction/signAuthEntry take an explicit address, so reconnecting
 // while this account is active would only risk the app re-deriving the
 // owner's keys under the wrong signer (verifySignerAddress would then
@@ -44,17 +44,17 @@ async function importAndConnectSigner(context, page, owner) {
     throw new Error(`importing the signer account changed the app's note owner to ${remembered || '(none)'}`);
   }
 
-  await selectFreighterAccount(context, owner);
+  await selectVarialAccount(context, owner);
   return signerAccount;
 }
 
 export async function run(helpers) {
-  const { page, context, driver, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, driver, waitForVarialApproval, approveOrWatch } = helpers;
   const logTag = '12-signing-account';
   const rpcUrl = RPC_URL;
   const owner = driver.publicKey();
 
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag });
 
   const signerAccount = await importAndConnectSigner(context, page, owner);
   const signer = signerAccount.publicKey();

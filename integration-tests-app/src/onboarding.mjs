@@ -27,7 +27,7 @@ const WIZARD_BUTTON_PRIORITY = [
   'Continue', // the storage step's own follow-on panel after a successful request
 ];
 
-export async function driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag = 'onboarding' }) {
+export async function driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag = 'onboarding' }) {
   const log = createLogger(`${logTag}/wizard`);
   for (let step = 0; step < 10; step += 1) {
     // The modal remains in the DOM and may appear after asynchronous storage
@@ -89,7 +89,7 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
     await page.getByText(choice, { exact: true }).first().click({ force: true });
 
     if (choice === 'Derive and store keys') {
-      const approvalPage = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 30000 }).catch(() => null);
+      const approvalPage = await waitForVarialApproval(context, 'signMessage', { timeoutMs: 30000 }).catch(() => null);
       if (approvalPage) await approveOrWatch(context, 'signMessage', { timeoutMs: 30000 });
     }
 

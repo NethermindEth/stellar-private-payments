@@ -13,11 +13,11 @@ import { RPC_URL } from '../src/testAccount.mjs';
 const log = createLogger('06-disclose-basic');
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForVarialApproval, approveOrWatch } = helpers;
   const logTag = '06-disclose-basic';
   const rpcUrl = RPC_URL;
 
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
 
   const initialSync = await waitForSyncedLedger(page);

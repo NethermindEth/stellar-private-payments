@@ -169,12 +169,12 @@ else
   export APP_URL="$LOCAL_URL"
 fi
 
-# Provision the Freighter profile if node_modules/extension/snapshot are
+# Provision the Varial profile if node_modules/extension/snapshot are
 # missing (E2E_SKIP_SETUP=1 bypasses this).
 if [ "${E2E_SKIP_SETUP:-}" != "1" ]; then
   MISSING=()
   [ -d "$PKG_ROOT/node_modules" ] || MISSING+=("node_modules")
-  [ -d "$PKG_ROOT/vendor/freighter" ] || MISSING+=("vendored extension")
+  [ -d "$PKG_ROOT/vendor/varial" ] || MISSING+=("vendored extension")
   [ -s "$PKG_ROOT/profile-snapshot.tar.gz" ] || MISSING+=("profile snapshot")
   if [ ${#MISSING[@]} -gt 0 ]; then
     step "profile: missing ${MISSING[*]} — running integration-tests-app/scripts/setup.sh"
@@ -182,7 +182,7 @@ if [ "${E2E_SKIP_SETUP:-}" != "1" ]; then
   fi
 fi
 
-# APPROVE=auto drives Freighter's approval prompts from the test runner.
+# APPROVE=auto drives Varial's approval prompts from the test runner.
 # Override with APPROVE=human (and HEADFUL=1) to approve them by hand.
 export APPROVE="${APPROVE:-auto}"
 

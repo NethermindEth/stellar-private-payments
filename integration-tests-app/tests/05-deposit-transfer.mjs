@@ -14,17 +14,17 @@ import { RPC_URL, createRegisteredAccount } from '../src/testAccount.mjs';
 const log = createLogger('05-deposit-transfer');
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForVarialApproval, approveOrWatch } = helpers;
   const logTag = '05-deposit-transfer';
   const rpcUrl = RPC_URL;
 
   // A passive recipient: created, funded, and registered directly through
-  // the app's SDK bundle — it never needs Freighter, since it's only ever
+  // the app's SDK bundle — it never needs Varial, since it's only ever
   // looked up by address, never connected.
   const recipientAccount = await createRegisteredAccount();
   const recipient = recipientAccount.publicKey();
 
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
 
   const initialSync = await waitForSyncedLedger(page);

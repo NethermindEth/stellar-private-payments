@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Orchestrate one e2e run: restore a fresh Freighter profile from the
+# Orchestrate one e2e run: restore a fresh Varial profile from the
 # snapshot into a temp dir, run src/runner.mjs against it, then clean up.
 #
 # Usage: run-e2e.sh TEST_FILE
@@ -19,7 +19,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: run-e2e.sh [OPTIONS] TEST_FILE
 
-Restores a fresh Freighter profile from the snapshot (scripts/provision.sh
+Restores a fresh Varial profile from the snapshot (scripts/provision.sh
 --restore) into a temp dir, runs src/runner.mjs against it with the given
 TEST_FILE (a module exporting an async run({ context, page, ... }) function)
 — then removes the temp profile dir.
@@ -28,11 +28,11 @@ Options:
   -h, --help     Show this help
 
 Environment:
-  APPROVE=auto|human    auto clicks through Freighter approvals by text;
+  APPROVE=auto|human    auto clicks through Varial approvals by text;
                         human waits for you to act (the demo path)
   HEADFUL=1             Run Chrome headed instead of headless
   APP_URL                App URL to connect to (required; no default)
-  E2E_FREIGHTER_PASSWORD Freighter unlock password (default: a fixed
+  E2E_VARIAL_PASSWORD Varial unlock password (default: a fixed
                         constant — see src/env.mjs)
 
 Examples:
@@ -54,12 +54,12 @@ if [ -z "$TEST_FILE" ]; then
   die "need a TEST_FILE"
 fi
 
-# Provision the Freighter profile if node_modules/extension/snapshot are
+# Provision the Varial profile if node_modules/extension/snapshot are
 # missing (E2E_SKIP_SETUP=1 bypasses this).
 if [ "${E2E_SKIP_SETUP:-}" != "1" ]; then
   MISSING=()
   [ -d "$PKG_ROOT/node_modules" ] || MISSING+=("node_modules")
-  [ -d "$PKG_ROOT/vendor/freighter" ] || MISSING+=("vendored extension")
+  [ -d "$PKG_ROOT/vendor/varial" ] || MISSING+=("vendored extension")
   [ -s "$PKG_ROOT/profile-snapshot.tar.gz" ] || MISSING+=("profile snapshot")
   if [ ${#MISSING[@]} -gt 0 ]; then
     step "profile: missing ${MISSING[*]} — running integration-tests-app/scripts/setup.sh"

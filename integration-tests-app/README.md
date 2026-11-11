@@ -1,6 +1,6 @@
 # integration-tests-app
 
-End-to-end tests that drive the app through a real Freighter extension in
+End-to-end tests that drive the app through a real Varial extension in
 Chrome/Chromium, submitting real transactions against a local
 `stellar/quickstart` network started fresh for each run
 (`deployments/scripts/localnet.sh`) and deployed to
@@ -8,7 +8,7 @@ Chrome/Chromium, submitting real transactions against a local
 
 ## Requirements
 
-`serve-and-run.sh` and `run-e2e.sh` both check the Freighter profile is
+`serve-and-run.sh` and `run-e2e.sh` both check the Varial profile is
 ready (node_modules, the vendored extension, the profile snapshot) before
 every run and provision it via `scripts/setup.sh` if not
 (`E2E_SKIP_SETUP=1` opts out). That can't do the one-time headed onboarding
@@ -44,7 +44,7 @@ sudo apt install -y chromium-browser
 
 **Do not use the `chromium` snap for these tests.** The snap wrapper runs
 Chromium in its own mount namespace with a private `/tmp`, so the extension
-never loads and every test fails with "Connect Freighter is still shown".
+never loads and every test fails with "Connect Varial is still shown".
 If you hit that error, check `which chromium` / `E2E_CHROMIUM_PATH` for a
 `/snap/*` or `/var/snap/*` path and switch to the PPA install above.
 
@@ -144,7 +144,7 @@ bash integration-tests-app/scripts/serve-and-run.sh integration-tests-app/tests/
 
 Two env vars control a run:
 
-- `APPROVE=auto|human` — `auto` clicks through every Freighter approval
+- `APPROVE=auto|human` — `auto` clicks through every Varial approval
   popup by matching its button text; `human` leaves them alone and waits
   for you to click.
 - `HEADFUL=1` — runs Chrome with a visible window instead of headless.
@@ -195,7 +195,7 @@ Timeouts are ownership-specific, not one global test timeout:
 
   `connectApp` returns when the runtime is ready or onboarding is open.
   `driveWizard` completes onboarding and then waits for runtime readiness.
-- Freighter approval discovery is short and repeated while an operation is
+- Varial approval discovery is short and repeated while an operation is
   active.
 - Submitted transaction confirmation has a 60-second chain/RPC bound.
 - Indexer, note readiness, and disclosure proof/root work use their own
@@ -220,8 +220,8 @@ deliberately, not in a tight loop.
 
 | File | Proves |
 |---|---|
-| `tests/01-connect.mjs` | Connect flow: Freighter's grant-access approval, wallet address shown, network is the local custom network. |
-| `tests/02-deposit.mjs` | Deposit 0.01 XLM: proving/signing/submitting stages, Freighter signTransaction approval(s), and `SUCCESS` confirmation through Soroban RPC. |
+| `tests/01-connect.mjs` | Connect flow: Varial's grant-access approval, wallet address shown, network is the local custom network. |
+| `tests/02-deposit.mjs` | Deposit 0.01 XLM: proving/signing/submitting stages, Varial signTransaction approval(s), and `SUCCESS` confirmation through Soroban RPC. |
 | `tests/03-rejection.mjs` | Rejecting a deposit's signing prompt: the app surfaces it as "Deposit cancelled." (not a crash or generic error) and returns to idle. |
 | `tests/04-deposit-withdraw.mjs` | Deposit then withdraw to self back-to-back: two distinct transactions, both confirmed `SUCCESS` on-chain. |
 | `tests/05-deposit-transfer.mjs` | Deposit then transfer to a second, freshly created and registered account: recipient resolves through the public-key registry, two distinct transactions, both confirmed `SUCCESS` on-chain. |
@@ -237,7 +237,7 @@ deliberately, not in a tight loop.
 ## CI
 
 Two GitHub Actions workflows automate e2e testing: the pre-signing SDK
-suite gates on push/PR to main, and the Freighter suite runs a smoke
+suite gates on push/PR to main, and the Varial suite runs a smoke
 subset on PR plus the full suite on manual dispatch.
 
 ### Workflows
@@ -249,11 +249,11 @@ wasm32-unknown-unknown --manifest-path integration-tests-web/Cargo.toml --
 --include-ignored`), compiled from the checked-out commit and run in
 headless Chrome against a local `stellar/quickstart` network. These exercise
 the pre-signing SDK path (flows signed directly with ephemeral test-account
-secrets generated at run time — no Freighter, no deployed app), so they need
+secrets generated at run time — no Varial, no deployed app), so they need
 no nullifier-detection support in the deployed app. Locally the same suite
 runs via `integration-tests-web/run.sh`.
 
-**`integration-tests-app.yml`** — Freighter suite (smoke on PR, full on demand)
+**`integration-tests-app.yml`** — Varial suite (smoke on PR, full on demand)
 
 On pull requests to main it runs the smoke subset (01-connect,
 03-rejection, 05-deposit-transfer) as a fast gate; `workflow_dispatch`
@@ -276,13 +276,13 @@ session on our runners).
 ### CI credentials
 
 No GitHub secrets or environments. Each run generates its own ephemeral
-accounts (`testAccount.mjs`) and a fixed, non-sensitive Freighter wallet
+accounts (`testAccount.mjs`) and a fixed, non-sensitive Varial wallet
 password (`env.mjs`) — nothing is generated ahead of time to mask.
 
 ## Building the profile snapshot
 
-One command does the whole chain (npm deps, the pinned Freighter
-extension fetch, Freighter profile provisioning, headed
+One command does the whole chain (npm deps, the pinned Varial
+extension fetch, Varial profile provisioning, headed
 onboarding completion, the snapshot, and a verification pass):
 
 ```bash
@@ -299,7 +299,7 @@ headed rendering, so run setup on a machine with a desktop session.
 What setup.sh does under the hood, if you ever need the pieces:
 
 ```bash
-# 0. Fetch the pinned Freighter extension into vendor/ (git-ignored)
+# 0. Fetch the pinned Varial extension into vendor/ (git-ignored)
 bash integration-tests-app/scripts/fetch-extension.sh
 
 # 1. Provision a fresh profile, complete onboarding headed, and snapshot it.
@@ -317,4 +317,9 @@ concurrent runs at the same restored copy (Chrome's profile storage is
 single-writer). `scripts/run-e2e.sh` does this automatically and cleans up
 afterward.
 
-Unlocking browser storage requires Freighter message approval (two matching signatures when enrolling a new database, and one on later opens), which the runner handles automatically before onboarding.
+Unlocking browser storage requires Varial message approval (two matching signatures when enrolling a new database, and one on later opens), which the runner handles automatically before onboarding.
+
+`E2E_VARIAL_PASSWORD` takes precedence over the legacy `E2E_FREIGHTER_PASSWORD`
+variable. The default password is unchanged so existing browser profiles remain usable.
+The pinned extension is still downloaded from `stellar/freighter`; its extension ID,
+routes, and selectors are upstream identifiers and do not change with the branding.

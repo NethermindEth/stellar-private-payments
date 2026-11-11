@@ -1,7 +1,7 @@
 // Redact known secrets from any string before it hits a log line.
 //
 // CodeQL flags clear-text logging of process-environment data
-// (js/clear-text-logging): E2E_FREIGHTER_PASSWORD is read from the
+// (js/clear-text-logging): E2E_VARIAL_PASSWORD is read from the
 // environment and could otherwise surface inside error messages (e.g. a
 // thrown Error whose message embeds an env value). scrub() replaces it with
 // [REDACTED] so assert/error logging can never echo it. Per-test ephemeral
@@ -9,8 +9,8 @@
 // need no redaction here.
 
 function secrets() {
-  const v = process.env.E2E_FREIGHTER_PASSWORD;
-  return v && v.length >= 8 ? [v] : [];
+  return [process.env.E2E_VARIAL_PASSWORD, process.env.E2E_FREIGHTER_PASSWORD]
+    .filter(value => value);
 }
 
 // Replace every known secret in `text` with [REDACTED]. Non-strings pass
