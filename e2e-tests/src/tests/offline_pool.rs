@@ -78,8 +78,6 @@ pub struct OfflinePool {
     pub prover: ScriptedProver,
     pub signer: ScriptedSigner,
     pub storage: FaultyStorage,
-    /// The background sync task, when the pool syncs in the background; run
-    /// it to sync.
     pub background: Option<BackgroundSync>,
     _wallet: WalletFile,
 }
@@ -94,6 +92,7 @@ pub struct OfflinePoolBuilder {
     unsynced_on_chain: usize,
     foreign_spent_on_chain: usize,
     garbled_outputs: Vec<u32>,
+    forged_spends: Vec<u32>,
     deposits_paused: bool,
 }
 
@@ -161,6 +160,14 @@ impl OfflinePoolBuilder {
     /// pool's tree, but the wallet never finds the notes.
     pub fn garbled_outputs(mut self, leaf_indices: &[u32]) -> Self {
         self.garbled_outputs = leaf_indices.to_vec();
+        self
+    }
+
+    /// Has the RPC serve a `NewNullifierEvent` for each seeded note at these
+    /// leaf indices that the pool never emitted, as when a bootnode forges
+    /// spends: the wallet then holds more events than the pool published.
+    pub fn forged_spends(mut self, leaf_indices: &[u32]) -> Self {
+        self.forged_spends = leaf_indices.to_vec();
         self
     }
 
@@ -274,13 +281,26 @@ impl OfflinePoolBuilder {
             pool::PoolContractClient::new(&deployment.env, &deployment.pool).pause_deposits();
             served.extend(published_events(&deployment));
         }
+        // The pool's chain before the forged spends, which it emits in the
+        // host only for their XDR.
+        let chains = event_chains(&deployment)?;
+        let forged = self
+            .forged_spends
+            .iter()
+            .map(|&leaf_index| {
+                let commitment = pool_leaves
+                    .get(leaf_index as usize)
+                    .with_context(|| format!("no seeded note at leaf {leaf_index}"))?;
+                Ok(PoolEvent::Nullifier(
+                    sdk_tests::seed::seeded_note_nullifier(commitment, leaf_index)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if !forged.is_empty() {
+            served.extend(publish_history(&deployment, &forged)?);
+        }
 
-        let rpc = ScriptedRpc::start(
-            &deployment,
-            rpc_events(&pool_id, &served),
-            event_chains(&deployment)?,
-        )
-        .await?;
+        let rpc = ScriptedRpc::start(&deployment, rpc_events(&pool_id, &served), chains).await?;
         let config = harness_config(&deployment, &rpc);
         let prover = ScriptedProver::default();
         let signer = ScriptedSigner::new()?;

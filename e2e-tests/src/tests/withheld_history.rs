@@ -147,6 +147,30 @@ async fn a_balance_is_refused_when_another_users_nullifier_is_missing() -> Resul
     Ok(())
 }
 
+/// The bootnode serves a `NewNullifierEvent` the pool never emitted, so the
+/// wallet holds more events than the pool published and takes one of its
+/// notes for spent. The wallet must not report a balance built on that
+/// history.
+#[tokio::test]
+async fn a_balance_is_refused_when_the_wallet_holds_a_spend_the_pool_never_made() -> Result<()> {
+    let h = OfflinePool::builder()
+        .notes(&[10, 20])
+        .forged_spends(&[0])
+        .build()
+        .await?;
+
+    let result = h.pool.balance().await;
+
+    assert!(
+        matches!(
+            result,
+            Err(Error::EventHistoryMismatch { synced, published, .. }) if synced > published
+        ),
+        "a balance was reported from history with a spend the pool never made: {result:?}"
+    );
+    Ok(())
+}
+
 /// History that matches the pool raises no alarm: the wallet reports its
 /// balance and spends.
 #[tokio::test]

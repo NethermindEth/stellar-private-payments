@@ -16,7 +16,7 @@ use crate::{
     types::{ContractConfig, SyncMetadata},
 };
 use anyhow::Context as _;
-use futures::task::AtomicWaker;
+use futures::{lock::Mutex as AsyncMutex, task::AtomicWaker};
 
 use crate::{
     Error, Handle, RetentionGap, StorageHandle, chain::RpcClient, sleep::sleep,
@@ -32,6 +32,11 @@ const BACKGROUND_SYNC_INTERVAL_MS: u32 = 5_000;
 /// each other.
 const EVENT_CHAIN_ROUNDS: u32 = 3;
 const EVENT_CHAIN_RETRY_MS: u32 = 500;
+
+/// Serializes the steps that write synced history with
+/// [`reset_contract_history`], so a reset lands between them and none resumes
+/// from progress the reset forgot.
+pub(crate) type HistoryLock = AsyncMutex<()>;
 
 const SYNC_MODE_INLINE: u8 = 0;
 const SYNC_MODE_BACKGROUND: u8 = 1;
@@ -108,7 +113,16 @@ impl SyncHandle {
         contract_config: &ContractConfig,
     ) -> Result<(), Error> {
         match self.mode() {
-            SyncMode::Inline => catch_up(rpc, storage, contract_config, self.bootnode_url()).await,
+            SyncMode::Inline => {
+                catch_up(
+                    rpc,
+                    storage,
+                    contract_config,
+                    self.bootnode_url(),
+                    self.kick.history(),
+                )
+                .await
+            }
             SyncMode::Background => {
                 if let Some((contract, check)) = self.kick.history_fault() {
                     return Err(history_error(&contract, check));
@@ -128,6 +142,7 @@ pub(crate) struct SyncKick {
     /// A contract whose synced events background sync found not to match its
     /// event chain, until its history is reset.
     history_fault: Mutex<Option<(String, EventChainCheck)>>,
+    history: HistoryLock,
 }
 
 impl SyncKick {
@@ -137,7 +152,12 @@ impl SyncKick {
             waker: AtomicWaker::new(),
             signaled: AtomicBool::new(false),
             history_fault: Mutex::new(None),
+            history: HistoryLock::new(()),
         })
+    }
+
+    pub(crate) fn history(&self) -> &HistoryLock {
+        &self.history
     }
 
     fn history_fault(&self) -> Option<(String, EventChainCheck)> {
@@ -293,6 +313,7 @@ impl BackgroundSync {
                     &self.contract_config,
                     self.bootnode_url.as_deref(),
                     Some(self.stop.as_ref()),
+                    self.kick.history(),
                 )
                 .await
                 {
@@ -318,7 +339,14 @@ impl BackgroundSync {
                 }
             }
             if let Some(opened) = &indexer {
-                match catch_up_loop(opened, &self.storage, Some(self.stop.as_ref())).await {
+                match catch_up_loop(
+                    opened,
+                    &self.storage,
+                    Some(self.stop.as_ref()),
+                    self.kick.history(),
+                )
+                .await
+                {
                     Ok(()) => {
                         consecutive_failures = 0;
                         unsettled_rounds = self.check_event_chains(unsettled_rounds).await;
@@ -350,6 +378,7 @@ impl BackgroundSync {
     /// Returns how many rounds in a row a count has now differed; a count that
     /// still differs after [`EVENT_CHAIN_ROUNDS`] rounds is a fault too.
     async fn check_event_chains(&self, unsettled_rounds: u32) -> u32 {
+        let _history = self.kick.history().lock().await;
         match check_event_chains(&self.rpc, &self.storage, &self.contract_config).await {
             Ok(None) => {
                 self.kick.set_history_fault(None);
@@ -401,7 +430,9 @@ fn retention_handoff_from_ledger(err: &RpcError) -> Option<u32> {
 
 /// Forgets everything synced from `contract_id`, once its events can be
 /// fetched again from its deployment: from the bootnode, or without one, from
-/// the wallet RPC.
+/// the wallet RPC. Waits for a sync step in progress, so the next one starts
+/// the contract over from its deployment, and clears the fault background
+/// sync recorded.
 ///
 /// # Errors
 ///
@@ -414,6 +445,7 @@ pub(crate) async fn reset_contract_history(
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
     contract_id: &str,
+    kick: &SyncKick,
 ) -> Result<(), Error> {
     if bootnode_url.is_none() {
         let deployment_ledger = contract_config
@@ -430,7 +462,10 @@ pub(crate) async fn reset_contract_history(
             Err(e) => return Err(e.into()),
         }
     }
-    storage.forget_contract_history(contract_id).await
+    let _history = kick.history().lock().await;
+    storage.forget_contract_history(contract_id).await?;
+    kick.set_history_fault(None);
+    Ok(())
 }
 
 fn is_rpc_sync_gap(err: &IndexerError) -> bool {
@@ -472,12 +507,14 @@ async fn apply_bootnode_handoff_from_err(
     storage: &StorageHandle,
     contract_config: &ContractConfig,
     err: &RpcError,
+    history: &HistoryLock,
 ) -> Result<(), Error> {
     let from_ledger = retention_handoff_from_ledger(err).ok_or_else(|| {
         Error::Other(anyhow::anyhow!(
             "bootnode handoff missing fromLedger in error data"
         ))
     })?;
+    let _history = history.lock().await;
     apply_bootnode_handoff(storage, contract_config, from_ledger).await
 }
 
@@ -500,11 +537,13 @@ pub async fn bootnode_required(
 /// Run indexer rounds until caught up, stopped, or an error.
 ///
 /// When `stop` is set, returns `Ok(())` without draining further. Applies
-/// pending state after each successful round.
+/// pending state after each successful round. Holds `history` through each
+/// round, which reads where to resume and saves how far it got.
 async fn catch_up_loop<I>(
     indexer: &Indexer<I>,
     storage: &StorageHandle,
     stop: Option<&AtomicBool>,
+    history: &HistoryLock,
 ) -> Result<(), Error>
 where
     I: ContractDataStorage,
@@ -513,8 +552,12 @@ where
         if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
             return Ok(());
         }
-        let may_have_more = indexer.fetch_contract_events().await?;
-        storage.process_pending_state().await?;
+        let may_have_more = {
+            let _history = history.lock().await;
+            let may_have_more = indexer.fetch_contract_events().await?;
+            storage.process_pending_state().await?;
+            may_have_more
+        };
         if !may_have_more {
             return Ok(());
         }
@@ -546,6 +589,7 @@ async fn bootnode_catch_up(
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
     stop: Option<&AtomicBool>,
+    history: &HistoryLock,
 ) -> Result<(), Error> {
     let Some(bootnode) = bootnode_url else {
         return Err(RetentionGap::SyncGap.into());
@@ -557,23 +601,24 @@ async fn bootnode_catch_up(
     let bootnode_client =
         RpcClient::new(bootnode).map_err(|e| RetentionGap::BootnodeFailed(e.to_string()))?;
 
-    let bootnode_indexer =
-        match Indexer::init(bootnode_client, storage.fork()?, contract_config).await {
-            Ok(indexer) => indexer,
-            Err(IndexerError::Rpc(rpc_err @ RpcError::RetentionHandoff { .. })) => {
-                apply_bootnode_handoff_from_err(storage, contract_config, &rpc_err).await?;
-                return Ok(());
-            }
-            Err(IndexerError::Rpc(e)) => return Err(bootnode_gap(e).into()),
-            Err(IndexerError::Other(e)) => return Err(e.into()),
-        };
+    let bootnode_indexer = match Indexer::init(bootnode_client, storage.fork()?, contract_config)
+        .await
+    {
+        Ok(indexer) => indexer,
+        Err(IndexerError::Rpc(rpc_err @ RpcError::RetentionHandoff { .. })) => {
+            apply_bootnode_handoff_from_err(storage, contract_config, &rpc_err, history).await?;
+            return Ok(());
+        }
+        Err(IndexerError::Rpc(e)) => return Err(bootnode_gap(e).into()),
+        Err(IndexerError::Other(e)) => return Err(e.into()),
+    };
 
     let mut waited_at_tip = false;
     loop {
         if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
             return Ok(());
         }
-        match catch_up_loop(&bootnode_indexer, storage, stop).await {
+        match catch_up_loop(&bootnode_indexer, storage, stop, history).await {
             // Caught up to bootnode tip (or stopped): wait, then poll for
             // handoff.
             Ok(()) => {
@@ -591,7 +636,8 @@ async fn bootnode_catch_up(
             }
             // bootnode handoff, use main RPC
             Err(Error::Rpc(rpc_err @ RpcError::RetentionHandoff { .. })) => {
-                apply_bootnode_handoff_from_err(storage, contract_config, &rpc_err).await?;
+                apply_bootnode_handoff_from_err(storage, contract_config, &rpc_err, history)
+                    .await?;
                 return Ok(());
             }
             Err(Error::Rpc(e)) => return Err(bootnode_gap(e).into()),
@@ -608,13 +654,14 @@ async fn open_indexer(
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
     stop: Option<&AtomicBool>,
+    history: &HistoryLock,
 ) -> Result<Indexer<StorageHandle>, Error> {
     match Indexer::init(rpc.clone(), storage.fork()?, contract_config).await {
         Ok(indexer) => return Ok(indexer),
         Err(e) if is_rpc_sync_gap(&e) => {}
         Err(e) => return Err(anyhow::Error::from(e).context("indexer").into()),
     }
-    bootnode_catch_up(storage, contract_config, bootnode_url, stop).await?;
+    bootnode_catch_up(storage, contract_config, bootnode_url, stop, history).await?;
     if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
         return Err(anyhow::anyhow!("stopped during bootnode catch-up").into());
     }
@@ -642,12 +689,16 @@ pub(crate) async fn catch_up(
     storage: &StorageHandle,
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
+    history: &HistoryLock,
 ) -> Result<(), Error> {
     let mut rounds_left = EVENT_CHAIN_ROUNDS;
     loop {
-        catch_up_events(rpc, storage, contract_config, bootnode_url).await?;
-        let Some((contract, check)) = check_event_chains(rpc, storage, contract_config).await?
-        else {
+        catch_up_events(rpc, storage, contract_config, bootnode_url, history).await?;
+        let checked = {
+            let _history = history.lock().await;
+            check_event_chains(rpc, storage, contract_config).await?
+        };
+        let Some((contract, check)) = checked else {
             return Ok(());
         };
         rounds_left = rounds_left.saturating_sub(1);
@@ -667,9 +718,10 @@ pub(crate) async fn catch_up_events(
     storage: &StorageHandle,
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
+    history: &HistoryLock,
 ) -> Result<(), Error> {
-    let indexer = open_indexer(rpc, storage, contract_config, bootnode_url, None).await?;
-    catch_up_loop(&indexer, storage, None)
+    let indexer = open_indexer(rpc, storage, contract_config, bootnode_url, None, history).await?;
+    catch_up_loop(&indexer, storage, None, history)
         .await
         .context("indexer catch-up")
         .map_err(Into::into)
@@ -1369,7 +1421,15 @@ mod tests {
             published: 0,
         };
 
-        let refused = reset_contract_history(&rpc, &storage, config, None, &pool).await;
+        let refused = reset_contract_history(
+            &rpc,
+            &storage,
+            config,
+            None,
+            &pool,
+            &SyncKick::new(SyncMode::Inline),
+        )
+        .await;
         assert!(
             matches!(refused, Err(Error::RetentionGap(RetentionGap::SyncGap))),
             "{refused:?}"
@@ -1379,7 +1439,15 @@ mod tests {
             saved
         );
 
-        reset_contract_history(&rpc, &storage, config, Some("http://bootnode"), &pool).await?;
+        reset_contract_history(
+            &rpc,
+            &storage,
+            config,
+            Some("http://bootnode"),
+            &pool,
+            &SyncKick::new(SyncMode::Inline),
+        )
+        .await?;
         assert_eq!(
             storage.check_event_chain(&pool, EventChain::EMPTY).await?,
             EventChainCheck::Matches
@@ -1396,11 +1464,98 @@ mod tests {
         let pool = config.pools[0].pool_contract_id.clone();
         let storage = storage_with_one_event("reset-held", &pool).await?;
 
-        reset_contract_history(&rpc, &storage, config, None, &pool).await?;
+        reset_contract_history(
+            &rpc,
+            &storage,
+            config,
+            None,
+            &pool,
+            &SyncKick::new(SyncMode::Inline),
+        )
+        .await?;
 
         assert_eq!(
             storage.check_event_chain(&pool, EventChain::EMPTY).await?,
             EventChainCheck::Matches
+        );
+        Ok(())
+    }
+
+    /// The background task syncs while the user resets a contract's history.
+    /// A reset that lands between two pages of a sync pass must still leave
+    /// the contract to be fetched again from its deployment, not resumed from
+    /// the pass's cursor past the events it forgot.
+    #[tokio::test]
+    async fn a_reset_during_a_sync_pass_fetches_the_history_again() -> Result<(), Error> {
+        let rpc = MockServer::start().await;
+        // The pass's second page, which resumes from the first page's cursor,
+        // arrives late enough for the reset to land before it.
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .and(body_string_contains("first-page"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(get_events_page("first-page", json!([]), 2_000))
+                    .set_delay(Duration::from_millis(500)),
+            )
+            .with_priority(1)
+            .mount(&rpc)
+            .await;
+        mount_get_events(
+            &rpc,
+            vec![get_events_page(
+                "first-page",
+                json!([{
+                    "type": "contract",
+                    "ledger": 10,
+                    "ledgerClosedAt": "2024-01-01T00:00:00Z",
+                    "contractId": "CPOOL",
+                    "id": RPC_EVENT_ID,
+                    "pagingToken": "10-1",
+                    "inSuccessfulContractCall": true,
+                    "topic": ["AAAADwAAAAVvdGhlcgAAAA=="],
+                    "value": "AAAAAQ==",
+                }]),
+                2_000,
+            )],
+        )
+        .await;
+        let rpc = RpcClient::new(&rpc.uri())?;
+        let config = distinct_config();
+        let storage = temp_storage("reset-mid-pass");
+        let kick = SyncKick::new(SyncMode::Background);
+        let indexer = Indexer::init(rpc.clone(), storage.fork()?, &config)
+            .await
+            .map_err(anyhow::Error::from)?;
+
+        let pass = catch_up_loop(&indexer, &storage, None, kick.history());
+        let reset = async {
+            while !storage
+                .get_sync_state()
+                .await?
+                .iter()
+                .any(|row| row.contract_id == "CPOOL")
+            {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            reset_contract_history(
+                &rpc,
+                &storage,
+                &config,
+                Some("http://bootnode"),
+                "CPOOL",
+                &kick,
+            )
+            .await
+        };
+        let (pass, reset) = tokio::join!(pass, reset);
+        pass?;
+        reset?;
+
+        let rows = storage.get_sync_state().await?;
+        assert!(
+            rows.iter().all(|row| row.contract_id != "CPOOL"),
+            "the next pass resumes the reset pool from {rows:?}"
         );
         Ok(())
     }
@@ -1614,6 +1769,7 @@ mod tests {
                     &storage,
                     &distinct_config(),
                     Some(&bootnode.uri()),
+                    &HistoryLock::default(),
                 ),
             )
             .await
@@ -1643,6 +1799,7 @@ mod tests {
             &storage,
             &distinct_config(),
             Some(&bootnode.uri()),
+            &HistoryLock::default(),
         )
         .await;
 
@@ -1756,6 +1913,7 @@ mod tests {
             &storage,
             &distinct_config(),
             Some(&bootnode.uri()),
+            &HistoryLock::default(),
         )
         .await;
 
@@ -1797,6 +1955,7 @@ mod tests {
                 &storage,
                 &distinct_config(),
                 Some(&bootnode.uri()),
+                &HistoryLock::default(),
             ),
         )
         .await
@@ -1832,6 +1991,7 @@ mod tests {
                 &storage,
                 &distinct_config(),
                 Some(&bootnode.uri()),
+                &HistoryLock::default(),
             ),
         )
         .await

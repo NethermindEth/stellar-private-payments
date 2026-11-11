@@ -90,13 +90,15 @@ impl Client {
             &self.storage,
             &self.contract_config,
             self.sync.bootnode_url(),
+            self.sync.kick.history(),
         )
         .await
     }
 
     /// Forgets everything synced from `contract_id`: its events, what was
     /// derived from them, and the notes they made. The next sync fetches the
-    /// contract's events again from its deployment.
+    /// contract's events again from its deployment. A sync in progress,
+    /// inline or in the background, finishes its current step first.
     ///
     /// Recovers from [`Error::EventHistoryMismatch`] and
     /// [`Error::EventHistoryIncomplete`]. The same bootnode serves the same
@@ -114,10 +116,9 @@ impl Client {
             &self.contract_config,
             self.sync.bootnode_url(),
             contract_id,
+            &self.sync.kick,
         )
-        .await?;
-        self.sync.kick.set_history_fault(None);
-        Ok(())
+        .await
     }
 
     /// Keep client synced in [`SyncMode::Background`] mode.
