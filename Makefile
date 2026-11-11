@@ -83,8 +83,8 @@ install:
 	@rustup target add wasm32v1-none
 	@command -v trunk >/dev/null 2>&1 || cargo install trunk --locked
 
-# App browser e2e suite (drives a real Freighter extension). Starts a local
-# network + `make serve`, provisions the Freighter profile if needed
+# App browser e2e suite (drives a real Varial extension). Starts a local
+# network + `make serve`, provisions the Varial profile if needed
 # (E2E_SKIP_SETUP=1 skips that), runs the tests, and tears down.
 #
 # integration-tests-app-setup just provisions the profile, running no tests.

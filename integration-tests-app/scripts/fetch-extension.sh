@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Fetch the pinned Freighter extension build from the upstream project's
+# Fetch the pinned Varial extension build from the upstream project's
 # GitHub release (stellar/freighter) and install it as
-# integration-tests-app/vendor/freighter.
+# integration-tests-app/vendor/varial.
 #
 # vendor/ is git-ignored on purpose (third-party build output does not
 # belong in this repo), so every fresh checkout — locally and in CI —
@@ -24,13 +24,13 @@ step() { echo "==> $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-VENDOR_DIR="$PKG_ROOT/vendor/freighter"
+VENDOR_DIR="$PKG_ROOT/vendor/varial"
 
 # Pinned upstream version. Bump deliberately: the auto-approve logic
-# drives Freighter's DOM by text and is version-sensitive.
-FREIGHTER_VERSION="5.44.0"
+# drives Varial's DOM by text and is version-sensitive.
+VARIAL_VERSION="5.44.0"
 EXPECTED_EXT_ID="bcacfldlkkdogcmkkibnjlakofdplcbk"
-DOWNLOAD_URL="https://github.com/stellar/freighter/releases/download/${FREIGHTER_VERSION}/build-${FREIGHTER_VERSION}.zip"
+DOWNLOAD_URL="https://github.com/stellar/freighter/releases/download/${VARIAL_VERSION}/build-${VARIAL_VERSION}.zip"
 
 # Developer public key from the Web Store build (public, not a secret).
 MANIFEST_KEY="MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnZVggwOXfOvqp8Ah5Vpd29xgsM5Y0gvaMAesSLQDk4DAEoZIlUkq6biihDuxEoJAQ97fb7+iOWDoZZW3esOI+6zLBQSvJiOmTPghr2eN9nf8D/8u8mPtnQPsu3lKz+Jf2zLEwNvjQAorgq+fTmyS0IIKWLxJQ3W0ByywzIZOJk/gz7qke1xWUxdLtPlMc1YK8vHWOhrpoH7bMdy60/poEkcRGsWTclV/uCAbVUAuX1wJU4VVpvOqrbJmE95ZwQg1Q3bGGpKmtPLeQ4kEj5uxan0mvlrlC+YaJUCK08TrnlcIalRxFqUciuNvK339z3Ru5MwI3WoPSqfTKOCiezi6tQIDAQAB"
@@ -49,26 +49,26 @@ need node
 
 if [ "$FORCE" -eq 0 ] && [ -f "$VENDOR_DIR/manifest.json" ]; then
   have="$(node -p "JSON.parse(require('fs').readFileSync('$VENDOR_DIR/manifest.json','utf8')).version || ''")"
-  if [ "$have" = "$FREIGHTER_VERSION" ]; then
-    step "vendored Freighter $FREIGHTER_VERSION already present — nothing to do"
+  if [ "$have" = "$VARIAL_VERSION" ]; then
+    step "vendored Varial $VARIAL_VERSION already present — nothing to do"
     exit 0
   fi
-  die "vendored Freighter is version '$have', want '$FREIGHTER_VERSION' — re-run with --force to replace it"
+  die "vendored Varial is version '$have', want '$VARIAL_VERSION' — re-run with --force to replace it"
 fi
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-step "downloading Freighter $FREIGHTER_VERSION from stellar/freighter releases"
-curl -fsSL -o "$TMP/freighter.zip" "$DOWNLOAD_URL" \
+step "downloading Varial $VARIAL_VERSION from stellar/freighter releases"
+curl -fsSL -o "$TMP/varial.zip" "$DOWNLOAD_URL" \
   || die "download failed: $DOWNLOAD_URL"
 
 step "unpacking"
-unzip -q "$TMP/freighter.zip" -d "$TMP/unpacked"
+unzip -q "$TMP/varial.zip" -d "$TMP/unpacked"
 [ -f "$TMP/unpacked/manifest.json" ] || die "zip has no top-level manifest.json — upstream layout changed?"
 
 step "patching manifest key and verifying the derived extension id"
-MANIFEST_KEY="$MANIFEST_KEY" EXPECTED_EXT_ID="$EXPECTED_EXT_ID" PIN="$FREIGHTER_VERSION" \
+MANIFEST_KEY="$MANIFEST_KEY" EXPECTED_EXT_ID="$EXPECTED_EXT_ID" PIN="$VARIAL_VERSION" \
   node - "$TMP/unpacked/manifest.json" <<'NODE'
 const fs = require('fs');
 const crypto = require('crypto');
@@ -87,7 +87,7 @@ console.log(`    manifest ${m.version}, extension id ${id} verified`);
 NODE
 
 step "patching background script to open approvals in a tab instead of a popup"
-# Freighter's background.min.js uses chrome.windows.create with type:"popup" for
+# Varial's background.min.js uses chrome.windows.create with type:"popup" for
 # approvals. In headed runs that popup is a separate OS window that Playwright
 # sometimes struggles to attach to promptly. Opening it as a normal browser
 # window/tab makes it a first-class Playwright page target.
@@ -109,4 +109,4 @@ fi
 rm -rf "$VENDOR_DIR"
 mkdir -p "$(dirname "$VENDOR_DIR")"
 mv "$TMP/unpacked" "$VENDOR_DIR"
-step "installed $VENDOR_DIR ($FREIGHTER_VERSION)"
+step "installed $VENDOR_DIR ($VARIAL_VERSION)"

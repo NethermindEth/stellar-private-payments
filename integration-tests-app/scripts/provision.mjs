@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Provision a Freighter Chrome profile for e2e tests: create the wallet,
+// Provision a Varial Chrome profile for e2e tests: create the wallet,
 // switch to the local quickstart network, enable sidebar mode. No test
 // account is baked in — runner.mjs imports a fresh ephemeral one per test.
 // The caller (provision.sh) handles snapshots and restore paths.
@@ -8,7 +8,7 @@ import '../src/env.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scrub } from '../src/redact.mjs';
-import { launch, unlockFreighter, connectApp } from '../src/runner.mjs';
+import { launch, unlockVarial, connectApp } from '../src/runner.mjs';
 import { importAccount } from '../src/wallet.mjs';
 import { isOnboardingWizardVisible } from '../src/appState.mjs';
 import {
@@ -68,14 +68,14 @@ function getRequiredEnv(name) {
   return v;
 }
 
-// ── Provision the Freighter extension: wallet + network + sidebar mode ──
-async function provisionFreighter(context) {
-  step('setting up Freighter extension');
+// ── Provision the Varial extension: wallet + network + sidebar mode ──
+async function provisionVarial(context) {
+  step('setting up Varial extension');
   const page = await context.newPage();
   await page.goto(`chrome-extension://${EXT_ID}/index.html`);
   await page.waitForTimeout(1000);
 
-  const password = getRequiredEnv('E2E_FREIGHTER_PASSWORD');
+  const password = getRequiredEnv('E2E_VARIAL_PASSWORD');
 
   // Its mnemonic is throwaway — every test imports its own ephemeral account.
   await page.getByText(SEL.createNewWalletText, { exact: true }).click();
@@ -114,7 +114,7 @@ async function provisionFreighter(context) {
   await page.getByText(SEL.sidebarModeText, { exact: true }).first().click({ force: true });
   await page.waitForTimeout(500);
 
-  step('Freighter wallet created, local network active, sidebar mode on');
+  step('Varial wallet created, local network active, sidebar mode on');
   await page.close();
 }
 
@@ -149,7 +149,7 @@ async function main() {
   if (VERIFY_ONLY) {
     const context = await launch({ userDataDir: PROFILE_DIR, headless: true });
     try {
-      await unlockFreighter(context);
+      await unlockVarial(context);
       await verifyProfile(context);
     } finally {
       await context.close();
@@ -161,8 +161,8 @@ async function main() {
   // gets tar'd next and verification imports a wallet (see --verify above).
   const context = await launch({ userDataDir: PROFILE_DIR, headless: false });
   try {
-    await unlockFreighter(context);
-    await provisionFreighter(context);
+    await unlockVarial(context);
+    await provisionVarial(context);
   } finally {
     await context.close();
   }

@@ -1,5 +1,5 @@
 // Drives the app's real onboarding wizard end to end, for an account that
-// was funded and imported into Freighter but never pre-seeded (every other
+// was funded and imported into Varial but never pre-seeded (every other
 // test skips this via seedDriverOnboarding — see src/testAccount.mjs and
 // src/runner.mjs). This is the one test that proves the wizard itself works.
 
@@ -13,12 +13,12 @@ export const rawOnboarding = true;
 const log = createLogger('13-onboarding');
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForVarialApproval, approveOrWatch } = helpers;
 
   assert(await isOnboardingWizardVisible(page), 'onboarding wizard did not open for an unseeded account');
 
   await driveWizard(page, context, {
-    waitForFreighterApproval,
+    waitForVarialApproval,
     approveOrWatch,
     logTag: '13-onboarding',
   });

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the real-Freighter e2e suite (or a given subset) end to end: one
+# Run the real-Varial e2e suite (or a given subset) end to end: one
 # scripts/run-e2e.sh invocation per test, so each test gets a fresh
 # profile restore exactly as it was verified. Prints a per-test summary
 # at the end and exits nonzero if any test failed.
@@ -28,7 +28,7 @@ arguments are taken as the subset to run (paths from the repo root or the
 integration-tests-app directory).
 
 Environment: same as run-e2e.sh (APPROVE, HEADFUL, APP_URL, E2E_LOG_LEVEL,
-E2E_FREIGHTER_PASSWORD).
+E2E_VARIAL_PASSWORD).
 
 Examples:
   scripts/run-all.sh                          # whole suite
