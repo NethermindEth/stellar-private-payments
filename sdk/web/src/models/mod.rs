@@ -12,8 +12,8 @@ mod user_note_summary;
 
 pub(crate) use chain::operational_feed_items;
 pub use chain::{
-    AspMembership, AspNonMembership, ContractsStateData, OperationalFeedItem, PoolInfo,
-    RecipientLookup,
+    AspMembership, AspNonMembership, ContractsStateData, NoteKeyOwnerLookup, OperationalFeedItem,
+    PoolInfo, RecipientLookup,
 };
 pub use config::ContractConfig;
 pub(crate) use config::contract_config_from_js;

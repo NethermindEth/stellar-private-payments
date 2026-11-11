@@ -4,9 +4,9 @@ use crate::{
     types::{
         AspMembershipSync, BootnodeSetting, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey,
         EncryptionPublicKey, Field, GlobalViewKeyCiphertext, GvkAuthoritySetting, LeafAddedEvent,
-        NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey,
-        NotePublicKey, OperationalFeedItem, PortfolioBalance, PortfolioPoolEntry, PublicKeyEvent,
-        RecipientLookup, UserNoteSummary, UserOperation,
+        NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyOwner, NoteKeyOwnerLookup,
+        NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem, PortfolioBalance,
+        PortfolioPoolEntry, PublicKeyEvent, RecipientLookup, UserNoteSummary, UserOperation,
     },
 };
 use anyhow::{Context, Result, anyhow, ensure};
@@ -38,6 +38,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
             include_str!("schema_v8_event_chain.sql"),
             fold_saved_event_chains,
         ),
+        M::up(include_str!("schema_v9_registry_lookup_indexes.sql")),
     ])
 });
 /// Raw events one pass of [`Storage::fold_event_chain`] loads at a time.
@@ -47,6 +48,29 @@ const FOLD_BATCH: i64 = 512;
 /// chains, as the v8 migration's hook.
 fn fold_saved_event_chains(tx: &rusqlite::Transaction) -> HookResult {
     Storage::fold_every_event_chain(tx).map_err(|e| HookError::Hook(format!("{e:#}")))
+}
+
+/// `FROM … WHERE` clause selecting the raw events (`r`, of contract `c`) the
+/// processor has not handled: those with neither a derived row nor a
+/// `processed_events` mark.
+const UNPROCESSED_EVENTS_SQL: &str = "FROM raw_contract_events r
+    JOIN contracts c ON c.contract_id = r.contract_id
+    LEFT JOIN pool_commitments pc ON r.id = pc.event_id
+    LEFT JOIN public_keys p ON r.id = p.event_id
+    LEFT JOIN asp_membership_leaves l ON r.id = l.event_id
+    LEFT JOIN pool_nullifiers n ON r.id = n.event_id
+    LEFT JOIN processed_events pe ON r.id = pe.event_id
+    WHERE pc.event_id IS NULL
+    AND p.event_id IS NULL
+    AND n.event_id IS NULL
+    AND l.event_id IS NULL
+    AND pe.event_id IS NULL";
+
+/// Sync status of one registry; see [`Storage::registry_sync_status`].
+struct RegistrySyncStatus {
+    fully_synced: bool,
+    network_tip_ledger: u32,
+    last_fully_indexed_ledger: u32,
 }
 
 // Note `n` has a saved nullifier in the pool of event `r`, reconciled or not.
@@ -751,6 +775,52 @@ impl Storage {
             .context("lookup_public_key_by_address")
     }
 
+    /// Every address that registered a key in `note_keys` with the registry
+    /// `public_key_registry_contract_id`.
+    ///
+    /// Only that registry's events count: one database can index several
+    /// deployments, such as `local` and `testnet` sharing a CLI data dir.
+    ///
+    /// Several addresses may register the same key (see
+    /// [`NoteKeyOwnerLookup`]). Rows are ordered per key by address; unknown
+    /// keys yield no rows.
+    fn lookup_owners_by_note_keys(
+        &self,
+        note_keys: &[Field],
+        public_key_registry_contract_id: &str,
+    ) -> Result<Vec<NoteKeyOwner>> {
+        // `Field` binds as its 32-byte little-endian blob, the same layout the
+        // registry emits and `public_keys.note_key` stores.
+        let mut stmt = self.conn.prepare(
+            "SELECT p.owner
+             FROM public_keys p
+             JOIN raw_contract_events r ON r.id = p.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE p.note_key = ?1 AND c.address = ?2
+             GROUP BY p.owner
+             ORDER BY p.owner",
+        )?;
+
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for note_key in note_keys {
+            if !seen.insert(*note_key) {
+                continue;
+            }
+            let rows =
+                stmt.query_map(params![note_key, public_key_registry_contract_id], |row| {
+                    Ok(NoteKeyOwner {
+                        note_key: *note_key,
+                        address: row.get(0)?,
+                    })
+                })?;
+            for row in rows {
+                out.push(row.context("lookup_owners_by_note_keys")?);
+            }
+        }
+        Ok(out)
+    }
+
     /// List notes derived for `address` (newest first).
     pub fn list_user_notes(
         &self,
@@ -971,26 +1041,83 @@ impl Storage {
         Ok(balances)
     }
 
-    pub fn recipient_lookup(
+    /// Sync status of the registry `public_key_registry_contract_id`.
+    ///
+    /// The indexer advances the sync metadata once raw events are stored, but
+    /// `public_keys` is only filled when those events are processed, so the
+    /// registry counts as fully synced only when none of its raw events is
+    /// still pending.
+    ///
+    /// Callers must read this before the `public_keys` rows it describes. The
+    /// indexer writes on another connection, committing events before progress
+    /// and processed rows after both, and never removes registry rows. Reading
+    /// the status first therefore yields rows at least as recent as the
+    /// status, never older.
+    fn registry_sync_status(
         &self,
-        address: &str,
         public_key_registry_contract_id: &str,
-    ) -> Result<RecipientLookup> {
-        let entry = self.lookup_public_key_by_address(address, public_key_registry_contract_id)?;
-        let registry_last_fully_indexed_ledger = self
+    ) -> Result<RegistrySyncStatus> {
+        let last_fully_indexed_ledger = self
             .get_sync_metadata()?
             .into_iter()
             .find(|meta| meta.contract_id == public_key_registry_contract_id)
             .map(|meta| meta.last_fully_indexed_ledger)
             .unwrap_or_default();
         let network_tip_ledger = self.network_tip_ledger()?;
+        let fully_synced = network_tip_ledger > 0
+            && last_fully_indexed_ledger >= network_tip_ledger
+            && !self.has_unprocessed_events(public_key_registry_contract_id)?;
+        Ok(RegistrySyncStatus {
+            fully_synced,
+            network_tip_ledger,
+            last_fully_indexed_ledger,
+        })
+    }
+
+    /// Whether `contract_id` has a raw event the processor has not handled.
+    fn has_unprocessed_events(&self, contract_id: &str) -> Result<bool> {
+        self.conn
+            .query_row(
+                &format!("SELECT EXISTS (SELECT 1 {UNPROCESSED_EVENTS_SQL} AND c.address = ?1)"),
+                params![contract_id],
+                |row| row.get(0),
+            )
+            .context("has_unprocessed_events")
+    }
+
+    pub fn recipient_lookup(
+        &self,
+        address: &str,
+        public_key_registry_contract_id: &str,
+    ) -> Result<RecipientLookup> {
+        // Status before rows; see `registry_sync_status`.
+        let status = self.registry_sync_status(public_key_registry_contract_id)?;
+        let entry = self.lookup_public_key_by_address(address, public_key_registry_contract_id)?;
 
         Ok(RecipientLookup {
             entry,
-            registry_fully_synced: network_tip_ledger > 0
-                && registry_last_fully_indexed_ledger >= network_tip_ledger,
-            network_tip_ledger,
-            registry_last_fully_indexed_ledger,
+            registry_fully_synced: status.fully_synced,
+            network_tip_ledger: status.network_tip_ledger,
+            registry_last_fully_indexed_ledger: status.last_fully_indexed_ledger,
+        })
+    }
+
+    /// [`Self::lookup_owners_by_note_keys`] together with the sync status of
+    /// the same registry, so both describe one contract.
+    pub fn note_key_owner_lookup(
+        &self,
+        note_keys: &[Field],
+        public_key_registry_contract_id: &str,
+    ) -> Result<NoteKeyOwnerLookup> {
+        // Status before rows; see `registry_sync_status`.
+        let registry_fully_synced = self
+            .registry_sync_status(public_key_registry_contract_id)?
+            .fully_synced;
+        let owners = self.lookup_owners_by_note_keys(note_keys, public_key_registry_contract_id)?;
+
+        Ok(NoteKeyOwnerLookup {
+            owners,
+            registry_fully_synced,
         })
     }
 
@@ -1644,23 +1771,12 @@ impl Storage {
 
     /// Unprocessed raw events fetch
     pub fn get_unprocessed_events(&self, limit: u32) -> Result<Vec<ContractEvent>> {
-        let mut stmt = self.conn.prepare(
+        let mut stmt = self.conn.prepare(&format!(
             "SELECT r.id, r.ledger, c.address, r.topics, r.value
-                FROM raw_contract_events r
-                JOIN contracts c ON c.contract_id = r.contract_id
-                LEFT JOIN pool_commitments pc ON r.id = pc.event_id
-                LEFT JOIN public_keys p ON r.id = p.event_id
-                LEFT JOIN asp_membership_leaves l ON r.id = l.event_id
-                LEFT JOIN pool_nullifiers n ON r.id = n.event_id
-                LEFT JOIN processed_events pe ON r.id = pe.event_id
-                WHERE pc.event_id IS NULL
-                AND p.event_id IS NULL
-                AND n.event_id IS NULL
-                AND l.event_id IS NULL
-                AND pe.event_id IS NULL
-                ORDER BY r.ledger ASC, r.id ASC
-                LIMIT ?1",
-        )?;
+             {UNPROCESSED_EVENTS_SQL}
+             ORDER BY r.ledger ASC, r.id ASC
+             LIMIT ?1"
+        ))?;
 
         let event_iter = stmt.query_map(params![limit], |row| {
             let topics_str: String = row.get(3)?;
@@ -4052,13 +4168,17 @@ mod tests {
         let mut conn = Connection::open_in_memory()?;
         MIGRATIONS.to_version(&mut conn, 3)?;
         assert!(
-            !table_exists(&conn, "processed_events")?,
+            !schema_object_exists(&conn, "table", "processed_events")?,
             "v3 must predate the table"
         );
 
         let storage = Storage::connect_with_connection(conn)?;
 
-        assert!(table_exists(&storage.conn, "processed_events")?);
+        assert!(schema_object_exists(
+            &storage.conn,
+            "table",
+            "processed_events"
+        )?);
         Ok(())
     }
 
@@ -4109,6 +4229,29 @@ mod tests {
             storage.get_all_asp_membership_leaves_ordered("CASP2")?,
             vec![leaf_b]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn opening_a_v8_database_applies_the_v9_registry_lookup_indexes() -> Result<()> {
+        const INDEXES: [&str; 2] = [
+            "idx_public_keys_note_key",
+            "idx_raw_contract_events_contract_id",
+        ];
+        let mut conn = Connection::open_in_memory()?;
+        MIGRATIONS.to_version(&mut conn, 8)?;
+        for index in INDEXES {
+            assert!(
+                !schema_object_exists(&conn, "index", index)?,
+                "v8 must predate {index}"
+            );
+        }
+
+        let storage = Storage::connect_with_connection(conn)?;
+
+        for index in INDEXES {
+            assert!(schema_object_exists(&storage.conn, "index", index)?);
+        }
         Ok(())
     }
 
@@ -4465,10 +4608,294 @@ mod tests {
         Ok(())
     }
 
-    fn table_exists(conn: &Connection, name: &str) -> Result<bool> {
+    #[test]
+    fn migrations_are_valid() -> Result<()> {
+        MIGRATIONS.validate()?;
+        Ok(())
+    }
+
+    const REGISTRY: &str = "CREGISTRY";
+    /// The registry of another deployment indexed into the same database.
+    const OTHER_REGISTRY: &str = "COTHERREGISTRY";
+
+    /// A raw event of `contract`, not yet processed.
+    fn raw_event(contract: &str, id: &str) -> ContractEvent {
+        ContractEvent {
+            contract_id: contract.to_string(),
+            ..dummy_event(id)
+        }
+    }
+
+    /// Process the raw event `id` into a registration of `note_key` by
+    /// `owner`.
+    fn process_registration(
+        storage: &mut Storage,
+        id: &str,
+        owner: &str,
+        note_key: Field,
+    ) -> Result<()> {
+        storage.save_public_key_events_batch(&vec![PublicKeyEvent {
+            id: id.to_string(),
+            owner: owner.to_string(),
+            encryption_key: EncryptionPublicKey([9u8; 32]),
+            // The registry stores a note key as its little-endian field bytes.
+            note_key: NotePublicKey(note_key.to_le_bytes()),
+        }])
+    }
+
+    /// Store and process an event of `registry` registering `note_key` for
+    /// `owner`.
+    fn register_note_key_in(
+        storage: &mut Storage,
+        registry: &str,
+        id: &str,
+        owner: &str,
+        note_key: Field,
+    ) -> Result<()> {
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![raw_event(registry, id)],
+            cursor: id.to_string(),
+            latest_ledger: 1,
+        })?;
+        process_registration(storage, id, owner, note_key)
+    }
+
+    /// [`register_note_key_in`] the [`REGISTRY`].
+    fn register_note_key(
+        storage: &mut Storage,
+        id: &str,
+        owner: &str,
+        note_key: Field,
+    ) -> Result<()> {
+        register_note_key_in(storage, REGISTRY, id, owner, note_key)
+    }
+
+    /// Mark the [`REGISTRY`] as indexed up to the network tip, ledger 42.
+    fn mark_registry_indexed(storage: &mut Storage) -> Result<()> {
+        storage.save_sync_progress(
+            &[crate::types::SyncMetadata {
+                contract_id: REGISTRY.to_string(),
+                cursor: "c".to_string(),
+                last_indexed_ledger: 42,
+                last_fully_indexed_ledger: 0,
+            }],
+            true,
+        )
+    }
+
+    fn owners_of(storage: &Storage, keys: &[Field]) -> Result<Vec<(Field, String)>> {
+        Ok(storage
+            .lookup_owners_by_note_keys(keys, REGISTRY)?
+            .into_iter()
+            .map(|o| (o.note_key, o.address))
+            .collect())
+    }
+
+    /// The registry never emits two events for one address, but a lying
+    /// source can repeat one under another id.
+    #[test]
+    fn note_key_lookup_lists_a_repeated_registration_once() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(3));
+        register_note_key(&mut storage, "evt-first", "GALICE", key)?;
+        register_note_key(&mut storage, "evt-again", "GALICE", key)?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GALICE".to_string())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_returns_every_owner_of_a_shared_key_by_address() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(4));
+        register_note_key(&mut storage, "evt-zed", "GZED", key)?;
+        register_note_key(&mut storage, "evt-amy", "GAMY", key)?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GAMY".to_string()), (key, "GZED".to_string())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_ignores_registrations_of_other_deployments() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let shared = Field::from(NoteAmount::from(12));
+        let other_only = Field::from(NoteAmount::from(13));
+        register_note_key_in(
+            &mut storage,
+            OTHER_REGISTRY,
+            "evt-other-shared",
+            "GLOCAL",
+            shared,
+        )?;
+        register_note_key_in(
+            &mut storage,
+            OTHER_REGISTRY,
+            "evt-other-only",
+            "GLOCAL",
+            other_only,
+        )?;
+        register_note_key(&mut storage, "evt-this", "GALICE", shared)?;
+
+        assert_eq!(
+            owners_of(&storage, &[shared, other_only])?,
+            vec![(shared, "GALICE".to_string())]
+        );
+        assert!(
+            storage
+                .note_key_owner_lookup(&[other_only], REGISTRY)?
+                .owners
+                .is_empty()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_of_an_unknown_key_is_empty() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(5));
+        register_note_key(&mut storage, "evt-a", "GALICE", key)?;
+
+        assert!(owners_of(&storage, &[Field::from(NoteAmount::from(6))])?.is_empty());
+        assert!(owners_of(&storage, &[])?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_matches_the_registry_little_endian_bytes() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(0x0102_0304));
+        assert_ne!(key.to_le_bytes(), key.to_be_bytes());
+        register_note_key(&mut storage, "evt-a", "GALICE", key)?;
+
+        assert_eq!(
+            owners_of(&storage, &[key])?,
+            vec![(key, "GALICE".to_string())]
+        );
+        // The same 32 bytes read as a big-endian integer are a different key.
+        let be_misread = Field::try_from_be_bytes(key.to_le_bytes())?;
+        assert!(owners_of(&storage, &[be_misread])?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_lookup_ignores_duplicate_requested_keys() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let k1 = Field::from(NoteAmount::from(7));
+        let k2 = Field::from(NoteAmount::from(8));
+        register_note_key(&mut storage, "evt-k1", "GALICE", k1)?;
+        register_note_key(&mut storage, "evt-k2", "GBOB", k2)?;
+
+        assert_eq!(
+            owners_of(&storage, &[k2, k1, k2, k1])?,
+            vec![(k2, "GBOB".to_string()), (k1, "GALICE".to_string())]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn note_key_owner_lookup_reports_registry_sync_status() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(9));
+        register_note_key(&mut storage, "evt-a", "GALICE", key)?;
+
+        let lookup = storage.note_key_owner_lookup(&[key], REGISTRY)?;
+        assert_eq!(lookup.owners.len(), 1);
+        assert!(!lookup.registry_fully_synced);
+
+        mark_registry_indexed(&mut storage)?;
+
+        assert!(
+            storage
+                .note_key_owner_lookup(&[key], REGISTRY)?
+                .registry_fully_synced
+        );
+        Ok(())
+    }
+
+    /// The indexer stores raw events and marks progress before the processor
+    /// fills `public_keys`; the registry is not synced in between.
+    #[test]
+    fn registry_with_unprocessed_events_is_not_fully_synced() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let key = Field::from(NoteAmount::from(9));
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![
+                raw_event(REGISTRY, "evt-key"),
+                raw_event(REGISTRY, "evt-ignored"),
+            ],
+            cursor: "c".to_string(),
+            latest_ledger: 42,
+        })?;
+        mark_registry_indexed(&mut storage)?;
+
+        let synced = |storage: &Storage| -> Result<(bool, bool)> {
+            Ok((
+                storage
+                    .note_key_owner_lookup(&[key], REGISTRY)?
+                    .registry_fully_synced,
+                storage
+                    .recipient_lookup("GALICE", REGISTRY)?
+                    .registry_fully_synced,
+            ))
+        };
+        // Indexed up to the tip, yet not synced.
+        let lookup = storage.recipient_lookup("GALICE", REGISTRY)?;
+        assert_eq!(lookup.registry_last_fully_indexed_ledger, 42);
+        assert_eq!(synced(&storage)?, (false, false));
+        assert!(
+            storage
+                .note_key_owner_lookup(&[key], REGISTRY)?
+                .owners
+                .is_empty()
+        );
+
+        // One event processed into a row, the other still pending.
+        process_registration(&mut storage, "evt-key", "GALICE", key)?;
+        assert_eq!(synced(&storage)?, (false, false));
+
+        // Events the processor skips count once they are marked.
+        storage.save_processed_event_ids(&["evt-ignored".to_string()])?;
+        assert_eq!(synced(&storage)?, (true, true));
+        assert_eq!(
+            storage
+                .note_key_owner_lookup(&[key], REGISTRY)?
+                .owners
+                .len(),
+            1
+        );
+        Ok(())
+    }
+
+    /// Pending events of other contracts do not hold back the registry.
+    #[test]
+    fn unprocessed_events_of_other_contracts_do_not_block_registry_sync() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-pool")],
+            cursor: "c".to_string(),
+            latest_ledger: 42,
+        })?;
+        mark_registry_indexed(&mut storage)?;
+
+        assert!(
+            storage
+                .note_key_owner_lookup(&[], REGISTRY)?
+                .registry_fully_synced
+        );
+        Ok(())
+    }
+
+    /// Whether the schema has a `kind` (`"table"` or `"index"`) called `name`.
+    fn schema_object_exists(conn: &Connection, kind: &str, name: &str) -> Result<bool> {
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-            params![name],
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = ?1 AND name = ?2",
+            params![kind, name],
             |row| row.get(0),
         )?;
         Ok(count > 0)

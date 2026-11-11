@@ -251,8 +251,8 @@
                             </div>
                         </div>
                         <div class="sm:col-span-2 lg:col-span-3">
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkFilterPk">Note owner (PK)</label>
-                            <input id="gvkFilterPk" type="text" placeholder="0x... or partial match, comma-separated for multiple" autocomplete="off" spellcheck="false" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="gvkFilterPk">Note owner (address or PK)</label>
+                            <input id="gvkFilterPk" type="text" placeholder="G… or 0x…, partial match, comma-separated for multiple" autocomplete="off" spellcheck="false" class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-3 py-2 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" />
                         </div>
                         <div>
                             <label class="text-xs font-medium uppercase tracking-[0.18em] text-slate-500" for="gvkFilterLedgerFrom">Ledger range</label>
@@ -275,6 +275,15 @@
                 </div>
 
                 <div id="gvkAuditStatus" class="hidden rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300"></div>
+
+                <div id="gvkOwnersNotice" class="hidden rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100" role="status">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <span>The public key registry owner lookup keeps failing, so note owners are shown as public keys.</span>
+                        <button type="button" id="gvkOwnersRetryBtn" class="rounded-full border border-amber-300/30 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:border-amber-200/60 hover:text-white">
+                            Retry owner lookup
+                        </button>
+                    </div>
+                </div>
 
                 <div id="gvkAuditEmpty" class="rounded-2xl border border-dashed border-white/10 bg-ink-900/40 px-5 py-8 text-center text-sm text-slate-500">
                     Select a pool, enter the authority key, then run Sync &amp; Audit.

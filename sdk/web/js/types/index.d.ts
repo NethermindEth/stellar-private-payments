@@ -15,6 +15,8 @@ export type {
   GlobalViewKeyCiphertext,
   GvkAudit,
   GvkAuthority,
+  NoteKeyOwner,
+  NoteKeyOwnerLookup,
   OperationalFeedItem,
   OperatorCall,
   PoolConfigEntry,

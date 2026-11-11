@@ -150,6 +150,7 @@ function wrapClient(wasmClient, telemetrySinks) {
     blocklistOperator: (contractId) => wasmClient.blocklistOperator(contractId),
     poolAdmin: (contractId) => wasmClient.poolAdmin(contractId),
     gvkAuthority: (globalViewPrivateKeyHex) => wasmClient.gvkAuthority(globalViewPrivateKeyHex),
+    noteKeyOwnerLookup: (noteKeys) => wasmClient.noteKeyOwnerLookup(noteKeys),
     allContractsData: () => wasmClient.allContractsData(),
     poolContractsData: (poolContractId) => wasmClient.poolContractsData(poolContractId),
     verifySelectiveDisclosure: (receiptJson, expectedVkHash) =>

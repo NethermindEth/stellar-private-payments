@@ -12,6 +12,7 @@ import type {
   ContractsStateData,
   DisclosureVerificationReport,
   GvkAuthority,
+  NoteKeyOwnerLookup,
   OperationalFeedItem,
   PoolAdmin,
   ProverBridge,
@@ -211,6 +212,8 @@ export interface Client {
   blocklistOperator(contractId: string): BlocklistOperator;
   poolAdmin(contractId: string): PoolAdmin;
   gvkAuthority(globalViewPrivateKeyHex: string): GvkAuthority;
+  /** Addresses that registered each note key (`0x` big-endian hex, as GVK `note.pk`) in the configured registry; complete once `registryFullySynced`. */
+  noteKeyOwnerLookup(noteKeys: string[]): Promise<NoteKeyOwnerLookup>;
   allContractsData(): Promise<ContractsStateData>;
   poolContractsData(poolContractId: string): Promise<ContractsStateData>;
   verifySelectiveDisclosure(
