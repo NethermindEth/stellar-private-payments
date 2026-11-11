@@ -64,7 +64,7 @@ This is [the administrative control panel](https://nethermindeth.github.io/stell
 
 This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy.
 
-Every admin call is a transaction from the contract's admin account. When the connected Freighter account can sign it alone, the page signs and sends it at once; otherwise the account's signers read and sign it in turn in the page's Admin Transaction card. The [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md) covers the account, each procedure, and the response to each incident.
+Every admin call is a transaction from the contract's admin account. When the connected Varial account can sign it alone, the page signs and sends it at once; otherwise the account's signers read and sign it in turn in the page's Admin Transaction card. The [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md) covers the account, each procedure, and the response to each incident.
 
 #### Zero-Knowledge Circuits
 
@@ -153,7 +153,7 @@ build selection without deploying contracts or starting localnet.
 
 The deployment configuration records the network's public identity string
 (`networkPassphrase`) and default RPC address (`rpcUrl`). The website checks
-Freighter's identity, the CLI checks its Stellar CLI network configuration, and
+Varial's identity, the CLI checks its Stellar CLI network configuration, and
 the bootnode checks the upstream RPC's identity against that passphrase. Display
 names, explorer defaults, and test-network disclaimers also come from the config.
 
@@ -171,7 +171,7 @@ As a work-in-progress, this implementation has several limitations to be resolve
 - **Stellar Events retention**: The app relies heavily on Stellar events. But RPC nodes only store events for a small retention window (7 days). This means that the demo will not work for users onboarded after 7 days of contract deployment because they couldn't re-play events history. But a user who onboarded within 7 days from the contracts deployment and keeps their app tab open in a browser, can use the app without a reset as the events digestion happens in the background.
 - **Not Audited**: The code has not undergone security audits.
 - **Error Handling**: Error handling may not cover all edge cases.
-- **Browser storage**: The web app keeps its SQLite database (`spp.encrypted.db`) in the browser's [Origin Private File System (OPFS)](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system), encrypted under a random key whose Freighter-wrapped envelope lives in `localStorage`. You can export and import encrypted backups from the app. If browser storage is wiped without a backup, signing again with the same wallet re-derives your privacy keys and re-syncing recovers your notes (through a bootnode once the pool is older than the 7-day RPC retention window), though local settings and operation history are lost. Because the Freighter signature unwraps the `localStorage` envelope rather than deriving the random database key itself, losing `localStorage` while encrypted OPFS files remain leaves that database unreadable; you must either restore a backup or reset local storage before onboarding again.
+- **Browser storage**: The web app keeps its SQLite database (`spp.encrypted.db`) in the browser's [Origin Private File System (OPFS)](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system), encrypted under a random key whose Varial-wrapped envelope lives in `localStorage`. You can export and import encrypted backups from the app. If browser storage is wiped without a backup, signing again with the same wallet re-derives your privacy keys and re-syncing recovers your notes (through a bootnode once the pool is older than the 7-day RPC retention window), though local settings and operation history are lost. Because the Varial signature unwraps the `localStorage` envelope rather than deriving the random database key itself, losing `localStorage` while encrypted OPFS files remain leaves that database unreadable; you must either restore a backup or reset local storage before onboarding again.
 
 
 ## AI tools disclosure

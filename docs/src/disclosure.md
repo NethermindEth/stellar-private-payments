@@ -60,7 +60,7 @@ The `extContextHash` is a SHA-256 hash of all context fields (network, pool addr
 Note owners generate receipts through the **Disclosure** view in the main app, reached via the **Disclosure** tab (`/#disclosure`).
 
 ### Prerequisites
-- Freighter wallet extension installed and switched to testnet.
+- Varial wallet extension installed and switched to testnet.
 - The account has completed onboarding in the main app (privacy keys derived and stored in the shared OPFS database).
 - The account has at least one **unspent** note in the pool.
 
@@ -168,7 +168,7 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 
 ### For note owners: generating a receipt
 
-1. Open the main app and connect your Freighter wallet on Testnet.
+1. Open the main app and connect your Varial wallet on Testnet.
 2. Scroll to **Your Notes** and find an unspent note you want to disclose.
 3. Click **Disclose** in the note's Actions column. This opens `/#disclosure?commitment=0x<note-commitment>&pool=C<pool-contract-address>` with the note preselected. To preselect multiple notes, repeat the `commitment` query parameter.
 4. Enter the context requested by the authority:

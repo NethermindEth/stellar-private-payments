@@ -30,7 +30,7 @@ stellar-private-payments/
 │   │   ├── disclosure.js       # Selective disclosure UI entry
 │   │   ├── app-storage.js      # App-only persistence (settings, op history)
 │   │   ├── db-locked.js        # DB-locked (storage in use by another tab) modal
-│   │   ├── wallet.js           # Freighter connect/watch/sign UX
+│   │   ├── wallet.js           # Varial connect/watch/sign UX
 │   │   ├── wasm-facade.js      # Runtime facade over stellar-private-payments
 │   │   └── sw.js               # Service worker
 │   ├── css/                    # Stylesheets
@@ -70,7 +70,7 @@ stellar-private-payments/
 │   ├── bootnode/               # HTTPS JSON-RPC getEvents service (excluded from workspace)
 │   └── ceremony-cli/           # Groth16 BN254 trusted-setup ceremony CLI (wraps snarkjs)
 ├── cli/                        # CLI binary (stellar-private-payments-cli; see CLI development)
-├── integration-tests-app/      # Real-Freighter browser e2e suite (see integration-tests-app/README.md)
+├── integration-tests-app/      # Real-Varial browser e2e suite (see integration-tests-app/README.md)
 ├── integration-tests-web/      # Pre-signing SDK browser e2e suite (see integration-tests-web/README.md)
 ├── e2e-tests/                  # End-to-end integration tests
 ├── deployments/                # Deployment scripts, testnet config, legal notices
@@ -272,7 +272,7 @@ cargo test -p e2e-tests
 ### Browser E2E setup
 
 The two browser e2e suites — the pre-signing SDK wasm tests and the
-real-Freighter tests in `integration-tests-app/` (see `integration-tests-app/README.md`) —
+real-Varial tests in `integration-tests-app/` (see `integration-tests-app/README.md`) —
 each bring up their own prerequisites directly in their entry point script,
 rather than through a separate generalized preflight tool:
 
