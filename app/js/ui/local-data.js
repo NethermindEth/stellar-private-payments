@@ -4,6 +4,7 @@ import { rememberedNoteOwner } from '../account-session.js';
 import { getConnectedAddress } from '../wallet.js';
 import { Wallet } from './navigation.js';
 import { Toast } from './core.js';
+import { el } from './dom.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { SIGNER_MIGRATION_WARNING_EVENT } from '../private-signers.js';
 
@@ -116,7 +117,7 @@ export const LocalData = {
             try {
                 const text = await manageStorageBackup('export');
                 const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-                const link = document.createElement('a');
+                const link = el('a');
                 link.href = url;
                 link.download = `spp-encrypted-backup-${new Date().toISOString().slice(0, 10)}.json`;
                 document.body.append(link);

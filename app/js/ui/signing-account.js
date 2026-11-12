@@ -32,6 +32,7 @@ import {
 } from '../signing-account.js';
 import { App, Toast, Utils } from './core.js';
 import { onEnter } from './keys.js';
+import { el } from './dom.js';
 
 const OTHER = '__other__';
 const REQUEST_ACTIVE = '__request_active__';
@@ -135,20 +136,15 @@ function renderSettings() {
     const signers = isStorageUnlocked() ? App.state.wallet.signers || [] : [];
 
     list.replaceChildren(...signers.map((signer) => {
-        const item = document.createElement('li');
+        const item = el('li', 'flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-ink-950 px-4 py-3');
         item.setAttribute('data-testid', 'settings-signing-account');
-        item.className = 'flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-ink-950 px-4 py-3';
 
-        const address = document.createElement('span');
-        address.className = 'min-w-0 break-all font-mono text-xs text-slate-100';
-        address.textContent = signer;
+        const address = el('span', 'min-w-0 break-all font-mono text-xs text-slate-100', signer);
 
-        const remove = document.createElement('button');
+        const remove = el('button', 'shrink-0 rounded-full border border-rose-400/25 px-3 py-1.5 text-xs font-medium text-rose-100 transition hover:border-rose-400/40 hover:bg-rose-400/10', 'Remove');
         remove.type = 'button';
         remove.setAttribute('data-testid', 'settings-signing-account-remove');
         remove.setAttribute('aria-label', `Remove ${Utils.shortAddress(signer)}`);
-        remove.className = 'shrink-0 rounded-full border border-rose-400/25 px-3 py-1.5 text-xs font-medium text-rose-100 transition hover:border-rose-400/40 hover:bg-rose-400/10';
-        remove.textContent = 'Remove';
         remove.addEventListener('click', async () => {
             if (!await setSigners(removeSigner(App.state.wallet.signers, signer))) return;
             renderKeepingSelections();

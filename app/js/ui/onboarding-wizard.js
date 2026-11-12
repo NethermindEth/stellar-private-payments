@@ -4,6 +4,7 @@ import { client } from '../wasm-facade.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
 import { getRegistrationErrorMessage } from './errors.js';
 import { Utils, Toast } from './core.js';
+import { el, elc } from './dom.js';
 import {
     hasNotificationSupport,
     getNotificationsPrompted,
@@ -51,22 +52,22 @@ function setPersistPromptedFlag() {
 }
 
 function setError(message) {
-    const el = document.getElementById('onboarding-error');
-    if (!el) return;
+    const box = document.getElementById('onboarding-error');
+    if (!box) return;
     if (!message) {
-        el.textContent = '';
-        el.classList.add('hidden');
+        box.textContent = '';
+        box.classList.add('hidden');
         return;
     }
-    el.textContent = friendlyErrorMessage(message);
-    el.classList.remove('hidden');
+    box.textContent = friendlyErrorMessage(message);
+    box.classList.remove('hidden');
 }
 
 function showModal() {
-    const el = document.getElementById('onboarding-modal');
-    if (!el) throw new Error('Onboarding modal is missing');
+    const modal = document.getElementById('onboarding-modal');
+    if (!modal) throw new Error('Onboarding modal is missing');
     setError('');
-    el.classList.remove('hidden');
+    modal.classList.remove('hidden');
 }
 
 function hideModal() {
@@ -74,65 +75,47 @@ function hideModal() {
 }
 
 function renderContent(node) {
-    const el = document.getElementById('onboarding-content');
-    if (!el) return;
-    el.replaceChildren();
-    if (node) el.appendChild(node);
+    const content = document.getElementById('onboarding-content');
+    if (!content) return;
+    content.replaceChildren();
+    if (node) content.appendChild(node);
 }
 
 function renderWhy(stepId) {
-    document.querySelectorAll('#onboarding-why [data-why]').forEach(el => {
-        el.classList.toggle('hidden', el.dataset.why !== stepId);
+    document.querySelectorAll('#onboarding-why [data-why]').forEach(panel => {
+        panel.classList.toggle('hidden', panel.dataset.why !== stepId);
     });
 }
 
 function renderActions(buttons) {
-    const el = document.getElementById('onboarding-actions');
-    if (!el) return;
-    el.replaceChildren(...buttons);
+    const actions = document.getElementById('onboarding-actions');
+    if (!actions) return;
+    actions.replaceChildren(...buttons);
 }
 
 function makeButton({ text, variant = 'secondary', onClick }) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = text;
-    btn.className = variant === 'primary'
+    const btn = el('button', variant === 'primary'
         ? 'rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60'
         : variant === 'ghost'
             ? 'rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-60'
-            : 'rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-60';
+            : 'rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-60', text);
+    btn.type = 'button';
     if (onClick) btn.addEventListener('click', onClick);
     return btn;
 }
 
 function makePanel({ eyebrow, title, body, aside }) {
-    const wrap = document.createElement('div');
-    wrap.className = 'space-y-5';
-
-    const intro = document.createElement('div');
-    const eyebrowEl = document.createElement('p');
-    eyebrowEl.className = 'text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70';
-    eyebrowEl.textContent = eyebrow;
-    const titleEl = document.createElement('h3');
-    titleEl.className = 'mt-2 text-2xl font-semibold tracking-tight text-white';
-    titleEl.textContent = title;
-    intro.append(eyebrowEl, titleEl);
-    if (body) {
-        const bodyEl = document.createElement('p');
-        bodyEl.className = 'mt-3 text-sm leading-6 text-slate-300';
-        bodyEl.textContent = body;
-        intro.appendChild(bodyEl);
-    }
-    wrap.appendChild(intro);
+    const wrap = elc('div', 'space-y-5', [
+        elc('div', null, [
+            el('p', 'text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70', eyebrow),
+            el('h3', 'mt-2 text-2xl font-semibold tracking-tight text-white', title),
+            body ? el('p', 'mt-3 text-sm leading-6 text-slate-300', body) : null,
+        ]),
+    ]);
 
     if (aside) {
-        const info = document.createElement('div');
-        info.className = 'rounded-[24px] border border-white/8 bg-ink-950/70 p-5 text-sm leading-6 text-slate-300';
-        if (typeof aside === 'string') {
-            info.textContent = aside;
-        } else {
-            info.appendChild(aside);
-        }
+        const info = el('div', 'rounded-[24px] border border-white/8 bg-ink-950/70 p-5 text-sm leading-6 text-slate-300');
+        info.append(aside);
         wrap.appendChild(info);
     }
 
@@ -140,10 +123,10 @@ function makePanel({ eyebrow, title, body, aside }) {
 }
 
 function setStepState(stepId, state) {
-    const el = document.querySelector(`#onboarding-steps [data-step="${stepId}"]`);
-    if (!el) return;
-    el.dataset.state = state;
-    el.classList.remove(
+    const pill = document.querySelector(`#onboarding-steps [data-step="${stepId}"]`);
+    if (!pill) return;
+    pill.dataset.state = state;
+    pill.classList.remove(
         'border-white/8',
         'bg-white/[0.03]',
         'text-slate-400',
@@ -155,11 +138,11 @@ function setStepState(stepId, state) {
         'text-emerald-100'
     );
     if (state === 'current') {
-        el.classList.add('border-cyan-300/30', 'bg-cyan-300/10', 'text-cyan-100');
+        pill.classList.add('border-cyan-300/30', 'bg-cyan-300/10', 'text-cyan-100');
     } else if (state === 'done') {
-        el.classList.add('border-emerald-300/30', 'bg-emerald-300/10', 'text-emerald-100');
+        pill.classList.add('border-emerald-300/30', 'bg-emerald-300/10', 'text-emerald-100');
     } else {
-        el.classList.add('border-white/8', 'bg-white/[0.03]', 'text-slate-400');
+        pill.classList.add('border-white/8', 'bg-white/[0.03]', 'text-slate-400');
     }
 }
 
@@ -178,10 +161,7 @@ function renderDisclaimerMarkdown(md, container) {
 
     const flushCode = () => {
         if (!codeLines.length) return;
-        const pre = document.createElement('pre');
-        pre.className = 'overflow-auto rounded-2xl border border-white/8 bg-ink-950 px-4 py-3 text-xs text-slate-200';
-        pre.textContent = codeLines.join('\n');
-        container.appendChild(pre);
+        container.appendChild(el('pre', 'overflow-auto rounded-2xl border border-white/8 bg-ink-950 px-4 py-3 text-xs text-slate-200', codeLines.join('\n')));
         codeLines = [];
     };
 
@@ -212,31 +192,22 @@ function renderDisclaimerMarkdown(md, container) {
             flushList();
             const level = headingMatch[1].length;
             const text = headingMatch[2].trim();
-            const heading = document.createElement(level === 1 ? 'h4' : 'h5');
-            heading.className = level === 1 ? 'text-lg font-semibold text-white' : 'text-sm font-semibold text-white';
-            heading.textContent = text;
-            container.appendChild(heading);
+            container.appendChild(el(level === 1 ? 'h4' : 'h5', level === 1 ? 'text-lg font-semibold text-white' : 'text-sm font-semibold text-white', text));
             continue;
         }
 
         const listMatch = line.match(/^[-*]\s+(.*)$/);
         if (listMatch) {
             if (!currentList) {
-                currentList = document.createElement('ul');
-                currentList.className = 'list-disc space-y-2 pl-5';
+                currentList = el('ul', 'list-disc space-y-2 pl-5');
                 container.appendChild(currentList);
             }
-            const li = document.createElement('li');
-            li.textContent = listMatch[1].trim();
-            currentList.appendChild(li);
+            currentList.appendChild(el('li', null, listMatch[1].trim()));
             continue;
         }
 
         flushList();
-        const p = document.createElement('p');
-        p.className = 'leading-6';
-        p.textContent = line.trim();
-        container.appendChild(p);
+        container.appendChild(el('p', 'leading-6', line.trim()));
     }
 
     if (inCode) flushCode();
@@ -369,8 +340,7 @@ export async function runOnboardingWizard({
         renderWhy(stepId);
 
         if (stepId === 'disclaimer') {
-            const markdown = document.createElement('div');
-            markdown.className = 'space-y-3 text-sm text-slate-300 break-words';
+            const markdown = el('div', 'space-y-3 text-sm text-slate-300 break-words');
             renderDisclaimerMarkdown(disclaimerState?.disclaimerTextMd || '', markdown);
             const panel = makePanel({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
@@ -402,12 +372,9 @@ export async function runOnboardingWizard({
         }
 
         if (stepId === 'storage') {
-            const statusWrap = document.createElement('p');
-            statusWrap.append('Current status: ');
-            const statusValue = document.createElement('span');
-            statusValue.className = 'font-semibold text-white';
-            statusValue.textContent = persisted ? 'already persisted' : 'not persisted yet';
-            statusWrap.appendChild(statusValue);
+            const statusValue = el('span', 'font-semibold text-white', persisted ? 'already persisted' : 'not persisted yet');
+            const statusWrap = el('p');
+            statusWrap.append('Current status: ', statusValue);
             const panel = makePanel({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Request durable browser storage',
@@ -510,8 +477,7 @@ export async function runOnboardingWizard({
         if (stepId === 'retention') {
             const enableNotifications = hasNotificationSupport();
             const bootnodeEnabled = bootnodeRequired || !!state.bootnode?.enabled;
-            const inputWrap = document.createElement('div');
-            inputWrap.className = 'space-y-4';
+            const inputWrap = el('div', 'space-y-4');
             const bootnodeBox = document.getElementById('tpl-wizard-bootnode').content.firstElementChild.cloneNode(true);
             const bootnodeEnabledInput = bootnodeBox.querySelector('#wizard-bootnode-enabled');
             bootnodeEnabledInput.checked = bootnodeEnabled;
@@ -521,26 +487,17 @@ export async function runOnboardingWizard({
             inputWrap.appendChild(bootnodeBox);
 
             if (bootnodeRequired) {
-                const requiredNote = document.createElement('p');
-                requiredNote.className = 'mt-4 text-sm text-amber-200';
-                requiredNote.textContent = 'The public RPC is missing event history (sync gap), so a bootnode archive URL is required to join the app.';
-                bootnodeBox.appendChild(requiredNote);
+                bootnodeBox.appendChild(el('p', 'mt-4 text-sm text-amber-200', 'The public RPC is missing event history (sync gap), so a bootnode archive URL is required to join the app.'));
             }
 
             let permStatus = null;
             if (enableNotifications) {
-                const notif = document.createElement('div');
-                notif.className = 'rounded-[24px] border border-white/8 bg-white/[0.03] p-5 text-sm text-slate-300 space-y-2';
-                const notifTitle = document.createElement('p');
-                notifTitle.className = 'font-medium text-white';
-                notifTitle.textContent = 'Browser reminder';
-                const notifBody = document.createElement('p');
-                notifBody.textContent = 'If you choose to rely on RPC only, you can allow notifications so the app can remind you to reopen the tab before retention becomes a problem.';
-                permStatus = document.createElement('p');
-                permStatus.className = 'text-xs text-slate-500';
-                permStatus.textContent = `Current permission: ${Notification.permission}`;
-                notif.append(notifTitle, notifBody, permStatus);
-                inputWrap.appendChild(notif);
+                permStatus = el('p', 'text-xs text-slate-500', `Current permission: ${Notification.permission}`);
+                inputWrap.appendChild(elc('div', 'rounded-[24px] border border-white/8 bg-white/[0.03] p-5 text-sm text-slate-300 space-y-2', [
+                    el('p', 'font-medium text-white', 'Browser reminder'),
+                    el('p', null, 'If you choose to rely on RPC only, you can allow notifications so the app can remind you to reopen the tab before retention becomes a problem.'),
+                    permStatus,
+                ]));
             }
 
             const panel = makePanel({

@@ -14,28 +14,7 @@
 // and the formatting helpers below. createNoteRow() is an el()-based CARD row
 // for non-table note lists (the disclosure selector and any future surface).
 
-// ---------------------------------------------------------------------------
-// Minimal DOM builders (signature-compatible with disclosure.js el()/elc()).
-// ---------------------------------------------------------------------------
-
-export function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text != null) node.textContent = String(text);
-  return node;
-}
-
-// Create an element and append DOM-node children. `children` only ever contains
-// Nodes (or null) — never raw strings — so nothing untrusted reaches the DOM as
-// markup.
-export function elc(tag, className, children) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  for (const child of children) {
-    if (child instanceof Node) node.appendChild(child);
-  }
-  return node;
-}
+import { el, elc } from './dom.js';
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -71,7 +50,6 @@ export function tokenLabel(pool) {
   return 'Token';
 }
 
-// Shorten a hex string for display (mirrors disclosure.js shortCommitment).
 export function shortHex(hex, start = 8, end = 4, ellipsis = '…') {
   if (!hex || hex.length < start + end + 2) return hex || '--';
   return `${hex.slice(0, start)}${ellipsis}${hex.slice(-end)}`;

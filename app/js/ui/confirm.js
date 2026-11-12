@@ -8,6 +8,8 @@
  * @module ui/confirm
  */
 
+import { el, elc } from './dom.js';
+
 /**
  * Show a confirmation dialog and wait for the user's choice.
  *
@@ -28,65 +30,40 @@ export function confirmAction({ title, rows = [], confirmLabel = 'Confirm', warn
     return new Promise((resolve) => {
         const previouslyFocused = document.activeElement;
 
-        const overlay = document.createElement('div');
-        overlay.className = 'fixed inset-0 z-[60] flex items-center justify-center bg-ink-950/75 px-4 backdrop-blur-sm';
+        const overlay = el('div', 'fixed inset-0 z-[60] flex items-center justify-center bg-ink-950/75 px-4 backdrop-blur-sm');
 
-        const panel = document.createElement('div');
+        const panel = el('div', 'w-full max-w-md rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)]');
         panel.setAttribute('role', 'dialog');
         panel.setAttribute('aria-modal', 'true');
         panel.setAttribute('data-testid', 'confirm-dialog');
-        panel.className = 'w-full max-w-md rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(11,18,35,0.98),rgba(6,11,24,1))] p-6 shadow-[0_24px_100px_rgba(0,0,0,0.6)]';
 
-        const heading = document.createElement('h2');
-        heading.className = 'text-xl font-semibold tracking-tight text-white';
+        const heading = el('h2', 'text-xl font-semibold tracking-tight text-white', title);
         heading.setAttribute('data-testid', 'confirm-dialog-title');
-        heading.textContent = title;
         panel.appendChild(heading);
 
         if (rows.length) {
-            const list = document.createElement('dl');
-            list.className = 'mt-5 space-y-3 rounded-[24px] border border-white/8 bg-ink-900/80 p-5';
-            rows.forEach(({ label, value }) => {
-                const row = document.createElement('div');
-                row.className = 'flex items-center justify-between gap-4 text-sm';
-                const dt = document.createElement('dt');
-                dt.className = 'shrink-0 text-slate-500';
-                dt.textContent = label;
-                const dd = document.createElement('dd');
-                dd.className = 'break-all text-right font-mono text-slate-100';
-                dd.textContent = value;
-                row.append(dt, dd);
-                list.appendChild(row);
-            });
-            panel.appendChild(list);
+            panel.appendChild(elc('dl', 'mt-5 space-y-3 rounded-[24px] border border-white/8 bg-ink-900/80 p-5', rows.map(({ label, value }) => elc('div', 'flex items-center justify-between gap-4 text-sm', [
+                el('dt', 'shrink-0 text-slate-500', label),
+                el('dd', 'break-all text-right font-mono text-slate-100', value),
+            ]))));
         }
 
         if (warning) {
-            const note = document.createElement('p');
+            const note = el('p', 'mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-200', warning);
             note.setAttribute('role', 'alert');
             note.setAttribute('data-testid', 'confirm-dialog-warning');
-            note.className = 'mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/5 p-4 text-sm text-amber-200';
-            note.textContent = warning;
             panel.appendChild(note);
         }
 
-        const actions = document.createElement('div');
-        actions.className = 'mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end';
-
-        const cancelBtn = document.createElement('button');
+        const cancelBtn = el('button', 'rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Cancel');
         cancelBtn.type = 'button';
-        cancelBtn.className = 'rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100';
         cancelBtn.setAttribute('data-testid', 'confirm-dialog-cancel');
-        cancelBtn.textContent = 'Cancel';
 
-        const confirmBtn = document.createElement('button');
+        const confirmBtn = el('button', 'rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110', confirmLabel);
         confirmBtn.type = 'button';
-        confirmBtn.className = 'rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110';
         confirmBtn.setAttribute('data-testid', 'confirm-dialog-confirm');
-        confirmBtn.textContent = confirmLabel;
 
-        actions.append(cancelBtn, confirmBtn);
-        panel.appendChild(actions);
+        panel.appendChild(elc('div', 'mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end', [cancelBtn, confirmBtn]));
         overlay.appendChild(panel);
         document.body.appendChild(overlay);
 

@@ -14,6 +14,7 @@
 
 import { POOL_CONTROLS, poolControls } from '../pool-policy.js';
 import { App, Utils } from './core.js';
+import { el, svgEl } from './dom.js';
 
 const TAG = 'inline-flex min-h-11 items-center gap-2 rounded-full border px-3.5 text-[13px] font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60 aria-expanded:ring-2';
 const PANEL = 'rounded-xl border border-white/10 bg-ink-850 p-3 text-sm leading-relaxed';
@@ -24,22 +25,6 @@ const NEUTRAL = { tag: 'border-white/10 bg-white/[0.04] text-slate-200 aria-expa
 const ASP = { tag: 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100 aria-expanded:ring-cyan-300/30', impact: 'text-cyan-200' };
 const VIEW_KEY = { tag: 'border-violet-300/30 bg-violet-300/10 text-violet-200 aria-expanded:ring-violet-300/30', impact: 'text-violet-200' };
 const TONES = { open: NEUTRAL, allowlist: ASP, blocklist: ASP, viewOnly: VIEW_KEY, traceable: VIEW_KEY };
-
-const SVG_NS = 'http://www.w3.org/2000/svg';
-
-function svgEl(tag, attrs, children = []) {
-    const node = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-    node.append(...children);
-    return node;
-}
-
-function el(tag, className, text) {
-    const node = document.createElement(tag);
-    node.className = className;
-    if (text != null) node.textContent = text;
-    return node;
-}
 
 function helpIcon() {
     return svgEl('svg', { class: 'h-3.5 w-3.5 shrink-0', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'aria-hidden': 'true' }, [
