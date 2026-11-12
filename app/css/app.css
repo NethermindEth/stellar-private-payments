@@ -8,36 +8,31 @@
 @source not "../../dist";
 
 @theme {
-  --color-brand-50: #ebf8ff;
-  --color-brand-100: #cfe9ff;
-  --color-brand-200: #add7ff;
-  --color-brand-300: #84c2ff;
-  --color-brand-400: #58a6ff;
-  --color-brand-500: #3f8aff;
-  --color-brand-600: #2f6dff;
-  --color-brand-700: #244fd3;
-  --color-brand-800: #1e3f9f;
-  --color-brand-900: #1a336f;
-
-  --color-dark-50: #f8fbff;
-  --color-dark-100: #e6eefc;
-  --color-dark-200: #ccd9ef;
-  --color-dark-300: #aebdd6;
-  --color-dark-400: #7e91ae;
-  --color-dark-500: #5d6d88;
-  --color-dark-600: #3f4d64;
-  --color-dark-700: #243044;
-  --color-dark-800: #151f31;
-  --color-dark-900: #0b1423;
-  --color-dark-950: #040914;
-
   --color-ink-950: #040914;
   --color-ink-900: #0b1423;
   --color-ink-850: #101b2d;
   --color-ink-800: #16233a;
 
+  --color-accent-from: #74c5ff;
+  --color-accent-to: #2f6dff;
+
   --font-sans: "Manrope", ui-sans-serif, system-ui;
   --font-mono: "JetBrains Mono", monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-3xs: 0.625rem;
+  --tracking-label: 0.22em;
+  --tracking-eyebrow: 0.34em;
+
+  --radius-card: 28px;
+
+  --shadow-glow: 0 12px 30px rgba(63, 138, 255, 0.45);
+  --shadow-modal: 0 24px 100px rgba(0, 0, 0, 0.6);
+  --shadow-header: 0 20px 80px rgba(0, 0, 0, 0.35);
+
+  --animate-spin: spin 0.8s linear infinite;
+  --animate-pulse-dot: pulse-dot 1.8s ease-in-out infinite;
+  @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
   --color-border: rgba(255, 255, 255, 0.08);
 }
@@ -72,51 +67,23 @@
   }
 
   select option {
-    background-color: #0b1423;
-    color: #e2e8f0;
+    background-color: var(--color-ink-900);
+    color: var(--color-slate-200);
   }
 
   select option[data-privacy-warning="true"] {
-    color: #f87171;
+    color: var(--color-amber-300);
   }
 
   body {
     background:
-      radial-gradient(circle at top, rgba(63, 138, 255, 0.12), transparent 32%),
-      linear-gradient(180deg, #040914 0%, #061021 48%, #040914 100%);
+      radial-gradient(circle at top, --alpha(var(--color-blue-500) / 12%), transparent 32%),
+      linear-gradient(180deg, var(--color-ink-950) 0%, var(--color-ink-900) 48%, var(--color-ink-950) 100%);
   }
 
   ::selection {
-    background: rgba(116, 197, 255, 0.3);
-    color: #f8fbff;
-  }
-}
-
-@layer utilities {
-  /* A thin, low-contrast scrollbar for compact scroll regions (e.g. the GVK
-     admin panel's graph/history areas), instead of the chunky OS default.
-     Firefox honors scrollbar-width/-color; the rest use the WebKit pseudo-elements. */
-  .thin-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
-  }
-
-  .thin-scroll::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  .thin-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .thin-scroll::-webkit-scrollbar-thumb {
-    background-color: rgba(148, 163, 184, 0.35);
-    border-radius: 9999px;
-  }
-
-  .thin-scroll::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(148, 163, 184, 0.55);
+    background: --alpha(var(--color-accent-from) / 30%);
+    color: var(--color-slate-50);
   }
 
   input[type="number"]::-webkit-outer-spin-button,
@@ -128,21 +95,74 @@
   input[type="number"] {
     -moz-appearance: textfield;
   }
+}
 
-  @keyframes pulse-dot {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.45; }
+/* A utility, not a component, so the tone beats the base text color beside it. */
+@utility tone {
+  &[data-tone=ok] { color: var(--color-emerald-300); }
+  &[data-tone=info] { color: var(--color-cyan-200); }
+  &[data-tone=warn] { color: var(--color-amber-300); }
+  &[data-tone=fail] { color: var(--color-rose-300); }
+}
+
+@layer components {
+  .eyebrow { @apply text-2xs font-semibold uppercase tracking-eyebrow text-cyan-200/70; }
+  .field-label { @apply text-xs font-medium uppercase tracking-label text-slate-400; }
+  .section-title { @apply text-2xl font-semibold tracking-tight text-white; }
+  .table-head { @apply text-3xs uppercase tracking-wide text-slate-400; }
+  .field { @apply w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 transition focus:border-cyan-300/40; }
+  .btn-primary, .btn-secondary, .btn-danger { @apply inline-flex items-center justify-center rounded-2xl px-5 py-3 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 aria-busy:cursor-progress; }
+  .btn-primary { @apply bg-linear-135/srgb from-accent-from to-accent-to font-semibold text-ink-950 shadow-glow not-disabled:hover:brightness-110; }
+  .btn-primary:disabled:not([aria-busy=true]) { @apply bg-none text-slate-300 shadow-none inset-ring inset-ring-white/10; }
+  .btn-primary[aria-busy=true] { @apply opacity-70 shadow-none; }
+  .btn-secondary { @apply border border-white/10 text-slate-300 hover:border-cyan-300/30 hover:text-cyan-100; }
+  .btn-danger { @apply border border-rose-500/30 bg-rose-500/10 text-rose-100 hover:border-rose-500/50 hover:bg-rose-500/20; }
+  .tab { @apply rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100; }
+  .tab:is([aria-current=page], [aria-pressed=true]) { @apply bg-cyan-400/15 text-cyan-100; }
+  .icon-btn { @apply inline-flex items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100; }
+  .link { @apply text-cyan-400 underline underline-offset-2 transition hover:text-cyan-300; }
+  .card { @apply rounded-card border border-white/8 bg-white/3 p-6 backdrop-blur-xl; }
+  .panel { @apply rounded-3xl border border-white/8 p-5; }
+  .modal-panel { @apply rounded-card border border-white/8 bg-linear-to-b from-ink-900 to-ink-950 p-6 shadow-modal; }
+  .chip { @apply inline-flex items-center rounded-full border border-white/10 bg-white/4 px-2 py-1 text-2xs font-medium text-slate-200 ring-slate-300/30 transition; }
+  .chip[data-tone=info] { @apply border-cyan-300/30 bg-cyan-400/10 text-cyan-100 ring-cyan-300/30; }
+  .chip[data-tone=key] { @apply border-violet-300/30 bg-violet-300/10 text-violet-200 ring-violet-300/30; }
+  .chip[data-tone=fail] { @apply border-rose-400/30 bg-rose-400/10 text-rose-200; }
+  .sync-dot { @apply h-2 w-2 rounded-full bg-slate-500; }
+  .sync-dot[data-tone=ok] { @apply bg-emerald-400; box-shadow: 0 0 18px --alpha(var(--color-emerald-400) / 70%); }
+  .sync-dot[data-tone=warn] { @apply bg-amber-300 animate-pulse-dot; }
+  .step { @apply rounded-2xl border border-white/8 bg-white/3 px-4 py-3 text-sm text-slate-400; }
+  .step[data-state=current] { @apply border-cyan-300/30 bg-cyan-300/10 text-cyan-100; }
+  .step[data-state=done] { @apply border-emerald-300/30 bg-emerald-300/10 text-emerald-100; }
+  .ambient {
+    @apply pointer-events-none fixed inset-0 overflow-hidden;
+    background: radial-gradient(circle at top, --alpha(var(--color-blue-400) / 28%), transparent 58%) top / 100% 32rem no-repeat;
+    &::before, &::after { @apply absolute rounded-full blur-3xl content-['']; }
+    &::before { @apply -left-24 top-44 size-72 bg-cyan-400/10; }
+    &::after { @apply top-24 right-0 size-96; background-color: --alpha(var(--color-blue-500) / 10%); }
+  }
+}
+
+/* Firefox reads the scrollbar-* properties, WebKit the pseudo-elements. */
+@utility thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: --alpha(var(--color-slate-400) / 35%) transparent;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
   }
 
-  .animate-pulse-dot {
-    animation: pulse-dot 1.8s ease-in-out infinite;
+  &::-webkit-scrollbar-track {
+    background: transparent;
   }
 
-  @keyframes spin {
-    to { transform: rotate(360deg); }
+  &::-webkit-scrollbar-thumb {
+    background-color: --alpha(var(--color-slate-400) / 35%);
+    border-radius: 9999px;
   }
 
-  .animate-spin {
-    animation: spin 0.8s linear infinite;
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: --alpha(var(--color-slate-400) / 55%);
   }
 }

@@ -126,10 +126,10 @@ test('open + view-only shows both controls, neutral then violet', () => {
   select(OPEN_VIEW_ONLY);
   assert.deepEqual(labels(roots.move), ['Open', 'Admin view key · view-only']);
   const [open, viewOnly] = tagsOf(roots.move);
-  assert.match(open.className, /text-slate-200/);
-  assert.match(viewOnly.className, /text-violet-200/);
+  assert.equal(open.dataset.tone, undefined);
+  assert.equal(viewOnly.dataset.tone, 'key');
   select(BLOCKLIST);
-  assert.match(tagsOf(roots.move)[0].className, /text-cyan-100/);
+  assert.equal(tagsOf(roots.move)[0].dataset.tone, 'info');
 });
 
 test('hover previews a tag, allows reading its panel, and closes on leaving the section', () => {

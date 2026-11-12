@@ -1,5 +1,5 @@
 import { App, Utils } from './core.js';
-import { statusBadgeSpec } from './notes-view.js';
+import { createStatusBadge } from './notes-view.js';
 
 export const Templates = {
     init() {
@@ -68,10 +68,7 @@ export const Templates = {
         row.querySelector('.note-ledger').textContent = `Ledger ${note.createdAtLedger || 0}`;
         row.querySelector('.note-pool').textContent = Utils.shortAddress(note.poolContractId, 6, 4);
 
-        const status = row.querySelector('.note-status');
-        const badge = statusBadgeSpec(note.spent);
-        status.textContent = badge.text;
-        status.className = `note-status ${badge.className}`;
+        row.querySelector('.note-status').replaceWith(createStatusBadge(note.spent));
 
         // A spent note can't be used as a transact input — hide its Use button.
         const useBtn = row.querySelector('.note-use');

@@ -260,10 +260,10 @@ function copyToClipboard(cell, text) {
   navigator.clipboard?.writeText(text).then(() => {
     const original = cell.textContent;
     cell.textContent = 'Copied!';
-    cell.classList.add('!text-emerald-300');
+    cell.dataset.copied = '';
     setTimeout(() => {
       cell.textContent = original;
-      cell.classList.remove('!text-emerald-300');
+      delete cell.dataset.copied;
     }, 900);
   }).catch(() => {});
 }
@@ -272,13 +272,13 @@ function appendGridCell(grid, value, noteId) {
   const { display, full, title, matchPk } = asCell(value);
   const cell = el(
     'div',
-    'bg-ink-950/70 px-2 py-1.5 font-mono text-slate-300 whitespace-nowrap overflow-hidden text-ellipsis transition-colors',
+    'bg-ink-950/70 px-2 py-1.5 font-mono text-slate-300 whitespace-nowrap overflow-hidden text-ellipsis transition-colors data-copy:cursor-pointer data-copy:hover:text-white data-copied:text-emerald-300 data-[highlight=pk]:bg-cyan-500/20 data-[highlight=pk]:text-cyan-50 data-[highlight=note]:bg-amber-500/20 data-[highlight=note]:text-amber-50',
     display,
   );
   if (full) {
     // `title` overrides the tooltip only; the click still copies `full`.
     cell.title = title ?? `${full} (click to copy)`;
-    cell.classList.add('cursor-pointer', 'hover:!text-white');
+    cell.dataset.copy = '';
     cell.addEventListener('click', () => copyToClipboard(cell, full));
   }
   if (matchPk) cell.dataset.gvkPk = matchPk;
@@ -286,24 +286,15 @@ function appendGridCell(grid, value, noteId) {
   grid.appendChild(cell);
 }
 
-const PK_HIGHLIGHT_CLASSES = ['!bg-cyan-500/20', '!text-cyan-50'];
-const NOTE_HIGHLIGHT_CLASSES = ['!bg-amber-500/20', '!text-amber-50'];
 let activePkHighlight = null;
 /** @type {HTMLElement[]} */
 let activeNoteCells = [];
 let activeNoteSource = null;
 
-function toggleCellHighlight(cells, classes, enabled) {
+function toggleCellHighlight(cells, kind, enabled) {
   for (const cell of cells) {
-    // Tailwind's bg-/text-color utilities don't affect SVG fill/stroke, so
-    // graph marks (circles/lines) get a filter-based highlight instead.
-    if (cell instanceof SVGElement) {
-      cell.style.filter = enabled ? 'brightness(1.6) drop-shadow(0 0 3px rgba(255,255,255,0.7))' : '';
-      continue;
-    }
-    for (const className of classes) {
-      cell.classList.toggle(className, enabled);
-    }
+    if (enabled) cell.dataset.highlight = kind;
+    else delete cell.dataset.highlight;
   }
 }
 
@@ -316,7 +307,7 @@ function setPkHighlight(pk, enabled) {
   if (!resultsEl || !pk) return;
   toggleCellHighlight(
     [...resultsEl.querySelectorAll(`[data-gvk-pk="${CSS.escape(pk)}"]`)],
-    PK_HIGHLIGHT_CLASSES,
+    'pk',
     enabled,
   );
 }
@@ -346,7 +337,7 @@ function txSquareSelector(txIndex) {
 function setTxSquaresVisible(txIndex, visible) {
   if (!resultsEl || txIndex == null) return;
   for (const square of resultsEl.querySelectorAll(txSquareSelector(txIndex))) {
-    square.style.opacity = visible ? '1' : '0';
+    square.toggleAttribute('data-highlight', visible);
   }
 }
 
@@ -371,12 +362,12 @@ function syncTxSquaresForElement(el) {
 function applyNoteHighlight(cells) {
   clearNoteHighlight();
   activeNoteCells = cells;
-  toggleCellHighlight(activeNoteCells, NOTE_HIGHLIGHT_CLASSES, true);
+  toggleCellHighlight(activeNoteCells, 'note', true);
 }
 
 function clearNoteHighlight() {
   if (activeNoteCells.length === 0) return;
-  toggleCellHighlight(activeNoteCells, NOTE_HIGHLIGHT_CLASSES, false);
+  toggleCellHighlight(activeNoteCells, 'note', false);
   activeNoteCells = [];
 }
 
@@ -492,13 +483,7 @@ function setPanelStatus(message, kind = 'info') {
   }
   statusEl.textContent = message;
   statusEl.classList.remove('hidden');
-  statusEl.className = 'rounded-xl border px-4 py-3 text-sm ' + (
-    kind === 'error'
-      ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
-      : kind === 'ok'
-        ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-        : 'border-white/10 bg-ink-900/70 text-slate-300'
-  );
+  statusEl.dataset.tone = kind === 'error' ? 'fail' : kind;
 }
 
 function noteCells(audited) {
@@ -529,28 +514,24 @@ function columnWidth(header) {
 
 function renderSlotTable(title, headers, noteRows) {
   const block = el('div', 'min-w-0 flex-1 space-y-1.5');
-  block.appendChild(el('div', 'text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500', title));
+  block.appendChild(el('div', 'field-label text-3xs', title));
   const totalWidth = headers.reduce((sum, header) => sum + columnWidth(header), 0);
   block.style.flexGrow = totalWidth;
   block.style.flexBasis = '0%';
 
   if (noteRows.length === 0) {
     const empty = el('div', 'w-full rounded-lg border border-white/6 bg-ink-950/50 px-2 py-1.5');
-    empty.appendChild(el('p', 'font-mono text-[11px] text-slate-500', '—'));
+    empty.appendChild(el('p', 'font-mono text-2xs text-slate-400', '—'));
     block.appendChild(empty);
     return block;
   }
 
   const table = el('div', 'w-full rounded-lg border border-white/6 bg-ink-950/50');
-  const grid = el('div', 'grid w-full gap-px bg-white/6 text-[11px]');
+  const grid = el('div', 'grid w-full gap-px bg-white/6 text-2xs');
   grid.style.gridTemplateColumns = headers.map((header) => `${columnWidth(header)}fr`).join(' ');
 
   for (const header of headers) {
-    grid.appendChild(el(
-      'div',
-      'bg-ink-950/90 px-2 py-1.5 font-medium uppercase tracking-wide text-slate-500',
-      header,
-    ));
+    grid.appendChild(el('div', 'table-head bg-ink-950/90 px-2 py-1.5 text-2xs font-medium', header));
   }
 
   for (const { noteId, cells } of noteRows) {
@@ -1003,15 +984,11 @@ function renderNoteTable(rows, filters) {
   const notes = collectNotes(state.rows, rows).filter((note) => noteMatchesAmountAndPk(note.audited, filters));
   const headers = ['Created', 'Owner', 'Amount', 'Commitment', 'Status', 'Spent', 'Nullifier'];
   const wrap = el('div', 'overflow-x-auto rounded-2xl border border-white/8 bg-ink-900/70');
-  const grid = el('div', 'grid gap-px bg-white/6 text-[11px]');
+  const grid = el('div', 'grid gap-px bg-white/6 text-2xs');
   grid.style.gridTemplateColumns = headers.map((header) => `${columnWidth(header)}fr`).join(' ');
 
   for (const header of headers) {
-    grid.appendChild(el(
-      'div',
-      'bg-ink-950/90 px-3 py-2 font-medium uppercase tracking-wide text-slate-500',
-      header,
-    ));
+    grid.appendChild(el('div', 'table-head bg-ink-950/90 px-3 py-2 text-2xs font-medium', header));
   }
 
   for (const note of notes) {
@@ -1053,7 +1030,7 @@ function txMemberCounts(notes) {
 }
 
 function colorForPk(pk) {
-  if (!pk) return '#64748b';
+  if (!pk) return 'var(--color-slate-500)';
   let hash = 2166136261;
   for (let i = 0; i < pk.length; i += 1) {
     hash ^= pk.charCodeAt(i);
@@ -1152,7 +1129,7 @@ function renderGraphDetailPanel(container, notes) {
   const note = notes.find((n) => n.noteId === state.selectedNoteId);
 
   if (!note) {
-    panel.appendChild(el('p', 'text-slate-500', 'Click a note in the graph to inspect it. Use ← → to step through notes.'));
+    panel.appendChild(el('p', 'text-slate-400', 'Click a note in the graph to inspect it. Use ← → to step through notes.'));
     container.appendChild(panel);
     return;
   }
@@ -1164,14 +1141,14 @@ function renderGraphDetailPanel(container, notes) {
 
   const addRow = (label, value, valueClass = 'break-all') => {
     const row = el('div');
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', label));
+    row.appendChild(el('div', 'table-head', label));
     row.appendChild(el('div', `font-mono text-slate-200 ${valueClass}`, value));
     rows.appendChild(row);
   };
 
   const addTxRow = (label, txIndex, ledger, kind) => {
     const row = el('div');
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', kind ? `${label} (${kind})` : label));
+    row.appendChild(el('div', 'table-head', kind ? `${label} (${kind})` : label));
     row.appendChild(el('div', 'font-mono text-slate-200 break-words', txLabel(txIndex, ledger)));
     rows.appendChild(row);
   };
@@ -1187,10 +1164,10 @@ function renderGraphDetailPanel(container, notes) {
   addRow('Nullifier', note.nullifier ? cellDisplay(truncateHex(note.nullifier)) : '—');
 
   const nav = el('div', 'mt-auto flex items-center justify-between gap-2 pt-4');
-  const prevBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', '← Prev');
+  const prevBtn = el('button', 'btn-secondary px-3 py-1 text-2xs', '← Prev');
   prevBtn.type = 'button';
   prevBtn.addEventListener('click', () => moveGraphSelection(-1));
-  const nextBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Next →');
+  const nextBtn = el('button', 'btn-secondary px-3 py-1 text-2xs', 'Next →');
   nextBtn.type = 'button';
   nextBtn.addEventListener('click', () => moveGraphSelection(1));
   nav.appendChild(prevBtn);
@@ -1207,20 +1184,23 @@ const GRAPH_SIDE_PANEL_ALLOWANCE = 256 + 16 + 32 + 2;
 const GRAPH_PANEL_MIN_HEIGHT = 360;
 // Fixed height for the Account graph row, so the detail panel scrolls internally instead of growing it.
 const PK_GRAPH_PANEL_HEIGHT = GRAPH_PANEL_MIN_HEIGHT + 32 + 5;
+// bg- and text- utilities don't reach SVG fill or stroke, so a highlighted mark glows instead.
+const MARK_HIGHLIGHT = 'data-highlight:brightness-160 data-highlight:drop-shadow-[0_0_3px_--alpha(var(--color-white)/70%)]';
+const MARK_SELECTED = 'data-highlight:drop-shadow-[0_0_3px_--alpha(var(--color-white)/80%)]';
 
 function renderGraphLegend() {
   const wrap = el('div', 'group absolute right-3 top-3 z-10');
 
   const badge = el(
     'div',
-    'flex h-6 w-6 cursor-help select-none items-center justify-center rounded-full border border-white/15 bg-ink-950/85 text-[11px] font-semibold text-slate-300',
+    'flex h-6 w-6 cursor-help select-none items-center justify-center rounded-full border border-white/15 bg-ink-950/85 text-2xs font-semibold text-slate-300',
     'i',
   );
   wrap.appendChild(badge);
 
   const legend = el(
     'div',
-    'pointer-events-none absolute right-0 top-7 hidden w-56 space-y-1.5 rounded-xl border border-white/10 bg-ink-950/95 px-3 py-2 text-[10px] leading-tight text-slate-300 backdrop-blur group-hover:block',
+    'pointer-events-none absolute right-0 top-7 hidden w-56 space-y-1.5 rounded-xl border border-white/10 bg-ink-950/95 px-3 py-2 text-3xs leading-tight text-slate-300 backdrop-blur group-hover:block',
   );
   wrap.appendChild(legend);
 
@@ -1232,7 +1212,7 @@ function renderGraphLegend() {
   };
 
   const dot = (extra) => el('span', `inline-block h-2.5 w-2.5 shrink-0 rounded-full ${extra}`);
-  const square = (extra) => el('span', `inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] border border-slate-300 ${extra}`);
+  const square = (extra) => el('span', `inline-block h-2.5 w-2.5 shrink-0 rounded-xs border border-slate-300 ${extra}`);
   const line = () => el('span', 'inline-block h-px w-2.5 shrink-0 bg-cyan-400/70');
 
   addItem(dot('bg-cyan-400'), 'Color = note owner');
@@ -1248,7 +1228,7 @@ function renderGraphLegend() {
   } else {
     addItem(dot('bg-cyan-400'), 'Note at its creation ledger');
     addItem(square(''), 'Tx output (created here)');
-    legend.appendChild(el('div', 'text-slate-500', 'View-only pool: inputs are not decryptable, so spends are not drawn and every note\'s status is unknown.'));
+    legend.appendChild(el('div', 'text-slate-400', 'View-only pool: inputs are not decryptable, so spends are not drawn and every note\'s status is unknown.'));
   }
 
   return wrap;
@@ -1270,7 +1250,7 @@ function renderGraph(rows, containerWidth, filters) {
   resultsEl.appendChild(outer);
 
   if (notes.length === 0) {
-    graphWrap.appendChild(el('p', 'text-sm text-slate-500', 'No notes to plot.'));
+    graphWrap.appendChild(el('p', 'text-sm text-slate-400', 'No notes to plot.'));
     renderGraphDetailPanel(outer, notes);
     return;
   }
@@ -1315,9 +1295,8 @@ function renderGraph(rows, containerWidth, filters) {
   svg.append('g')
     .attr('transform', `translate(0, ${height - bottomAxis})`)
     .call(axisBottom(xScale).ticks(Math.min(10, maxLedger - minLedger + 1)).tickFormat(format('d')))
-    .call((g) => g.select('.domain').attr('stroke', 'rgba(255,255,255,0.15)'))
-    .call((g) => g.selectAll('line').attr('stroke', 'rgba(255,255,255,0.15)'))
-    .call((g) => g.selectAll('text').attr('fill', '#94a3b8').attr('font-size', 10));
+    .call((g) => g.selectAll('.domain, line').style('stroke', 'color-mix(in oklab, var(--color-white) 15%, transparent)'))
+    .call((g) => g.selectAll('text').style('fill', 'var(--color-slate-400)').attr('font-size', 10));
 
   // Behind the marks (dots keep their own click handler where they overlap
   // the brush's hit area) so drag-to-zoom and click-to-select coexist.
@@ -1344,11 +1323,12 @@ function renderGraph(rows, containerWidth, filters) {
     .join('line')
     .attr('data-gvk-pk', (d) => normalizeFieldKey(d.audited?.note?.pk))
     .attr('data-gvk-note-id', (d) => d.noteId)
+    .attr('class', MARK_HIGHLIGHT)
     .attr('x1', (d) => xScale(d.createdLedger))
     .attr('x2', (d) => xScale(d.spentLedger))
     .attr('y1', yFor)
     .attr('y2', yFor)
-    .attr('stroke', colorForNote)
+    .style('stroke', colorForNote)
     .attr('stroke-width', 1.5)
     .attr('opacity', 0.45);
 
@@ -1367,6 +1347,7 @@ function renderGraph(rows, containerWidth, filters) {
     .join('path')
     .attr('data-gvk-pk', (d) => normalizeFieldKey(d.audited?.note?.pk))
     .attr('data-gvk-note-id', (d) => d.noteId)
+    .attr('class', MARK_HIGHLIGHT)
     .attr('data-gvk-tx-created', (d) => (d.createdTxIndex != null ? d.createdTxIndex : null))
     .attr('data-gvk-tx-spent', (d) => (d.createdTxIndex == null && d.spentTxIndex != null ? d.spentTxIndex : null))
     .attr('transform', (d) => {
@@ -1374,8 +1355,8 @@ function renderGraph(rows, containerWidth, filters) {
       return `translate(${xScale(d.createdLedger ?? d.spentLedger)}, ${yFor(d)})${rotate}`;
     })
     .attr('d', (d) => noteMarkPath(primaryKind(d), primaryRadius(d)))
-    .attr('fill', colorForNote)
-    .attr('stroke', (d) => (d.noteId === state.selectedNoteId ? '#e0f2fe' : '#0b1220'))
+    .style('fill', colorForNote)
+    .style('stroke', (d) => (d.noteId === state.selectedNoteId ? 'var(--color-sky-100)' : 'var(--color-ink-900)'))
     .attr('stroke-width', (d) => (d.noteId === state.selectedNoteId ? 2 : 1))
     .style('cursor', 'pointer')
     .on('click', (_event, d) => selectGraphNote(d.noteId));
@@ -1388,14 +1369,15 @@ function renderGraph(rows, containerWidth, filters) {
     .join('path')
     .attr('data-gvk-pk', (d) => normalizeFieldKey(d.audited?.note?.pk))
     .attr('data-gvk-note-id', (d) => d.noteId)
+    .attr('class', MARK_HIGHLIGHT)
     .attr('data-gvk-tx-spent', (d) => d.spentTxIndex)
     .attr('transform', (d) => {
       const rotate = d.spentKind === 'deposit' ? ' rotate(180)' : '';
       return `translate(${xScale(d.spentLedger)}, ${yFor(d)})${rotate}`;
     })
     .attr('d', (d) => noteMarkPath(d.spentKind, 5))
-    .attr('fill', '#0b1220')
-    .attr('stroke', colorForNote)
+    .style('fill', 'var(--color-ink-900)')
+    .style('stroke', colorForNote)
     .attr('stroke-width', 1.5)
     .style('cursor', 'pointer')
     .on('click', (_event, d) => selectGraphNote(d.noteId));
@@ -1407,8 +1389,6 @@ function renderGraph(rows, containerWidth, filters) {
   // can't shadow the pk/note highlighting on the dots above. It's shown
   // persistently for the tx of the currently selected note, and toggled on
   // for whatever's hovered by syncTxSquaresForElement (see bindResultHighlights).
-  const selectedNote = notes.find((n) => n.noteId === state.selectedNoteId);
-  const selectedTxIndex = selectedNote?.createdTxIndex ?? selectedNote?.spentTxIndex ?? null;
   const txCounts = txMemberCounts(notes);
   const createdGrouped = notes.filter((n) => n.createdTxIndex != null && txCounts.get(n.createdTxIndex) > 1);
   const spentGrouped = notes.filter((n) => n.spentTxIndex != null && txCounts.get(n.spentTxIndex) > 1);
@@ -1425,10 +1405,10 @@ function renderGraph(rows, containerWidth, filters) {
     .attr('height', squareSize)
     .attr('rx', 3)
     .attr('fill', 'transparent')
-    .attr('stroke', 'rgba(226,232,240,0.6)')
+    .style('stroke', 'color-mix(in oklab, var(--color-slate-200) 60%, transparent)')
     .attr('stroke-width', 1)
     .style('pointer-events', 'none')
-    .style('opacity', (d) => (selectedTxIndex != null && d.createdTxIndex === selectedTxIndex ? 1 : 0));
+    .attr('class', 'opacity-0 data-highlight:opacity-100');
 
   svg.append('g')
     .selectAll('rect')
@@ -1442,10 +1422,10 @@ function renderGraph(rows, containerWidth, filters) {
     .attr('rx', 3)
     .attr('transform', (d) => `rotate(45, ${xScale(d.spentLedger)}, ${yFor(d)})`)
     .attr('fill', 'transparent')
-    .attr('stroke', 'rgba(226,232,240,0.6)')
+    .style('stroke', 'color-mix(in oklab, var(--color-slate-200) 60%, transparent)')
     .attr('stroke-width', 1)
     .style('pointer-events', 'none')
-    .style('opacity', (d) => (selectedTxIndex != null && d.spentTxIndex === selectedTxIndex ? 1 : 0));
+    .attr('class', 'opacity-0 data-highlight:opacity-100');
 
   renderGraphDetailPanel(outer, notes);
 }
@@ -1502,14 +1482,14 @@ function renderPkGraphLegend() {
 
   const badge = el(
     'div',
-    'flex h-6 w-6 cursor-help select-none items-center justify-center rounded-full border border-white/15 bg-ink-950/85 text-[11px] font-semibold text-slate-300',
+    'flex h-6 w-6 cursor-help select-none items-center justify-center rounded-full border border-white/15 bg-ink-950/85 text-2xs font-semibold text-slate-300',
     'i',
   );
   wrap.appendChild(badge);
 
   const legend = el(
     'div',
-    'pointer-events-none absolute right-0 top-7 hidden w-64 space-y-1.5 rounded-xl border border-white/10 bg-ink-950/95 px-3 py-2 text-[10px] leading-tight text-slate-300 backdrop-blur group-hover:block',
+    'pointer-events-none absolute right-0 top-7 hidden w-64 space-y-1.5 rounded-xl border border-white/10 bg-ink-950/95 px-3 py-2 text-3xs leading-tight text-slate-300 backdrop-blur group-hover:block',
   );
   wrap.appendChild(legend);
 
@@ -1534,7 +1514,7 @@ function renderPkGraphLegend() {
     addItem(triangle('fill-emerald-400', true), 'Triangle down: deposit');
   } else {
     addItem(dot('border border-cyan-400 bg-ink-950'), 'Circle: a note received by that owner');
-    legend.appendChild(el('div', 'text-slate-500', 'View-only pool: spends and counterparties are not decryptable, so note origins are unknown and no transfers are drawn.'));
+    legend.appendChild(el('div', 'text-slate-400', 'View-only pool: spends and counterparties are not decryptable, so note origins are unknown and no transfers are drawn.'));
   }
 
   return wrap;
@@ -1542,7 +1522,7 @@ function renderPkGraphLegend() {
 
 function pkGraphDetailAmountRow(label, amount, count) {
   const row = el('div');
-  row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', label));
+  row.appendChild(el('div', 'table-head', label));
   row.appendChild(el(
     'div',
     'font-mono text-slate-200',
@@ -1554,9 +1534,9 @@ function pkGraphDetailAmountRow(label, amount, count) {
 /** Click-to-copy detail row: the registered address (when unique) above the PK. */
 function pkGraphDetailPkRow(label, pk) {
   const row = el('div');
-  row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', label));
+  row.appendChild(el('div', 'table-head', label));
   const addValue = (text) => {
-    const value = el('div', 'cursor-pointer font-mono text-slate-200 break-all hover:!text-white', text);
+    const value = el('div', 'cursor-pointer font-mono text-slate-200 break-all hover:text-white data-copied:text-emerald-300', text);
     value.title = `${text} (click to copy)`;
     value.addEventListener('click', () => copyToClipboard(value, text));
     row.appendChild(value);
@@ -1571,11 +1551,7 @@ function pkGraphDetailPkRow(label, pk) {
 function pkGraphDetailBalanceRow(node) {
   const traceable = state.poolGvkMode === 'traceable';
   const row = el('div');
-  row.appendChild(el(
-    'div',
-    'text-[10px] uppercase tracking-wide text-slate-500',
-    traceable ? 'Current balance' : 'Total received',
-  ));
+  row.appendChild(el('div', 'table-head', traceable ? 'Current balance' : 'Total received'));
   row.appendChild(el(
     'div',
     'font-mono text-sm text-white',
@@ -1589,25 +1565,25 @@ function pkGraphDetailSelectedDotRow(dot) {
   const row = el('div', 'rounded-lg border border-white/10 bg-ink-950/60 p-2 space-y-1');
 
   if (dot.deposited > 0n) {
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-emerald-400', 'This deposit'));
+    row.appendChild(el('div', 'table-head text-emerald-400', 'This deposit'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(dot.deposited)));
   } else if (dot.withdrawn > 0n) {
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-rose-400', 'This withdrawal'));
+    row.appendChild(el('div', 'table-head text-rose-400', 'This withdrawal'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(dot.withdrawn)));
   } else if (dot.received > 0n) {
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-400', 'This note'));
+    row.appendChild(el('div', 'table-head', 'This note'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(dot.received)));
-    row.appendChild(el('div', 'text-[10px] text-slate-500', 'Origin unknown — view-only pool'));
+    row.appendChild(el('div', 'text-3xs text-slate-400', 'Origin unknown — view-only pool'));
   } else if (dot.transferIn > 0n || dot.transferOut > 0n) {
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-cyan-400', 'This transfer'));
+    row.appendChild(el('div', 'table-head text-cyan-400', 'This transfer'));
     if (dot.transferIn > 0n) row.appendChild(el('div', 'font-mono text-slate-200', `Received ${formatTokenAmount(dot.transferIn)}`));
     if (dot.transferOut > 0n) row.appendChild(el('div', 'font-mono text-slate-200', `Sent ${formatTokenAmount(dot.transferOut)}`));
   } else {
-    row.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-400', 'This note'));
+    row.appendChild(el('div', 'table-head', 'This note'));
     row.appendChild(el('div', 'font-mono text-slate-200', formatTokenAmount(0n)));
   }
 
-  row.appendChild(el('div', 'font-mono text-[10px] text-slate-500', `tx ${dot.txIndex} · ledger ${dot.ledger}`));
+  row.appendChild(el('div', 'font-mono text-3xs text-slate-400', `tx ${dot.txIndex} · ledger ${dot.ledger}`));
   return row;
 }
 
@@ -1616,18 +1592,18 @@ function renderPkGraphFlowDetailPanel(container, flow) {
   const rows = el('div', 'space-y-3');
   panel.appendChild(rows);
 
-  rows.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', 'Transfer'));
+  rows.appendChild(el('div', 'table-head', 'Transfer'));
   rows.appendChild(pkGraphDetailPkRow('From', flow.fromPk));
   rows.appendChild(pkGraphDetailPkRow('To', flow.toPk));
   rows.appendChild(pkGraphDetailAmountRow('Amount', flow.amount, 1));
 
   const txRow = el('div');
-  txRow.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', 'Transaction'));
+  txRow.appendChild(el('div', 'table-head', 'Transaction'));
   txRow.appendChild(el('div', 'font-mono text-slate-200', `tx ${flow.txIndex} · ledger ${flow.ledger}`));
   rows.appendChild(txRow);
 
   const footer = el('div', 'mt-auto pt-4');
-  const closeBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Clear selection');
+  const closeBtn = el('button', 'btn-secondary px-3 py-1 text-2xs', 'Clear selection');
   closeBtn.type = 'button';
   closeBtn.addEventListener('click', () => selectPkGraphFlow(flow));
   footer.appendChild(closeBtn);
@@ -1646,7 +1622,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   const node = nodes.find((n) => n.pk === state.selectedPk);
 
   if (!node) {
-    panel.appendChild(el('p', 'text-slate-500', 'Click a node to inspect an owner, or an arrow to inspect a transfer. Use ← → to step through owners.'));
+    panel.appendChild(el('p', 'text-slate-400', 'Click a node to inspect an owner, or an arrow to inspect a transfer. Use ← → to step through owners.'));
     container.appendChild(panel);
     return;
   }
@@ -1674,7 +1650,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   const neighbors = pkGraphNeighborEdges(node.pk, edges);
   if (neighbors.length > 0) {
     const transfersBox = el('div', 'space-y-1 rounded-lg border border-white/10 bg-ink-950/40 p-2');
-    transfersBox.appendChild(el('div', 'text-[10px] uppercase tracking-wide text-slate-500', 'Transfers'));
+    transfersBox.appendChild(el('div', 'table-head', 'Transfers'));
     const list = el('div', 'space-y-1');
     for (const edge of neighbors) {
       const outgoing = edge.from === node.pk;
@@ -1690,10 +1666,10 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
   }
 
   const nav = el('div', 'mt-auto flex shrink-0 items-center justify-between gap-2 pt-4');
-  const prevBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', '← Prev');
+  const prevBtn = el('button', 'btn-secondary px-3 py-1 text-2xs', '← Prev');
   prevBtn.type = 'button';
   prevBtn.addEventListener('click', () => movePkGraphSelection(-1));
-  const nextBtn = el('button', 'rounded-full border border-white/10 px-3 py-1 text-[11px] text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100', 'Next →');
+  const nextBtn = el('button', 'btn-secondary px-3 py-1 text-2xs', 'Next →');
   nextBtn.type = 'button';
   nextBtn.addEventListener('click', () => movePkGraphSelection(1));
   nav.appendChild(prevBtn);
@@ -1783,7 +1759,7 @@ function renderPkGraph(rows, containerWidth, filters) {
   resultsEl.appendChild(outer);
 
   if (orderedPks.length === 0) {
-    graphWrap.appendChild(el('p', 'text-sm text-slate-500', 'No owners to plot.'));
+    graphWrap.appendChild(el('p', 'text-sm text-slate-400', 'No owners to plot.'));
     renderPkGraphDetailPanel(outer, nodes, edges, selectedFlow, selectedDot, fullNodeByPk);
     return;
   }
@@ -1821,8 +1797,8 @@ function renderPkGraph(rows, containerWidth, filters) {
   const FLOW_HEAD_HALF_WIDTH = 5;
 
   const laneStripeFill = (pk) => (pk === state.selectedPk
-    ? 'rgba(34,211,238,0.08)'
-    : laneIndexOf.get(pk) % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent');
+    ? 'color-mix(in oklab, var(--color-cyan-400) 8%, transparent)'
+    : laneIndexOf.get(pk) % 2 === 0 ? 'color-mix(in oklab, var(--color-white) 2%, transparent)' : 'transparent');
 
   // Label column stays fixed (frozen first column); horizontal scroll is
   // driven by the axis strip below (always visible, unlike a scrollbar on
@@ -1861,9 +1837,8 @@ function renderPkGraph(rows, containerWidth, filters) {
   axisSvgEl.append('g')
     .attr('transform', 'translate(0, 1)')
     .call(axisBottom(xScale).ticks(Math.min(10, maxLedger - minLedger + 1)).tickFormat(format('d')))
-    .call((g) => g.select('.domain').attr('stroke', 'rgba(255,255,255,0.15)'))
-    .call((g) => g.selectAll('line').attr('stroke', 'rgba(255,255,255,0.15)'))
-    .call((g) => g.selectAll('text').attr('fill', '#94a3b8').attr('font-size', 10));
+    .call((g) => g.selectAll('.domain, line').style('stroke', 'color-mix(in oklab, var(--color-white) 15%, transparent)'))
+    .call((g) => g.selectAll('text').style('fill', 'var(--color-slate-400)').attr('font-size', 10));
 
   axisScrollX.addEventListener('scroll', () => {
     select(plotScrollX).select('svg').style('transform', `translateX(${-axisScrollX.scrollLeft}px)`);
@@ -1889,7 +1864,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('y', (pk) => topPad + laneIndexOf.get(pk) * rowHeight)
     .attr('width', PK_TIMELINE_LABEL_WIDTH)
     .attr('height', rowHeight)
-    .attr('fill', laneStripeFill);
+    .style('fill', laneStripeFill);
 
   labelsSvg.append('g')
     .selectAll('text')
@@ -1900,7 +1875,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('dy', '0.32em')
     .attr('font-size', 11)
     .attr('font-family', 'monospace')
-    .attr('fill', (pk) => colorForPk(pk))
+    .style('fill', (pk) => colorForPk(pk))
     .style('cursor', 'pointer')
     .style('user-select', 'none')
     .text((pk) => ownerLabel(pk))
@@ -1924,7 +1899,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('y', (pk) => topPad + laneIndexOf.get(pk) * rowHeight)
     .attr('width', plotWidth)
     .attr('height', rowHeight)
-    .attr('fill', laneStripeFill);
+    .style('fill', laneStripeFill);
 
   // Behind the marks (same drag-to-zoom-by-ledger-range as the Note graph),
   // so it and click-to-select coexist — marks appended after it stay on top.
@@ -1982,15 +1957,17 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('x2', (g) => g.x)
     .attr('y1', (g) => g.shaftStartY)
     .attr('y2', (g) => g.shaftEndY)
-    .attr('stroke', (g) => g.color)
+    .style('stroke', (g) => g.color)
     .attr('stroke-width', (g) => (isSelectedFlow(g.flow) ? FLOW_STROKE_WIDTH + 2 : FLOW_STROKE_WIDTH))
     .attr('stroke-linecap', 'round')
-    .style('filter', (g) => (isSelectedFlow(g.flow) ? 'drop-shadow(0 0 3px rgba(255,255,255,0.8))' : null));
+    .attr('class', MARK_SELECTED)
+    .attr('data-highlight', (g) => (isSelectedFlow(g.flow) ? '' : null));
 
   flowGroups.append('path')
     .attr('d', (g) => `M ${g.x - FLOW_HEAD_HALF_WIDTH} ${g.headBaseY} L ${g.x + FLOW_HEAD_HALF_WIDTH} ${g.headBaseY} L ${g.x} ${g.tipY} Z`)
-    .attr('fill', (g) => g.color)
-    .style('filter', (g) => (isSelectedFlow(g.flow) ? 'drop-shadow(0 0 3px rgba(255,255,255,0.8))' : null));
+    .style('fill', (g) => g.color)
+    .attr('class', MARK_SELECTED)
+    .attr('data-highlight', (g) => (isSelectedFlow(g.flow) ? '' : null));
 
   flowGroups.append('title')
     .text((g) => `tx ${g.flow.txIndex} · ledger ${g.flow.ledger}\n${ownerShort(g.flow.fromPk)} → ${ownerShort(g.flow.toPk)}\n${formatTokenAmount(g.flow.amount)}`);
@@ -2012,11 +1989,12 @@ function renderPkGraph(rows, containerWidth, filters) {
       return `translate(${xScale(d.ledger)}, ${yFor(d.pk)})${rotate}`;
     })
     .attr('d', dotPathD)
-    .attr('fill', (d) => colorForPk(d.pk))
-    .attr('stroke', (d) => (isSelectedDot(d) || d.pk === state.selectedPk ? '#e0f2fe' : '#0b1220'))
+    .style('fill', (d) => colorForPk(d.pk))
+    .style('stroke', (d) => (isSelectedDot(d) || d.pk === state.selectedPk ? 'var(--color-sky-100)' : 'var(--color-ink-900)'))
     .attr('stroke-width', (d) => (isSelectedDot(d) ? 3 : d.pk === state.selectedPk ? 2.5 : 1))
     .style('cursor', 'pointer')
-    .style('filter', (d) => (isSelectedDot(d) ? 'drop-shadow(0 0 3px rgba(255,255,255,0.8))' : null))
+    .attr('class', MARK_SELECTED)
+    .attr('data-highlight', (d) => (isSelectedDot(d) ? '' : null))
     .on('click', (_event, d) => selectPkGraphDot(d))
     .append('title')
     .text((d) => {
@@ -2170,19 +2148,10 @@ async function ensureFullyLoaded() {
   await drainPromise;
 }
 
-function setLoadMoreHighlight(active) {
-  loadMoreBtnEl.classList.toggle('border-white/10', !active);
-  loadMoreBtnEl.classList.toggle('text-slate-300', !active);
-  loadMoreBtnEl.classList.toggle('border-cyan-300/50', active);
-  loadMoreBtnEl.classList.toggle('text-cyan-100', active);
-  loadMoreBtnEl.classList.toggle('bg-cyan-400/10', active);
-}
-
 function updateLoadMoreButton() {
   if (!loadMoreBtnEl) return;
   if (!state.audit) {
     loadMoreBtnEl.disabled = true;
-    setLoadMoreHighlight(false);
     return;
   }
 
@@ -2192,7 +2161,6 @@ function updateLoadMoreButton() {
     : !state.exhausted);
 
   loadMoreBtnEl.disabled = !hasMore;
-  setLoadMoreHighlight(hasMore);
 }
 
 function updateExportButton() {
@@ -2342,11 +2310,7 @@ function updateViewButtons() {
     [viewTxBtnEl, 'tx'], [viewNoteBtnEl, 'note'], [viewGraphBtnEl, 'graph'], [viewPkGraphBtnEl, 'pkGraph'],
   ]) {
     if (!btn) continue;
-    const active = state.view === view;
-    btn.setAttribute('aria-pressed', String(active));
-    btn.classList.toggle('bg-cyan-400/15', active);
-    btn.classList.toggle('text-cyan-100', active);
-    btn.classList.toggle('text-slate-400', !active);
+    btn.ariaPressed = state.view === view;
   }
 }
 
@@ -2556,6 +2520,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     const originalText = auditBtnEl.textContent;
     try {
       auditBtnEl.disabled = true;
+      auditBtnEl.ariaBusy = true;
       loadMoreBtnEl.disabled = true;
       auditBtnEl.textContent = 'Syncing…';
       setPanelStatus('Syncing chain data and opening audit cursor…', 'info');
@@ -2567,6 +2532,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       showToast?.(`Global View audit failed: ${err?.message || err}`, 'error');
     } finally {
       auditBtnEl.disabled = false;
+      auditBtnEl.ariaBusy = false;
       auditBtnEl.textContent = originalText;
       syncActionButtons();
     }
@@ -2588,6 +2554,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     try {
       loadMoreBtnEl.disabled = true;
       loadMoreBtnEl.textContent = 'Loading…';
+      loadMoreBtnEl.ariaBusy = true;
       await fetchBatch(BATCH_SIZE);
       await applyFiltersAndRender();
     } catch (err) {
@@ -2595,6 +2562,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       showToast?.(`Load more failed: ${err?.message || err}`, 'error');
     } finally {
       loadMoreBtnEl.textContent = originalText;
+      loadMoreBtnEl.ariaBusy = false;
       syncActionButtons();
     }
   });
@@ -2606,6 +2574,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     try {
       exportBtnEl.disabled = true;
       exportBtnEl.textContent = 'Exporting…';
+      exportBtnEl.ariaBusy = true;
       if (!state.exhausted) setPanelStatus('Loading full result set to export…', 'info');
       await ensureFullyLoaded();
       if (!readFilters().valid) throw new Error('Correct the amount filters before exporting.');
@@ -2623,6 +2592,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       showToast?.(`Export failed: ${err?.message || err}`, 'error');
     } finally {
       exportBtnEl.textContent = originalText;
+      exportBtnEl.ariaBusy = false;
       syncActionButtons();
     }
   });
