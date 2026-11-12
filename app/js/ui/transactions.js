@@ -68,12 +68,8 @@ function setLoading(button, loading, label = 'Submitting…') {
     button.ariaBusy = loading;
     button.dataset.status = loading ? 'submitting' : 'idle';
     if (!loading) delete button.dataset.progress;
-    button.querySelector('.btn-text')?.classList.toggle('hidden', loading);
-    const loadingEl = button.querySelector('.btn-loading');
-    if (loadingEl) {
-        loadingEl.classList.toggle('hidden', !loading);
-        loadingEl.textContent = loading ? label : '';
-    }
+    button.querySelector('.btn-text').hidden = loading;
+    Object.assign(button.querySelector('.btn-loading'), { hidden: !loading, textContent: loading ? label : '' });
 }
 
 // SDK prover emits `stellar-private-payments:tx-progress` with { flow, stage, message };
@@ -84,7 +80,7 @@ function bindTxProgress(button, flow) {
         if (!button || detail?.flow !== flow || !detail?.message) return;
         const loadingEl = button.querySelector('.btn-loading');
         if (!loadingEl) return;
-        loadingEl.classList.remove('hidden');
+        loadingEl.hidden = false;
         loadingEl.textContent = detail.message;
         button.dataset.status = 'submitting';
         button.dataset.progress = detail.message;
@@ -208,7 +204,7 @@ async function submitTransfer(button, amountValue, pool, transferRefs, transferA
         transferRefs.encKey.value = '';
         transferRefs.status.textContent = '';
         transferRefs.warning.textContent = '';
-        transferRefs.manual.classList.add('hidden');
+        transferRefs.manual.hidden = true;
     }
 }
 
@@ -306,7 +302,7 @@ async function updatePoolFeeLines() {
 async function lookupRecipient(address, refs) {
     refs.warning.textContent = '';
     refs.status.textContent = '';
-    refs.manual.classList.add('hidden');
+    refs.manual.hidden = true;
     if (!address) {
         refs.noteKey.value = '';
         refs.encKey.value = '';
@@ -321,7 +317,7 @@ async function lookupRecipient(address, refs) {
         return lookup;
     }
 
-    refs.manual.classList.remove('hidden');
+    refs.manual.hidden = false;
     refs.status.textContent = 'No local registration found';
     if (!lookup?.registryFullySynced) {
         refs.warning.textContent =
@@ -580,7 +576,7 @@ export const Transactions = {
             }
             // No registration found: the manual key fields are now visible and empty,
             // so send focus there rather than past them to the amount.
-            if (!transferRefs.noteKey.value.trim() && !transferRefs.manual.classList.contains('hidden')) {
+            if (!transferRefs.noteKey.value.trim() && !transferRefs.manual.hidden) {
                 transferRefs.noteKey.focus();
                 return;
             }
@@ -655,12 +651,12 @@ export const Transactions = {
         const updateSignerVisibility = () => {
             const decimals = selectedPool()?.decimals;
             const signerControl = document.querySelector('[data-signing-account="advanced"]');
-            signerControl?.classList.remove('hidden');
+            signerControl.hidden = false;
             if (decimals == null || !isRuntimeReady()) return;
             const deposit = parseAmount(depositInput?.value, decimals);
             const withdraw = parseAmount(withdrawInput?.value, decimals);
             const isDeposit = deposit.ok && withdraw.ok && deposit.value > withdraw.value;
-            signerControl?.classList.toggle('hidden', isDeposit);
+            signerControl.hidden = isDeposit;
         };
         App.events.addEventListener('pool:config', updateSignerVisibility);
         App.events.addEventListener('pool:selected', updateSignerVisibility);
@@ -823,7 +819,6 @@ export const Transactions = {
             : `${label}: ${hashes.length} transactions submitted. Last: ${Utils.truncateHex(lastHash, 10, 8)}`;
         Toast.show(message, 'success', 7000, {
             linkUrl: Utils.explorerTxUrl(lastHash),
-            linkAriaLabel: 'Open transaction in explorer',
             origin,
             transactionHash: lastHash,
         });
