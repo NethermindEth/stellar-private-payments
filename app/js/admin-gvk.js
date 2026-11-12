@@ -2086,7 +2086,7 @@ function refreshOwnersDisplay() {
 
 /** Shown once automatic owner lookups stopped after repeated errors, with a command to try again. */
 function updateOwnersNotice() {
-  ownersNoticeEl?.classList.toggle('hidden', ownersRetryState(state.ownersRetry) !== 'stopped');
+  ownersNoticeEl.hidden = ownersRetryState(state.ownersRetry) !== 'stopped';
 }
 
 /** Manual retry: restarts the error count, so automatic retries resume if this attempt fails too. */
