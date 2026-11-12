@@ -1,0 +1,159 @@
+import { POOL_CONTROLS, poolControls } from '../pool-policy.js';
+import { App } from './core.js';
+
+const TONES = {
+    open: 'border-white/10 bg-white/[0.04] text-slate-200',
+    allowlist: 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100',
+    blocklist: 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100',
+    viewOnly: 'border-violet-300/30 bg-violet-300/10 text-violet-200',
+    traceable: 'border-violet-300/30 bg-violet-300/10 text-violet-200',
+};
+
+const entries = new WeakMap();
+let nextId = 0;
+let open = null;
+let initialized = false;
+
+function el(tag, className, text) {
+    const node = document.createElement(tag);
+    node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+}
+
+function close(restoreFocus = false) {
+    if (!open) return;
+    const { trigger, panel } = open;
+    const focusInside = panel.contains(document.activeElement);
+    open = null;
+    trigger.setAttribute('aria-expanded', 'false');
+    panel.hidePopover();
+    panel.hidden = true;
+    if (restoreFocus && focusInside && trigger.isConnected) trigger.focus({ preventScroll: true });
+}
+
+function position() {
+    if (!open) return;
+    const { trigger, panel } = open;
+    // Moving an existing card can remove its popover from the top layer.
+    if (!panel.matches(':popover-open')) panel.showPopover();
+    const viewport = window.visualViewport;
+    const left = (viewport?.offsetLeft ?? 0) + 8;
+    const top = (viewport?.offsetTop ?? 0) + 8;
+    const right = left + (viewport?.width ?? window.innerWidth) - 16;
+    const bottom = top + (viewport?.height ?? window.innerHeight) - 16;
+    const rect = trigger.getBoundingClientRect();
+    const width = Math.min(352, right - left);
+    panel.style.width = `${width}px`;
+    panel.style.maxHeight = `${bottom - top}px`;
+    const height = panel.getBoundingClientRect().height;
+    const below = Math.max(0, bottom - rect.bottom - 8);
+    const above = Math.max(0, rect.top - top - 8);
+    const flip = height > below && above > below;
+    const available = Math.min(bottom - top, flip ? above : below);
+    const panelHeight = Math.min(height, available);
+    const y = flip ? rect.top - 8 - panelHeight : rect.bottom + 8;
+    panel.style.maxHeight = `${available}px`;
+    panel.style.left = `${Math.max(left, Math.min(rect.right - width, right - width))}px`;
+    panel.style.top = `${Math.max(top, Math.min(y, bottom - panelHeight))}px`;
+}
+
+function attach(card) {
+    const trigger = card.querySelector('[data-overview-pool-controls]');
+    // The top layer escapes the Overview container's backdrop filter, which
+    // otherwise makes fixed positioning relative to that container.
+    const panel = el('section', 'fixed inset-auto z-50 m-0 overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-ink-850 p-4 text-sm text-slate-100 shadow-[0_16px_48px_rgba(0,0,0,0.5)]');
+    panel.setAttribute('popover', 'manual');
+    panel.id = `overview-pool-controls-${++nextId}`;
+    panel.hidden = true;
+    panel.setAttribute('aria-labelledby', `${panel.id}-heading`);
+    trigger.setAttribute('aria-controls', panel.id);
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.after(panel);
+    const entry = { trigger, panel, signature: null, poolId: card.dataset.poolId };
+    entries.set(card, entry);
+    // Native button activation covers click, touch, Enter and Space.
+    trigger.addEventListener('click', () => {
+        if (open === entry) {
+            close();
+        } else {
+            close(true);
+            open = entry;
+            panel.hidden = false;
+            panel.showPopover();
+            trigger.setAttribute('aria-expanded', 'true');
+            position();
+        }
+    });
+    return entry;
+}
+
+export const OverviewPoolControls = {
+    init() {
+        if (initialized) return;
+        initialized = true;
+        document.addEventListener('click', (event) => {
+            if (open && !open.trigger.contains(event.target) && !open.panel.contains(event.target)) close();
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && open) {
+                event.preventDefault();
+                close(true);
+            }
+        });
+        window.addEventListener('scroll', position, true);
+        window.addEventListener('resize', position);
+        window.visualViewport?.addEventListener('scroll', position);
+        window.visualViewport?.addEventListener('resize', position);
+        App.events.addEventListener('view:changed', (event) => {
+            if (event.detail.view !== 'dashboard') close();
+        });
+        App.events.addEventListener('wallet:disconnected', () => close());
+    },
+
+    update(card) {
+        const entry = entries.get(card) ?? attach(card);
+        const pool = App.state.pools.find((pool) => pool.poolContractId === entry.poolId);
+        const controls = pool ? poolControls(pool) : null;
+        const signature = JSON.stringify(controls);
+        if (signature === entry.signature) return;
+        if (open === entry) close(true);
+        entry.signature = signature;
+        const { trigger, panel } = entry;
+        trigger.setAttribute('aria-label', controls
+            ? `Pool controls: ${controls.map((control) => POOL_CONTROLS[control].tag).join(', ')}`
+            : 'Pool controls unavailable');
+        const heading = el('h3', 'font-semibold text-white', 'Pool controls');
+        heading.id = `${panel.id}-heading`;
+        panel.replaceChildren(heading);
+        if (!controls) {
+            panel.append(el('p', 'mt-3 text-slate-300', 'Pool controls unavailable'));
+            return;
+        }
+        for (const control of controls) {
+            const { tag, impact } = POOL_CONTROLS[control];
+            const row = el('div', 'mt-3');
+            row.append(
+                el('span', `inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${TONES[control]}`, tag),
+                el('p', 'mt-2 text-sm leading-relaxed text-slate-300', impact),
+            );
+            panel.append(row);
+        }
+        const details = el('a', 'mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-cyan-100 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60', 'Details in Move funds');
+        details.href = '#move-funds';
+        details.addEventListener('click', (event) => {
+            event.preventDefault();
+            close();
+            App.events.dispatchEvent(new CustomEvent('dashboard:view-pool-controls', { detail: { poolId: entry.poolId } }));
+        });
+        panel.append(details);
+    },
+
+    remove(card) {
+        if (open === entries.get(card)) close(true);
+        entries.delete(card);
+    },
+
+    close,
+    reposition: position,
+};
