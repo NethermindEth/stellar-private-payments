@@ -5,6 +5,7 @@ import { OpHistory } from './op-history.js';
 import { el } from './dom.js';
 import { openModal } from './toast.js';
 import { shortHex } from './notes-view.js';
+import { OverviewPoolControls } from './overview-pool-controls.js';
 
 function poolLabelById(poolContractId) {
     const pool = App.state.pools.find(item => item.poolContractId === poolContractId);
@@ -15,6 +16,7 @@ export const Dashboard = {
     _timer: null,
 
     init() {
+        OverviewPoolControls.init();
         App.events.addEventListener('wallet:ready', () => {
             this.start();
         });
@@ -44,6 +46,7 @@ export const Dashboard = {
     },
 
     clear() {
+        OverviewPoolControls.close();
         document.getElementById('dashboard-balance-grid')?.replaceChildren();
         document.getElementById('dashboard-feed')?.replaceChildren();
     },
@@ -56,6 +59,8 @@ export const Dashboard = {
             client().operationalFeed(5),
             client().recipientLookup(address),
         ]);
+        // Ignore work from a wallet that disconnected while requests were in flight.
+        if (App.state.wallet.address !== address) return;
 
         if (balancesRes.status === 'fulfilled') {
             App.state.balances = Array.isArray(balancesRes.value) ? balancesRes.value : [];
@@ -88,9 +93,31 @@ export const Dashboard = {
     renderBalances() {
         const container = document.getElementById('dashboard-balance-grid');
         if (!container) return;
-        container.replaceChildren();
-        App.state.balances.forEach(balance => container.appendChild(Templates.createBalanceCard(balance)));
-        container.querySelectorAll('[data-quick-flow]').forEach(btn => {
+        const cards = new Map([...container.children].map(card => [card.dataset.poolId, card]));
+        const active = document.activeElement;
+        App.state.balances.forEach((balance, index) => {
+            let card = cards.get(balance.poolContractId);
+            if (card) {
+                cards.delete(balance.poolContractId);
+                Templates.updateBalanceCard(card, balance);
+            } else {
+                card = Templates.createBalanceCard(balance);
+                this.bindBalanceCard(card);
+            }
+            if (container.children[index] !== card) container.insertBefore(card, container.children[index] ?? null);
+            OverviewPoolControls.update(card);
+        });
+        for (const card of cards.values()) {
+            OverviewPoolControls.remove(card);
+            card.remove();
+        }
+        OverviewPoolControls.reposition();
+        // Moving a card to reflect portfolio ordering can blur its focused child.
+        if (active?.isConnected && container.contains(active) && document.activeElement !== active) active.focus({ preventScroll: true });
+    },
+
+    bindBalanceCard(card) {
+        card.querySelectorAll('[data-quick-flow]').forEach(btn => {
             btn.addEventListener('click', () => {
                 const flow = btn.dataset.quickFlow;
                 const poolId = btn.dataset.poolId;
@@ -99,14 +126,14 @@ export const Dashboard = {
                 }));
             });
         });
-        container.querySelectorAll('[data-view-notes]').forEach(btn => {
+        card.querySelectorAll('[data-view-notes]').forEach(btn => {
             btn.addEventListener('click', () => {
                 App.events.dispatchEvent(new CustomEvent('dashboard:view-notes', {
                     detail: { poolId: btn.dataset.poolId },
                 }));
             });
         });
-        container.querySelectorAll('[data-view-history]').forEach(btn => {
+        card.querySelectorAll('[data-view-history]').forEach(btn => {
             btn.addEventListener('click', () => this.openHistory(btn.dataset.poolId));
         });
     },

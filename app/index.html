@@ -123,7 +123,7 @@
                                 <!-- Rendered by pool-controls.js. w-0 min-w-full: fill the card without widening it to fit an explanation. -->
                                 <section data-pool-controls="move" aria-labelledby="move-pool-controls-heading" class="mt-4 w-0 min-w-full border-t border-white/8 pt-4" hidden>
                                     <div class="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
-                                        <h3 id="move-pool-controls-heading" class="field-label whitespace-nowrap">Pool controls</h3>
+                                        <h3 id="move-pool-controls-heading" tabindex="-1" class="field-label whitespace-nowrap">Pool controls</h3>
                                         <span class="whitespace-nowrap text-xs text-slate-400">Select a tag for details</span>
                                     </div>
                                     <div data-pool-controls-tags class="mt-3 flex flex-wrap gap-2"></div>
@@ -697,7 +697,14 @@
                     <p class="field-label mt-2">Pool address</p>
                     <a class="balance-pool mt-1 block font-mono text-2xs text-cyan-200/80 transition hover:text-cyan-100 hover:underline" target="_blank" rel="noopener noreferrer"></a>
                 </div>
-                <button type="button" data-view-notes title="View notes for this token" class="balance-notes btn-secondary shrink-0 px-3 py-1 text-2xs"></button>
+                <div class="flex shrink-0 items-center gap-1">
+                    <button type="button" data-view-notes title="View notes for this token" class="balance-notes btn-secondary shrink-0 px-3 py-1 text-2xs"></button>
+                    <button type="button" data-overview-pool-controls aria-label="Pool controls unavailable" aria-expanded="false" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-slate-200 transition hover:border-white/30 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                            <path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Z" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
             </div>
             <p class="balance-amount mt-8 text-3xl font-semibold tracking-tight text-white"></p>
             <div class="mt-6 flex flex-wrap gap-2">

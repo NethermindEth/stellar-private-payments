@@ -112,6 +112,7 @@ function setActiveView(view) {
         panel.hidden = !active;
         panel.dataset.state = active ? 'active' : 'inactive';
     });
+    App.events.dispatchEvent(new CustomEvent('view:changed', { detail: { view } }));
 
     if (view === 'disclosure' && !disclosureLoaded) {
         disclosureLoaded = true;
@@ -403,6 +404,18 @@ export const Shell = {
             setActiveView('move-funds');
             setMoveFlow(flow);
             App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
+        });
+
+        App.events.addEventListener('dashboard:view-pool-controls', (event) => {
+            const poolId = event.detail?.poolId;
+            if (!App.state.pools.some(pool => pool.poolContractId === poolId)) return;
+            App.state.selectedPoolId = poolId;
+            document.querySelectorAll('[data-pool-select]').forEach(select => {
+                select.value = poolId;
+            });
+            App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
+            setActiveView('move-funds');
+            document.getElementById('move-pool-controls-heading')?.focus();
         });
 
         App.events.addEventListener('dashboard:view-notes', (event) => {

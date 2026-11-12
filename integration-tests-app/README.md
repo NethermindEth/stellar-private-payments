@@ -213,6 +213,19 @@ npm --prefix integration-tests-app run test:unit                         # helpe
 bash integration-tests-app/scripts/serve-and-run.sh                       # full local suite
 ```
 
+The Overview pool-controls browser check uses the production HTML, generated
+CSS and UI modules with wallet/RPC dependencies stubbed. It requires system
+Chrome and the `app` and `integration-tests-app` npm dependencies, but no
+wallet or localnet. From the repository root:
+
+```bash
+npm exec --yes --package @tailwindcss/cli@4.3.3 -- tailwindcss -i app/css/app.css -o /tmp/overview-controls.css --minify
+node integration-tests-app/tests/browser/overview-pool-controls.mjs /tmp/overview-controls.css
+```
+
+It checks desktop and mobile keyboard/touch interaction, selection and focus
+after navigation, refresh preservation, and scrolling in small viewports.
+
 ## The tests
 
 Each submits real transactions against localnet — run them
