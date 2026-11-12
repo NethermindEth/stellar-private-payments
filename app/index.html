@@ -59,10 +59,11 @@
 
                     <div class="flex flex-wrap items-center gap-2">
                         <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/3 px-3 py-2 text-sm font-medium text-slate-100" title="Network & sync status">
-                            <span id="sync-dot" class="sync-dot"></span>
+                            <!-- Sync parts stay hidden until a wallet connects; before that there is nothing to sync. -->
+                            <span id="sync-dot" class="sync-dot" data-sync-part hidden></span>
                             <span id="network-name">NETWORK</span>
-                            <span class="text-slate-600">·</span>
-                            <span id="sync-status" class="text-slate-400">Offline</span>
+                            <span class="text-slate-600" data-sync-part hidden>·</span>
+                            <span id="sync-status" class="text-slate-400" data-sync-part hidden></span>
                         </div>
                         <!-- Label and action follow the access state (ui/access.js): connect, unlock, or hidden once ready. -->
                         <button id="wallet-btn" type="button" data-access-action="connect" class="btn-primary px-4 py-2">Connect Freighter</button>

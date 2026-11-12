@@ -213,14 +213,17 @@ function renderWallet() {
     renderSyncStatus();
 }
 
-// Sync indicator lives inside the network pill: grey/Offline when disconnected,
-// pulsing amber/Syncing until the registry is caught up, green/Synced after.
+// Sync indicator lives inside the network pill: hidden until a wallet connects,
+// then grey/Locked, pulsing amber/Syncing until the registry is caught up, and
+// green/Synced after.
 function renderSyncStatus() {
     const dot = document.getElementById('sync-dot');
     const text = document.getElementById('sync-status');
     if (!dot || !text) return;
-    if (!App.state.wallet.connected) {
-        text.textContent = 'Offline';
+    const connected = App.state.wallet.connected;
+    document.querySelectorAll('[data-sync-part]').forEach(part => { part.hidden = !connected; });
+    if (!connected) {
+        text.textContent = '';
         delete dot.dataset.tone;
         return;
     }
