@@ -89,6 +89,20 @@ test('Disclosure verification stays usable for visitors without an account', () 
     assert.equal(describe({ view: 'disclosure', storeExists: true, walletState: 'locked', walletConnected: true }).cardVisible, true);
 });
 
+test('a lock caused by inactivity says why and where to change it', () => {
+    const locked = { storeExists: true, walletState: 'locked', walletConnected: true };
+    const idle = describe({ ...locked, idleLockMinutes: 5 });
+    assert.equal(idle.state, 'locked');
+    assert.equal(idle.action, 'unlock');
+    assert.equal(idle.card.title, 'Locked after 5 minutes of inactivity');
+    assert.match(idle.card.note, /change the timeout in Settings/);
+    assert.equal(describe({ ...locked, idleLockMinutes: 1 }).card.title, 'Locked after 1 minute of inactivity');
+    // A lock the user chose needs no reason.
+    assert.equal(describe(locked).card.title, 'Your private account is locked');
+    // Only the locked card explains the timeout.
+    assert.equal(describe({ storeExists: true, idleLockMinutes: 5 }).card.title, 'Welcome back');
+});
+
 test('the card names the tab it stands in for', () => {
     const labels = { dashboard: 'Overview', 'move-funds': 'Move Funds', advanced: 'Advanced', disclosure: 'Disclosure' };
     for (const [view, label] of Object.entries(labels)) {

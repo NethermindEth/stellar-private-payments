@@ -14,7 +14,8 @@
 export const ACCESS_STATES = ['welcome', 'returning', 'connecting', 'locked', 'ready'];
 
 const SIGNATURE_NOTE = 'You’ll sign a message, not a transaction. It’s free and keeps your data encrypted on this device.';
-const PLAINTEXT_NOTE = 'Your private keys and history are stored unencrypted in this browser. Anyone with access to this device can read them.';
+const IDLE_LOCK_NOTE = 'After unlocking, you can change the timeout in Settings.';
+const PLAINTEXT_NOTE ='Your private keys and history are stored unencrypted in this browser. Anyone with access to this device can read them.';
 
 const COPY = {
     encrypted: {
@@ -89,9 +90,10 @@ function stateOf({ mode, storeExists, walletState, unlocked }) {
  *   unlocked: boolean,
  *   storageState?: string,
  *   view?: string,
- * }} input
+ *   idleLockMinutes?: number | null,
+ * }} input - `idleLockMinutes` is set when inactivity caused the last lock.
  */
-export function describeAccess({ mode, storeExists, walletState, walletConnected, unlocked, storageState, view }) {
+export function describeAccess({ mode, storeExists, walletState, walletConnected, unlocked, storageState, view, idleLockMinutes = null }) {
     const copy = COPY[mode];
     if (!copy) throw new Error(`Unknown storage mode: ${mode}`);
     const state = stateOf({ mode, storeExists, walletState, unlocked });
@@ -109,7 +111,15 @@ export function describeAccess({ mode, storeExists, walletState, walletConnected
     else if (action === 'unlock') label = 'Unlock';
     else if (action === 'connect') label = copy.connectLabel[state];
 
-    const card = state === 'ready' ? null : copy.cards[state];
+    let card = state === 'ready' ? null : copy.cards[state];
+    // An unexpected lock gets its reason, and where to change it.
+    if (state === 'locked' && idleLockMinutes > 0) {
+        card = {
+            ...card,
+            title: `Locked after ${idleLockMinutes} ${idleLockMinutes === 1 ? 'minute' : 'minutes'} of inactivity`,
+            note: IDLE_LOCK_NOTE,
+        };
+    }
     // Verifying a disclosure needs no account, so the card leaves the
     // Disclosure tab alone until the user starts connecting.
     const cardVisible = !!card && !(view === 'disclosure' && (state === 'welcome' || state === 'returning'));
