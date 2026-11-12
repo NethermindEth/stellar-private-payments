@@ -223,7 +223,7 @@ async fn policy_mismatches_propagate_through_both_fetch_paths() {
 }
 
 #[tokio::test]
-async fn a_mismatching_pool_does_not_prevent_reading_another_pool() {
+async fn a_policy_mismatch_in_one_pool_does_not_block_reading_another_pool() {
     let (_server, fetcher) = rpc_state(&[
         (PolicyFlags::EMPTY, Some(xdr::ScVal::U32(0))),
         (PolicyFlags::BLOCKLIST, Some(xdr::ScVal::U32(1))),
