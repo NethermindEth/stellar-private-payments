@@ -499,15 +499,16 @@ export const Wallet = {
                 renderWallet();
                 void refreshPublicIdentity();
 
-                // After locking, a reconnect on load restores only the public
-                // wallet session. A user's own Connect click also asks to unlock;
-                // cancelling that leaves the wallet connected but locked.
+                // A reconnect on load restores only the public wallet session;
+                // storage waits for the user's Unlock instead of prompting on
+                // its own. After locking, a user's own Connect click also asks
+                // to unlock; cancelling that leaves the wallet connected but locked.
                 if (storageWasLocked() && !isStorageUnlocked() && !auto) {
                     await ensureStorage({ unlock: true }).catch(error => {
                         if (error?.code !== 'unlock-cancelled') throw error;
                     });
                 }
-                if (storageWasLocked() && !isStorageUnlocked()) {
+                if ((auto || storageWasLocked()) && !isStorageUnlocked()) {
                     rememberNoteOwner(address);
                     document.body.dataset.walletState = 'locked';
                     this.startWatcher();

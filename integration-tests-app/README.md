@@ -235,7 +235,7 @@ deliberately, not in a tight loop.
 | `tests/12-signing-account.mjs` | Import a second ephemeral account and pick it to sign and pay, deposit 0.01 XLM into the owner's notes and withdraw 0.0099 XLM back to the owner, checking the confirmations name both accounts, the withdrawal warns that it links them, and on-chain the deposit is sent by the owner and the withdrawal by the signer. |
 | `tests/13-onboarding.mjs` | Drives the app's real onboarding wizard end to end for a freshly imported, unseeded account (every other test pre-seeds past it). |
 | `tests/14-first-visit.mjs` | First visit with no local store: every data view shows the welcome card, Connect is the only action, there is no lock control, and Disclosure stays uncovered. Connecting then runs onboarding into the app. Sets `connectFirst = false` so it can assert before the runner connects. |
-| `tests/15-lock-and-return.mjs` | Locking while the wallet is remembered: after the reload only Unlock is offered, and it opens the app. Disconnecting and then locking: the reload shows the returning-user card, whose single Connect action also unlocks. |
+| `tests/15-lock-and-return.mjs` | Reloading, then locking, while the wallet is remembered: after each reload no unlock dialog opens by itself, only Unlock is offered, and it opens the app. Disconnecting and then locking: the reload shows the returning-user card, whose single Connect action also unlocks. |
 
 ## CI
 

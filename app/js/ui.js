@@ -11,6 +11,7 @@ import { Dashboard } from './ui/dashboard.js';
 import { updateLastVisit, registerServiceWorker } from './ui/push-notifications.js';
 import { getConnectedAddress } from './wallet.js';
 import { rememberedNoteOwner } from './account-session.js';
+import { localStoreExists } from './wasm-facade.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
     Templates.init();
@@ -31,7 +32,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Reconnect on load only to an owner the user connected before. Without
     // one, connecting would take Freighter's active account as the owner, and
     // that may be an account last used to sign; wait for the user to connect.
-    if (rememberedNoteOwner() && await getConnectedAddress()) {
+    // Without a local store there is nothing to unlock, so setting one up
+    // also waits for the user's click.
+    if (rememberedNoteOwner() && await getConnectedAddress() && await localStoreExists().catch(() => false)) {
         await Wallet.connect({ auto: true }).catch(() => {});
     }
     // After the wallet reconnects, so the unlock can finish connecting it.
