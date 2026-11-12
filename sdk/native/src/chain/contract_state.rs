@@ -14,7 +14,8 @@ use stellar_xdr as xdr;
 use crate::types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, BabyJubJubPoint, ContractConfig,
     ContractsStateData, ExtAmount, Field, GlobalViewKeyCiphertext, GvkMode, NoteAmount,
-    NotePublicKey, PoolInfo, SMT_DEPTH, TransactChainContext, transact_chain_context_from_state,
+    NotePublicKey, PolicyFlags, PoolInfo, SMT_DEPTH, TransactChainContext,
+    transact_chain_context_from_state,
 };
 
 macro_rules! get_state {
@@ -190,6 +191,21 @@ impl StateFetcher {
         Ok(())
     }
 
+    /// Cross-checks a pool's configured policy against the decoded chain flags.
+    fn verify_policy_config(
+        pool: &crate::types::PoolConfigEntry,
+        chain_policy_flags: PolicyFlags,
+    ) -> Result<()> {
+        if pool.policy_flags != chain_policy_flags {
+            return Err(anyhow!(
+                "pool {} policy flags mismatch: config says {:?}, chain says {chain_policy_flags:?}",
+                pool.pool_contract_id,
+                pool.policy_flags,
+            ));
+        }
+        Ok(())
+    }
+
     pub fn new(client: Client, config: ContractConfig) -> Result<Self> {
         Ok(Self { client, config })
     }
@@ -234,7 +250,8 @@ impl StateFetcher {
     /// # Errors
     ///
     /// Returns an error if the pool is not an enabled deployment, an RPC read
-    /// fails, or a stored value does not decode.
+    /// fails, a stored value does not decode, or configured policy/GVK settings
+    /// disagree with the chain.
     pub async fn contracts_data_for_pool(
         &self,
         pool_contract_id: &str,
@@ -430,6 +447,12 @@ impl StateFetcher {
         let (fee, minimum_deposit_amount) = Self::fee_fields_from_pool_state(pool_state)?;
         let (gvk_admin_view_key, gvk_mode) = Self::gvk_fields_from_pool_state(pool_state)?;
         Self::verify_gvk_config(pool, gvk_admin_view_key.as_ref(), gvk_mode)?;
+        let policy_flags = scval_to_policy_flags(get_state!(
+            pool_state,
+            "PolicyFlags",
+            pool.pool_contract_id
+        )?)?;
+        Self::verify_policy_config(pool, policy_flags)?;
 
         Ok(PoolInfo {
             ledger,
@@ -470,11 +493,7 @@ impl StateFetcher {
             merkle_root,
             merkle_capacity,
             total_commitments: merkle_next_index.to_string(),
-            policy_flags: scval_to_policy_flags(get_state!(
-                pool_state,
-                "PolicyFlags",
-                pool.pool_contract_id
-            )?)?,
+            policy_flags,
             admin_view_key: gvk_admin_view_key,
             gvk_mode,
         })
@@ -986,6 +1005,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn policy_config_checks_all_flag_combinations() {
+        for configured in PolicyFlags::all_flags() {
+            let mut pool = pool_entry(GvkMode::Off, None);
+            pool.policy_flags = configured;
+            for on_chain in PolicyFlags::all_flags() {
+                let result = StateFetcher::verify_policy_config(&pool, on_chain);
+                if configured == on_chain {
+                    result.expect("matching flags");
+                } else {
+                    let error = result.expect_err("different policies must fail");
+                    assert_eq!(
+                        error.to_string(),
+                        format!(
+                            "pool CPOOL policy flags mismatch: config says {configured:?}, chain says {on_chain:?}"
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn policy_config_ignores_manifest_flag_order() {
+        let mut pool = pool_entry(GvkMode::Off, None);
+        pool.policy_flags =
+            serde_json::from_str(r#"["blocklist", "allowlist"]"#).expect("reversed flags");
+        StateFetcher::verify_policy_config(&pool, PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST)
+            .expect("typed flags agree regardless of serialization order");
+    }
+
     fn point(x: u64, y: u64) -> BabyJubJubPoint {
         BabyJubJubPoint {
             x: field(x),
@@ -1074,3 +1124,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "contract_state_tests.rs"]
+mod fetch_tests;
