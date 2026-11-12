@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { readAppLifecycle, waitForWalletRuntimeReady, waitForAppShell } from '../../src/appState.mjs';
+import { readAppLifecycle, waitForAccessState, waitForWalletRuntimeReady, waitForAppShell } from '../../src/appState.mjs';
 
 // Fake page over the two observations appState makes: body's lifecycle
 // attribute and the onboarding modal's visibility. Each entry is one poll.
@@ -113,23 +113,33 @@ test('a lifecycle that never advances still reports a timeout with its last stat
 });
 
 
-test('app shell is ready with a locked, hidden dashboard or unlocked storage', async () => {
-  for (const storageState of ['locked', 'unlocked']) {
-    const page = {
-      evaluate: async () => 'complete',
-      getByTestId: id => {
-        assert.equal(id, 'storage-lock-btn');
-        return { isVisible: async () => true, getAttribute: async () => storageState };
-      },
-    };
-    await waitForAppShell(page, { waitOptions: instantWait() });
+function shellPage(accessState) {
+  return {
+    evaluate: async () => 'complete',
+    locator: selector => {
+      assert.equal(selector, 'body');
+      return {
+        getAttribute: async name => {
+          assert.equal(name, 'data-access-state');
+          return accessState;
+        },
+      };
+    },
+  };
+}
+
+test('app shell is ready once it publishes any access state', async () => {
+  for (const state of ['welcome', 'returning', 'connecting', 'locked', 'ready']) {
+    await waitForAppShell(shellPage(state), { waitOptions: instantWait() });
   }
 });
 
-test('app shell does not pass readiness before its controls are initialized', async () => {
-  const page = {
-    evaluate: async () => 'complete',
-    getByTestId: () => ({ isVisible: async () => true, getAttribute: async () => null }),
-  };
-  await assert.rejects(waitForAppShell(page, { timeoutMs: 200, waitOptions: instantWait() }), /timed out/);
+test('app shell does not pass readiness before its access state is set', async () => {
+  await assert.rejects(waitForAppShell(shellPage(null), { timeoutMs: 200, waitOptions: instantWait() }), /timed out/);
+});
+
+test('waiting for an access state accepts any of several', async () => {
+  const state = await waitForAccessState(shellPage('returning'), ['locked', 'returning'], { waitOptions: instantWait() });
+  assert.equal(state.value, 'returning');
+  await assert.rejects(waitForAccessState(shellPage('welcome'), 'ready', { timeoutMs: 200, waitOptions: instantWait() }), /timed out/);
 });

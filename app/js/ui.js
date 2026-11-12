@@ -1,4 +1,5 @@
 import { LocalData } from './ui/local-data.js';
+import { Access } from './ui/access.js';
 import { Templates } from './ui/templates.js';
 import { Shell, Wallet } from './ui/navigation.js';
 import { Transactions } from './ui/transactions.js';
@@ -16,6 +17,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     Shell.init();
     LocalData.init();
     Wallet.init();
+    Access.init();
     Transactions.init();
     PoolControls.init();
     SigningAccount.init();

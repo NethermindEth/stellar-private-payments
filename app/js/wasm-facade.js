@@ -56,6 +56,16 @@ export function storageWasLocked() {
     return sessionStorage.getItem(LOCKED_SESSION_KEY) === 'true';
 }
 export function isStorageUnlocked() { return !!storageHandle && !storageLocking; }
+/**
+ * Which local storage this app opens. The SDK can also be built with plaintext
+ * storage (`Storage.openPlaintext`), but the app opens only encrypted storage.
+ */
+export const STORAGE_MODE = 'encrypted';
+/** Whether this browser already holds the app's local store. Needs no signature. */
+export async function localStoreExists() {
+    const root = await navigator.storage?.getDirectory?.();
+    return root ? hasEncryptedStorage(root) : false;
+}
 function setStorageState(state) {
     document.body.dataset.storageState = state;
     window.dispatchEvent(new Event(STORAGE_STATE_EVENT));

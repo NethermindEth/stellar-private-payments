@@ -4,7 +4,7 @@ import { poolSelectLabel } from '../pool-policy.js';
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, isStorageUnlocked, storageWasLocked } from '../wasm-facade.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, isStorageUnlocked, loadDeploymentConfig, storageWasLocked } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -113,6 +113,8 @@ function setActiveView(view) {
         panel.dataset.state = active ? 'active' : 'inactive';
     });
 
+    App.events.dispatchEvent(new CustomEvent('view:changed', { detail: { view } }));
+
     if (view === 'disclosure' && !disclosureLoaded) {
         disclosureLoaded = true;
         import('../disclosure.js').then(m => {
@@ -203,11 +205,9 @@ async function loadRuntimeState() {
 function renderWallet() {
     const connected = App.state.wallet.connected;
     const walletText = document.getElementById('wallet-text');
-    const walletBtn = document.getElementById('wallet-btn');
     const walletAddress = document.getElementById('settings-wallet-address');
     walletText.textContent = connected ? Utils.shortAddress(App.state.wallet.address, 8, 6) : '';
     walletText.hidden = !connected;
-    walletBtn.hidden = connected;
     walletAddress.textContent = App.state.wallet.address || 'Not connected';
     document.getElementById('network-name').textContent = (deploymentDefaults.displayName || deploymentDefaults.network || 'NETWORK').toUpperCase();
     renderSyncStatus();
@@ -453,15 +453,11 @@ export const Wallet = {
     _connectPromise: null,
     _stopWatcher: null,
 
+    // The account button (#wallet-btn) is driven by ui/access.js.
     init() {
-        document.getElementById('wallet-btn')?.addEventListener('click', () => {
-            if (App.state.wallet.connected) {
-                this.openSettings();
-            } else {
-                this.connect({ auto: false }).catch(() => {});
-            }
-        });
         renderWallet();
+        // The network name comes from deployments.json; show it before any wallet connects.
+        void loadDeploymentConfig().then(renderWallet).catch(() => {});
     },
 
     /**

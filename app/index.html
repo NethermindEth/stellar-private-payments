@@ -64,9 +64,13 @@
                             <span class="text-slate-600">·</span>
                             <span id="sync-status" class="text-slate-400">Offline</span>
                         </div>
-                        <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" class="btn-secondary px-4 py-2 data-[state=locked]:border-cyan-300/50 data-[state=locked]:bg-cyan-400/15 data-[state=locked]:text-cyan-100 data-[state=locked]:ring-2 data-[state=locked]:ring-cyan-300/30 data-[state=locked]:hover:bg-cyan-400/25">Unlock</button>
-                        <button id="wallet-btn" type="button" class="btn-primary px-4 py-2">
-                            Connect Freighter
+                        <!-- Label and action follow the access state (ui/access.js): connect, unlock, or hidden once ready. -->
+                        <button id="wallet-btn" type="button" data-access-action="connect" class="btn-primary px-4 py-2">Connect Freighter</button>
+                        <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" aria-label="Lock private data" title="Lock private data" class="icon-btn h-10 w-10" hidden>
+                            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="4" y="11" width="16" height="10" rx="2"/>
+                                <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+                            </svg>
                         </button>
                         <button id="open-settings-btn" type="button" aria-label="Settings" title="Wallet & settings" class="icon-btn gap-2 px-3 py-2">
                             <span id="wallet-text" class="font-mono text-sm text-slate-100" hidden></span>
@@ -80,8 +84,52 @@
             </div>
         </header>
 
-        <section id="storage-locked-notice" role="status" class="card text-slate-200">
-            Local data is locked. Use Unlock to view your private data and make payments. Your wallet can remain connected. Disclosure verification is available while locked.
+        <!-- Shown until local storage opens; copy and state come from js/access-state.js. -->
+        <section id="access-card" data-testid="access-card" role="region" aria-labelledby="access-title" aria-live="polite" class="card overflow-hidden p-0" hidden>
+            <div class="px-6 py-12 text-center sm:px-10 sm:py-16">
+                <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/20 bg-cyan-400/10 text-cyan-200" aria-hidden="true">
+                    <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 3 5 6v5c0 4.4 3 8.3 7 9.5 4-1.2 7-5.1 7-9.5V6l-7-3z"/>
+                        <path d="m9 12 2 2 4-4"/>
+                    </svg>
+                </div>
+                <p data-access-view-label data-testid="access-view-label" class="eyebrow mt-6"></p>
+                <h2 id="access-title" data-access-title class="mx-auto mt-3 max-w-2xl text-balance text-3xl font-semibold tracking-tight text-white sm:text-4xl"></h2>
+                <p data-access-body class="mx-auto mt-4 max-w-xl text-pretty text-base leading-7 text-slate-300"></p>
+                <div class="mt-8 flex justify-center">
+                    <button type="button" data-access-cta data-testid="access-card-action" class="btn-primary px-6"></button>
+                </div>
+                <p data-access-meta class="mx-auto mt-4 max-w-md text-balance text-xs leading-5 text-slate-400"></p>
+                <p data-access-install class="mx-auto mt-3 max-w-md text-balance text-xs leading-5 text-amber-200" hidden>
+                    Freighter was not detected in this browser.
+                    <a class="link" href="https://www.freighter.app/" target="_blank" rel="noreferrer noopener">Install Freighter</a>, then reload this page.
+                </p>
+            </div>
+            <div data-access-intro class="border-t border-white/8 bg-white/2 px-6 py-12 sm:px-10" hidden>
+                <h3 class="text-center text-sm font-semibold text-slate-200">How it works</h3>
+                <ol class="mx-auto mt-8 grid max-w-4xl gap-10 text-center sm:grid-cols-3 sm:gap-8">
+                    <li class="flex flex-col items-center">
+                        <span class="flex h-8 w-8 items-center justify-center rounded-full border border-cyan-300/25 bg-cyan-400/10 text-sm font-semibold text-cyan-100" aria-hidden="true">1</span>
+                        <p class="mt-4 text-sm font-semibold text-white">Deposit</p>
+                        <p class="mt-2 max-w-60 text-pretty text-sm leading-6 text-slate-400">Move tokens from your Stellar account into a privacy pool.</p>
+                    </li>
+                    <li class="flex flex-col items-center">
+                        <span class="flex h-8 w-8 items-center justify-center rounded-full border border-cyan-300/25 bg-cyan-400/10 text-sm font-semibold text-cyan-100" aria-hidden="true">2</span>
+                        <p class="mt-4 text-sm font-semibold text-white">Hold a private balance</p>
+                        <p class="mt-2 max-w-60 text-pretty text-sm leading-6 text-slate-400">Your deposit becomes private notes that only your keys can spend.</p>
+                    </li>
+                    <li class="flex flex-col items-center">
+                        <span class="flex h-8 w-8 items-center justify-center rounded-full border border-cyan-300/25 bg-cyan-400/10 text-sm font-semibold text-cyan-100" aria-hidden="true">3</span>
+                        <p class="mt-4 text-sm font-semibold text-white">Transfer or withdraw</p>
+                        <p class="mt-2 max-w-60 text-pretty text-sm leading-6 text-slate-400">Pay another user privately, or withdraw to any Stellar account.</p>
+                    </li>
+                </ol>
+                <nav aria-label="Learn more" class="mt-10 flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm">
+                    <a class="text-slate-400 underline-offset-4 transition hover:text-cyan-200 hover:underline" href="DISCLAIMER.txt" target="_blank" rel="noreferrer noopener">Disclaimer</a>
+                    <a class="text-slate-400 underline-offset-4 transition hover:text-cyan-200 hover:underline" href="https://github.com/NethermindEth/stellar-private-payments#readme" target="_blank" rel="noreferrer noopener">Documentation</a>
+                    <button type="button" class="text-slate-400 underline-offset-4 transition hover:text-cyan-200 hover:underline" data-access-goto="disclosure">Verify a disclosure</button>
+                </nav>
+            </div>
         </section>
 
         <main id="main-content" class="flex-1">

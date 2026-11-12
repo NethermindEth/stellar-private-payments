@@ -98,6 +98,19 @@ export async function connectWallet() {
 }
 
 /**
+ * Whether the Freighter extension answers on this page. Never prompts.
+ * @returns {Promise<boolean>}
+ */
+export async function isWalletInstalled() {
+    try {
+        const conn = await isConnected();
+        return !!conn?.isConnected;
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Return the active address only if Freighter is already connected AND allowed
  * for this origin, without prompting. Returns null otherwise. Lets a page
  * restore a session already established elsewhere in the app (same origin)

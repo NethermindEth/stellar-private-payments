@@ -12,6 +12,7 @@ import { SIGNER_MIGRATION_WARNING_EVENT } from '../private-signers.js';
 // Set across the reload that follows an import, so the restored storage unlocks next.
 const UNLOCK_AFTER_IMPORT_KEY = 'spp.unlockAfterImport';
 
+/** Open locked storage, then finish connecting a wallet that was waiting for it. */
 async function unlock() {
     try {
         await ensureStorage({ unlock: true });
@@ -24,6 +25,8 @@ async function unlock() {
 }
 
 export const LocalData = {
+    unlock,
+
     /** Prompt for the unlock signature once the page has reloaded after an import. */
     async resumeAfterImport() {
         if (sessionStorage.getItem(UNLOCK_AFTER_IMPORT_KEY) !== 'true') return;
@@ -58,22 +61,10 @@ export const LocalData = {
             select.title = unlocked ? '' : 'Unlock to change';
             select.value = unlocked ? String(autoLockMinutes()) : '';
             document.getElementById('settings-auto-lock-hint').textContent = unlocked ? 'Saved in encrypted local storage.' : 'Unlock to change the inactivity timeout.';
-            // Verification is public; only database-backed views and receipt
-            // generation require unlocked local data.
-            document.querySelectorAll('[data-view-panel]').forEach(panel => {
-                const blocked = !unlocked && panel.dataset.viewPanel !== 'disclosure';
-                panel.inert = blocked;
-                panel.style.display = blocked ? 'none' : '';
-            });
+            // Verification is public; receipt generation needs unlocked data.
             const generate = document.getElementById('disclosure-generate');
             if (generate) { generate.inert = !unlocked; generate.hidden = !unlocked; }
-
-            const notice = document.getElementById('storage-locked-notice');
-            if (notice) notice.hidden = unlocked;
-            button.textContent = unlocked ? 'Lock' : 'Unlock';
-            button.title = unlocked ? 'Lock local data' : 'Unlock local data';
-            button.dataset.state = unlocked ? 'unlocked' : 'locked';
-            button.disabled = ['unlocking', 'locking'].includes(document.body.dataset.storageState);
+            button.disabled = busy;
         };
         window.addEventListener(STORAGE_STATE_EVENT, render);
         render();
@@ -87,12 +78,9 @@ export const LocalData = {
                 Toast.show(`Could not delete legacy storage: ${error.message}`, 'error');
             }
         });
+        // Unlocking goes through the account button; this one only locks.
         button.addEventListener('click', async () => {
-            if (isStorageUnlocked()) {
-                await lockStorage();
-                return;
-            }
-            await unlock();
+            if (isStorageUnlocked()) await lockStorage();
         });
         const fileInput = document.getElementById('storage-backup-file');
         document.getElementById('storage-import').addEventListener('click', () => fileInput.click());

@@ -44,7 +44,8 @@ sudo apt install -y chromium-browser
 
 **Do not use the `chromium` snap for these tests.** The snap wrapper runs
 Chromium in its own mount namespace with a private `/tmp`, so the extension
-never loads and every test fails with "Connect Freighter is still shown".
+never loads and every test fails with `connectApp: access state is "…" after
+connecting — connection did not succeed`.
 If you hit that error, check `which chromium` / `E2E_CHROMIUM_PATH` for a
 `/snap/*` or `/var/snap/*` path and switch to the PPA install above.
 
@@ -220,7 +221,7 @@ deliberately, not in a tight loop.
 
 | File | Proves |
 |---|---|
-| `tests/01-connect.mjs` | Connect flow: Freighter's grant-access approval, wallet address shown, network is the local custom network. |
+| `tests/01-connect.mjs` | Connect flow: Freighter's grant-access approval, access state `ready` with a lock control, wallet address shown, network is the local custom network. |
 | `tests/02-deposit.mjs` | Deposit 0.01 XLM: proving/signing/submitting stages, Freighter signTransaction approval(s), and `SUCCESS` confirmation through Soroban RPC. |
 | `tests/03-rejection.mjs` | Rejecting a deposit's signing prompt: the app surfaces it as "Deposit cancelled." (not a crash or generic error) and returns to idle. |
 | `tests/04-deposit-withdraw.mjs` | Deposit then withdraw to self back-to-back: two distinct transactions, both confirmed `SUCCESS` on-chain. |
@@ -233,6 +234,8 @@ deliberately, not in a tight loop.
 | `tests/11-failure-modes.mjs` | Verify pre-signing failures for an empty wallet, insufficient notes, a spend one stroop above Max to send after pool fees, unregistered recipients, the pool deposit cap, a deposit below the smallest deposit, and invalid, missing or unfunded signing accounts, then complete a successful recovery deposit. |
 | `tests/12-signing-account.mjs` | Import a second ephemeral account and pick it to sign and pay, deposit 0.01 XLM into the owner's notes and withdraw 0.0099 XLM back to the owner, checking the confirmations name both accounts, the withdrawal warns that it links them, and on-chain the deposit is sent by the owner and the withdrawal by the signer. |
 | `tests/13-onboarding.mjs` | Drives the app's real onboarding wizard end to end for a freshly imported, unseeded account (every other test pre-seeds past it). |
+| `tests/14-first-visit.mjs` | First visit with no local store: every data view shows the welcome card, Connect is the only action, there is no lock control, and Disclosure stays uncovered. Connecting then runs onboarding into the app. Sets `connectFirst = false` so it can assert before the runner connects. |
+| `tests/15-lock-and-return.mjs` | Locking while the wallet is remembered: after the reload only Unlock is offered, and it opens the app. Disconnecting and then locking: the reload shows the returning-user card, whose single Connect action also unlocks. |
 
 ## CI
 
