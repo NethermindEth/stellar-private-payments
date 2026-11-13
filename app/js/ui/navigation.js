@@ -11,7 +11,7 @@ import { runOnboardingWizard } from './onboarding-wizard.js';
 import { confirmAction } from './confirm.js';
 import { el } from './dom.js';
 import { openModal } from './toast.js';
-import { getRegistrationErrorMessage } from './errors.js';
+import { describeRegistrationError } from './errors.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { loadPrivateSigners } from '../private-signers.js';
 import { explorerPreference, saveExplorerPreference } from '../public-settings.js';
@@ -713,7 +713,8 @@ export const Wallet = {
             Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, { linkUrl: Utils.explorerTxUrl(hash) });
             App.events.dispatchEvent(new CustomEvent('profile:updated'));
         } catch (error) {
-            Toast.show(getRegistrationErrorMessage(error), 'error');
+            const { message, details } = describeRegistrationError(error);
+            Toast.show(message, 'error', 4000, { details });
             if (btn) btn.disabled = false; // re-enable so the user can retry
         }
     },

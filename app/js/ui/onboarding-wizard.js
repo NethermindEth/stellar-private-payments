@@ -2,7 +2,7 @@ import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client } from '../wasm-facade.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
-import { getRegistrationErrorMessage } from './errors.js';
+import { describeRegistrationError } from './errors.js';
 import { Utils, Toast } from './core.js';
 import { el, elc } from './dom.js';
 import { openModal } from './toast.js';
@@ -616,7 +616,9 @@ export async function runOnboardingWizard({
                         } catch (error) {
                             register.disabled = false;
                             register.ariaBusy = false;
-                            setError(getRegistrationErrorMessage(error));
+                            // The box stays up, so an unexplained failure keeps its raw text.
+                            const { kind, message, details } = describeRegistrationError(error);
+                            setError(kind === 'unknown' && details ? `${message} Details: ${details}` : message);
                         }
                     },
                 });

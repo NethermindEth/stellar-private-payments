@@ -80,9 +80,10 @@ export const Dashboard = {
         }
         App.events.dispatchEvent(new CustomEvent('profile:updated'));
 
-        if (balancesRes.status === 'rejected' && feedRes.status === 'rejected' && lookupRes.status === 'rejected') {
-            Toast.show('Failed to refresh dashboard data', 'info');
-        }
+        // Polling retries every few seconds; say so once per run of failures.
+        const failed = balancesRes.status === 'rejected' && feedRes.status === 'rejected' && lookupRes.status === 'rejected';
+        if (failed && !this._failing) Toast.show('Couldn\'t refresh the overview. The app keeps retrying.', 'info');
+        this._failing = failed;
     },
 
     renderBalances() {

@@ -1,3 +1,5 @@
+import { UserFacingError } from './ui/errors.js';
+
 export async function readDisplayDecimals(session) {
   try {
     return await session.tokenDecimals();
@@ -25,12 +27,12 @@ export async function refreshTokenDecimals(pools, account, isCurrent, onUpdated)
 
 export function requireSamePool(pool, currentPool) {
   if (!pool || currentPool !== pool) {
-    throw new Error('Pool changed. Review the amount and try again.');
+    throw new UserFacingError('Pool changed. Review the amount and try again.');
   }
 }
 
 export async function resolveAmountContext(pool, account, currentPool, onUpdated) {
-  if (!pool) throw new Error('Select a pool first');
+  if (!pool) throw new UserFacingError('Select a pool first');
   const session = await account.pool({ poolContract: pool.poolContractId });
   const decimals = await session.tokenDecimals();
   requireSamePool(pool, currentPool());

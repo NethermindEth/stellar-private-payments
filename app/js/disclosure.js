@@ -1048,8 +1048,8 @@ export function mountVerify(container) {
     let parsed;
     try {
       parsed = JSON.parse(raw);
-    } catch (e) {
-      showImportError(`Invalid JSON: ${e.message}`);
+    } catch {
+      showImportError('This isn\'t a disclosure receipt: the text is not valid JSON. Load the .json file you were given, or paste its whole contents.');
       return;
     }
 
