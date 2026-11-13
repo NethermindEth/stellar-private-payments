@@ -223,7 +223,7 @@ npm exec --yes --package @tailwindcss/cli@4.3.3 -- tailwindcss -i app/css/app.cs
 node integration-tests-app/tests/browser/overview-pool-controls.mjs /tmp/overview-controls.css
 ```
 
-It checks desktop and mobile keyboard/touch interaction, selection and focus
+It checks mouse hover opening and dismissal, desktop and mobile keyboard/touch interaction, selection and focus
 after navigation, refresh preservation, and scrolling in small viewports.
 It also checks live deposit pause/unpause status, failed reads, and Deposit
 button behavior during SDK preflight, with transfers and withdrawals available.

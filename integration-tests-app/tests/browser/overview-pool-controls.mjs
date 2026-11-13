@@ -144,6 +144,15 @@ try {
     assert.equal(await a.getByRole('link', { name: 'Details in Move funds' }).count(), 0, 'hidden panel excluded from accessible roles');
     const target = await shield.boundingBox();
     assert.equal(target.width, 36); assert.equal(target.height, 36);
+    if (viewport.width >= 600) {
+      await shield.hover();
+      await panel.waitFor({ state: 'visible' });
+      await panel.hover();
+      await page.waitForTimeout(250);
+      assert.equal(await panel.isVisible(), true, 'hovering the popup keeps it open');
+      await page.mouse.move(1, 1);
+      await panel.waitFor({ state: 'hidden' });
+    }
     await shield.focus();
     assert.equal(await panel.isVisible(), false, 'focus does not open');
     await page.keyboard.press('Enter');
@@ -261,6 +270,8 @@ try {
     };
     await assertBounds();
     await page.screenshot({ path: join(screenshotDir, `${viewport.width}.png`) });
+    // Keep the pointer outside the cards while forcing artificial layout changes.
+    await page.mouse.move(1, 1);
     const beforeScroll = await shield.boundingBox();
     await page.evaluate(() => { document.body.style.minHeight = '300vh'; window.scrollBy(0, 20); });
     await page.waitForFunction(previous => document.querySelector('article[data-pool-id="A"] [data-overview-pool-controls]').getBoundingClientRect().top !== previous, beforeScroll.y);
@@ -292,7 +303,7 @@ try {
     });
     assert.equal(await page.locator('[data-overview-pool-controls]').count(), 0);
     assert.deepEqual(errors, []);
-    console.log(`PASS keyboard, touch, live pause/unpause and failed reads, refresh/focus, same-asset navigation, scroll and viewport bounds at ${viewport.width}x${viewport.height} and 320x240`);
+    console.log(`PASS hover, keyboard, touch, live pause/unpause and failed reads, refresh/focus, same-asset navigation, scroll and viewport bounds at ${viewport.width}x${viewport.height} and 320x240`);
     await context.close();
   }
   console.log(`Screenshots: ${screenshotDir}`);
