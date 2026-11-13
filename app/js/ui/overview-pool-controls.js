@@ -6,8 +6,10 @@ import { PoolDepositStatus } from './pool-deposit-status.js';
 
 const entries = new WeakMap();
 let open = null;
+let closeTimer = null;
 
 function close(restoreFocus = false) {
+    clearTimeout(closeTimer);
     if (!open) return;
     const { trigger, panel } = open;
     const focusInside = panel.contains(document.activeElement);
@@ -43,6 +45,23 @@ function position() {
     panel.style.top = `${Math.max(top, Math.min(y, bottom - panelHeight))}px`;
 }
 
+function show(entry) {
+    clearTimeout(closeTimer);
+    if (open === entry) return;
+    close(true);
+    open = entry;
+    entry.trigger.setAttribute('aria-expanded', 'true');
+    position();
+}
+
+function scheduleClose(entry) {
+    clearTimeout(closeTimer);
+    // Allow the pointer to cross the gap between the shield and its popup.
+    closeTimer = setTimeout(() => {
+        if (open === entry && !entry.hovered && !entry.panel.contains(document.activeElement)) close();
+    }, 180);
+}
+
 function attach(card) {
     const trigger = card.querySelector('[data-overview-pool-controls]');
     // The top layer escapes the Overview container's backdrop filter, which
@@ -54,18 +73,29 @@ function attach(card) {
     trigger.setAttribute('aria-controls', panel.id);
     trigger.setAttribute('aria-expanded', 'false');
     trigger.after(panel);
-    const entry = { trigger, panel, signature: null, poolId: card.dataset.poolId };
+    const entry = { trigger, panel, signature: null, poolId: card.dataset.poolId, hovered: false };
     entries.set(card, entry);
-    // Native button activation covers click, touch, Enter and Space.
-    trigger.addEventListener('click', () => {
-        if (open === entry) {
-            close();
-        } else {
-            close(true);
-            open = entry;
-            trigger.setAttribute('aria-expanded', 'true');
-            position();
-        }
+    for (const node of [trigger, panel]) {
+        node.addEventListener('pointerenter', (event) => {
+            if (event.pointerType !== 'mouse') return;
+            entry.hovered = true;
+            show(entry);
+        });
+        node.addEventListener('pointerleave', (event) => {
+            if (event.pointerType !== 'mouse') return;
+            entry.hovered = false;
+            scheduleClose(entry);
+        });
+        node.addEventListener('focusout', () => {
+            if (!entry.hovered) scheduleClose(entry);
+        });
+    }
+    // Keep native activation for touch and keyboard. A mouse click on an
+    // already hovered shield leaves its popup open.
+    trigger.addEventListener('click', (event) => {
+        if (entry.hovered && event.detail > 0) show(entry);
+        else if (open === entry) close();
+        else show(entry);
     });
     return entry;
 }

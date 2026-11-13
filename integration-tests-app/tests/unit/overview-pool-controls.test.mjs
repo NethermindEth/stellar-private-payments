@@ -129,9 +129,8 @@ test('missing configuration stays unavailable, with no details action or inferre
   assert.ok(details(card));
 });
 
-test('toggle, one-open-only, no hover/focus activation and outside dismissal', () => {
+test('toggle, one-open-only, no focus activation and outside dismissal', () => {
   const [a, b] = render();
-  trigger(a).dispatch('pointerenter', { pointerType: 'mouse' });
   trigger(a).focus();
   assert.equal(isOpen(a), false);
   trigger(a).click();
@@ -148,6 +147,38 @@ test('toggle, one-open-only, no hover/focus activation and outside dismissal', (
   trigger(a).click();
   document.body.click();
   assert.equal(isOpen(a), false);
+});
+
+test('mouse hover opens immediately, crosses the popup gap, and closes after leaving', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const [a, b] = render();
+  trigger(a).dispatch('pointerenter', { pointerType: 'touch' });
+  assert.equal(isOpen(a), false);
+  trigger(a).dispatch('pointerenter', { pointerType: 'mouse' });
+  assert.equal(isOpen(a), true);
+  trigger(a).dispatch('click', { detail: 1 });
+  assert.equal(isOpen(a), true, 'mouse click does not undo hover');
+  trigger(a).dispatch('pointerleave', { pointerType: 'mouse' });
+  t.mock.timers.tick(100);
+  assert.equal(isOpen(a), true, 'popup stays open while crossing the gap');
+  panel(a).dispatch('pointerenter', { pointerType: 'mouse' });
+  t.mock.timers.tick(200);
+  assert.equal(isOpen(a), true);
+  panel(a).dispatch('pointerleave', { pointerType: 'mouse' });
+  details(a).focus();
+  t.mock.timers.tick(200);
+  assert.equal(isOpen(a), true, 'keyboard focus inside keeps the popup accessible');
+  document.body.focus();
+  panel(a).dispatch('focusout');
+  t.mock.timers.tick(200);
+  assert.equal(isOpen(a), false);
+  trigger(a).dispatch('pointerenter', { pointerType: 'mouse' });
+  trigger(b).dispatch('pointerenter', { pointerType: 'mouse' });
+  assert.equal(isOpen(a), false);
+  assert.equal(isOpen(b), true);
+  trigger(b).dispatch('pointerleave', { pointerType: 'mouse' });
+  t.mock.timers.tick(200);
+  assert.equal(isOpen(b), false);
 });
 
 test('Escape returns focus from inside, leaves outside focus alone and prevents default only when open', () => {
