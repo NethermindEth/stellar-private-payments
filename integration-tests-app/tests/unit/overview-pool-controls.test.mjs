@@ -84,6 +84,12 @@ test('all 12 ASP/GVK configurations use full names, exact shared copy, order and
       const panels = card.querySelectorAll('section');
       assert.equal(triggers.length, controls.length);
       controls.forEach((key, index) => {
+        // An element created outside the SVG namespace does not render.
+        const icon = triggers[index].querySelector('svg');
+        assert.equal(icon?.namespaceURI, 'http://www.w3.org/2000/svg');
+        assert.equal(icon.getAttribute('aria-hidden'), 'true');
+        assert.ok(icon.children.length > 0);
+        for (const shape of icon.children) assert.equal(shape.namespaceURI, icon.namespaceURI);
         assert.equal(triggers[index].getAttribute('aria-label'), `Pool controls: ${POOL_CONTROLS[key].tag}`);
         assert.equal(triggers[index].getAttribute('aria-controls'), panels[index].id);
         assert.equal(panels[index].children[0].textContent, POOL_CONTROLS[key].tag);

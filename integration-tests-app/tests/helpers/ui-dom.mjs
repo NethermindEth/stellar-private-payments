@@ -86,6 +86,7 @@ export function installDom() {
   doc.body = new Element('body');
   doc.activeElement = doc.body;
   doc.createElement = tag => new Element(tag);
+  doc.createElementNS = (namespaceURI, tag) => new Element(tag, { namespaceURI });
   doc.getElementById = id => doc.body.querySelector(`#${id}`);
   doc.querySelectorAll = selector => doc.body.querySelectorAll(selector);
   doc.querySelector = selector => doc.body.querySelector(selector);

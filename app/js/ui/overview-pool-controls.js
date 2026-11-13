@@ -1,19 +1,38 @@
 import { POOL_CONTROLS, poolControls } from '../pool-policy.js';
 import { App } from './core.js';
-import { el } from './dom.js';
+import { el, svgEl } from './dom.js';
 import { TONES } from './pool-controls.js';
 import { PoolDepositStatus } from './pool-deposit-status.js';
 
 // Color follows the axis (TONES: ASP lists cyan, admin view key violet, open
-// neutral) and the silhouette tells the controls of one axis apart.
-const USER = '<circle cx="9.5" cy="7.5" r="4"/><path d="M2.5 21v-1.5A5.5 5.5 0 0 1 8 14h3"/>';
-const CONTROL_ICONS = {
-    open: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z"/>',
-    allowlist: `${USER}<path d="m14.5 17.5 2.5 2.5 4.5-5"/>`,
-    blocklist: `${USER}<path d="m16 15 5 5m0-5-5 5"/>`,
-    viewOnly: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
-    traceable: '<circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="5.5" r="2.5"/><path d="M8 18.5h7.5a3.25 3.25 0 0 0 0-6.5h-7a3.25 3.25 0 0 1 0-6.5H16"/>',
+// neutral) and the silhouette tells the controls of one axis apart. Shapes are
+// built per call because a DOM node can only sit in one trigger.
+const user = () => [
+    svgEl('circle', { cx: '9.5', cy: '7.5', r: '4' }),
+    svgEl('path', { d: 'M2.5 21v-1.5A5.5 5.5 0 0 1 8 14h3' }),
+];
+const CONTROL_SHAPES = {
+    open: () => [
+        svgEl('circle', { cx: '12', cy: '12', r: '9' }),
+        svgEl('path', { d: 'M3 12h18' }),
+        svgEl('path', { d: 'M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z' }),
+    ],
+    allowlist: () => [...user(), svgEl('path', { d: 'm14.5 17.5 2.5 2.5 4.5-5' })],
+    blocklist: () => [...user(), svgEl('path', { d: 'm16 15 5 5m0-5-5 5' })],
+    viewOnly: () => [
+        svgEl('path', { d: 'M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z' }),
+        svgEl('circle', { cx: '12', cy: '12', r: '3' }),
+    ],
+    traceable: () => [
+        svgEl('circle', { cx: '5.5', cy: '18.5', r: '2.5' }),
+        svgEl('circle', { cx: '18.5', cy: '5.5', r: '2.5' }),
+        svgEl('path', { d: 'M8 18.5h7.5a3.25 3.25 0 0 0 0-6.5h-7a3.25 3.25 0 0 1 0-6.5H16' }),
+    ],
 };
+
+function controlIcon(control) {
+    return svgEl('svg', { class: 'h-4 w-4', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' }, CONTROL_SHAPES[control]());
+}
 
 const entries = new WeakMap();
 let open = null;
@@ -187,7 +206,7 @@ export const OverviewPoolControls = {
                 if (control) {
                     trigger.setAttribute('title', POOL_CONTROLS[control].tag);
                     if (TONES[control]) trigger.dataset.tone = TONES[control];
-                    trigger.innerHTML = `<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${CONTROL_ICONS[control]}</svg>`;
+                    trigger.append(controlIcon(control));
                 } else {
                     trigger.textContent = '?';
                 }
