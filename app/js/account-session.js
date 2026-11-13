@@ -31,7 +31,7 @@ export function accountSession(wallet = {}) {
     };
 }
 
-const NOTE_OWNER_KEY = "poolstellar_note_owner";
+const NOTE_OWNER_KEY = 'poolstellar_note_owner';
 
 /**
  * The note owner the user connected, if one is remembered.
@@ -61,7 +61,7 @@ export function rememberNoteOwner(address, storage = globalThis.localStorage) {
     try {
         storage?.setItem(NOTE_OWNER_KEY, address);
     } catch (e) {
-        console.error("[AccountSession] rememberNoteOwner failed:", e);
+        console.error('[AccountSession] rememberNoteOwner failed:', e);
     }
 }
 
@@ -75,6 +75,6 @@ export function forgetNoteOwner(storage = globalThis.localStorage) {
     try {
         storage?.removeItem(NOTE_OWNER_KEY);
     } catch (e) {
-        console.error("[AccountSession] forgetNoteOwner failed:", e);
+        console.error('[AccountSession] forgetNoteOwner failed:', e);
     }
 }
