@@ -8,7 +8,7 @@ let generation = 0;
 
 const DETAIL = {
     loading: 'Checking deposit status…',
-    accepting: 'Deposits are enabled.',
+    accepting: '',
     paused: 'Deposits are paused. Transfers and withdrawals still work.',
     unavailable: 'Deposit status is unavailable. It will be checked again on the next refresh.',
 };
@@ -31,11 +31,11 @@ export const PoolDepositStatus = {
         return this.get(poolId) === 'paused';
     },
 
-    // Writes the pool's status sentence to `node`: amber while deposits are
-    // paused, `idleClass` otherwise.
+    // Show the status sentence only while deposits are paused.
     renderDetail(node, poolId, idleClass) {
         const detail = DETAIL[this.get(poolId)];
         const paused = this.isPaused(poolId);
+        node.hidden = !paused;
         if (node.textContent !== detail) node.textContent = detail;
         node.classList.toggle('text-amber-200', paused);
         node.classList.toggle(idleClass, !paused);
