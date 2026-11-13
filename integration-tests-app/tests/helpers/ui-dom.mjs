@@ -105,7 +105,7 @@ export function balanceCard() {
   card.append(new Element('button', { className: 'balance-notes', dataset: { viewNotes: '' } }));
   card.append(new Element('span', { dataset: { poolDepositStatus: '' }, textContent: 'Deposits paused' }));
   card.append(new Element('span', { dataset: { poolPausedIndicator: '' } }));
-  card.append(new Element('button', { dataset: { overviewPoolControls: '' }, rect: { left: 200, right: 244, top: 100, bottom: 144, width: 44, height: 44 } }));
+  card.append(new Element('div', { dataset: { poolBadges: '' }, rect: { left: 200, right: 244, top: 100, bottom: 144, width: 44, height: 44 } }));
   for (const quickFlow of ['deposit', 'transfer', 'withdraw']) card.append(new Element('button', { dataset: { quickFlow } }));
   card.append(new Element('button', { dataset: { viewHistory: '' } }));
   return card;

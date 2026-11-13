@@ -4,6 +4,17 @@ import { el } from './dom.js';
 import { TONES } from './pool-controls.js';
 import { PoolDepositStatus } from './pool-deposit-status.js';
 
+// Color follows the axis (TONES: ASP lists cyan, admin view key violet, open
+// neutral) and the silhouette tells the controls of one axis apart.
+const USER = '<circle cx="9.5" cy="7.5" r="4"/><path d="M2.5 21v-1.5A5.5 5.5 0 0 1 8 14h3"/>';
+const CONTROL_ICONS = {
+    open: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z"/>',
+    allowlist: `${USER}<path d="m14.5 17.5 2.5 2.5 4.5-5"/>`,
+    blocklist: `${USER}<path d="m16 15 5 5m0-5-5 5"/>`,
+    viewOnly: '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+    traceable: '<circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="5.5" r="2.5"/><path d="M8 18.5h7.5a3.25 3.25 0 0 0 0-6.5h-7a3.25 3.25 0 0 1 0-6.5H16"/>',
+};
+
 const entries = new WeakMap();
 let open = null;
 let closeTimer = null;
@@ -62,19 +73,18 @@ function scheduleClose(entry) {
     }, 180);
 }
 
-function attach(card) {
-    const trigger = card.querySelector('[data-overview-pool-controls]');
+function attach(card, trigger, control) {
     // The top layer escapes the Overview container's backdrop filter, which
     // otherwise makes fixed positioning relative to that container.
     const panel = el('section', 'fixed inset-auto z-50 m-0 overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-ink-850 p-4 text-sm text-slate-100 shadow-[0_16px_48px_rgba(0,0,0,0.5)]');
     panel.setAttribute('popover', 'manual');
-    panel.id = `overview-pool-controls-${card.dataset.poolId}`;
+    panel.id = `overview-pool-controls-${card.dataset.poolId}-${control ?? "unavailable"}`;
     panel.setAttribute('aria-labelledby', `${panel.id}-heading`);
     trigger.setAttribute('aria-controls', panel.id);
     trigger.setAttribute('aria-expanded', 'false');
     trigger.after(panel);
-    const entry = { trigger, panel, signature: null, poolId: card.dataset.poolId, hovered: false };
-    entries.set(card, entry);
+    const entry = { trigger, panel, poolId: card.dataset.poolId, hovered: false };
+
     for (const node of [trigger, panel]) {
         node.addEventListener('pointerenter', (event) => {
             if (event.pointerType !== 'mouse') return;
@@ -104,7 +114,7 @@ function build({ trigger, panel, poolId }, controls) {
     trigger.setAttribute('aria-label', controls
         ? `Pool controls: ${controls.map((control) => POOL_CONTROLS[control].tag).join(', ')}`
         : 'Pool controls unavailable');
-    const heading = el('h3', 'font-semibold text-white', 'Pool controls');
+    const heading = el('h3', 'font-semibold text-white', controls ? POOL_CONTROLS[controls[0]].tag : 'Pool controls unavailable');
     heading.id = `${panel.id}-heading`;
     panel.replaceChildren(heading);
     if (!controls) {
@@ -112,14 +122,14 @@ function build({ trigger, panel, poolId }, controls) {
         return;
     }
     for (const control of controls) {
-        const { tag, impact } = POOL_CONTROLS[control];
+        const { tag, explanation } = POOL_CONTROLS[control];
         const row = el('div', 'mt-3');
         row.dataset.poolControlRow = '';
         const badge = el('span', 'chip px-2.5 py-1 text-xs font-semibold', tag);
         if (TONES[control]) badge.dataset.tone = TONES[control];
         row.append(
             badge,
-            el('p', 'mt-2 text-sm leading-relaxed text-slate-300', impact),
+            el('p', 'mt-2 text-sm leading-relaxed text-slate-300', explanation),
         );
         panel.append(row);
     }
@@ -158,23 +168,45 @@ export const OverviewPoolControls = {
     },
 
     update(card) {
-        const entry = entries.get(card) ?? attach(card);
-        const pool = App.state.pools.find((pool) => pool.poolContractId === entry.poolId);
+        let group = entries.get(card);
+        const poolId = card.dataset.poolId;
+        const pool = App.state.pools.find((pool) => pool.poolContractId === poolId);
         const controls = pool ? poolControls(pool) : null;
         const signature = JSON.stringify(controls);
-        if (signature !== entry.signature) {
-            if (open === entry) close(true);
-            entry.signature = signature;
-            build(entry, controls);
+        if (!group || signature !== group.signature) {
+            const restoreFocus = group?.items.some(({ trigger, panel }) => trigger === document.activeElement || panel.contains(document.activeElement));
+            if (group?.items.includes(open)) close(true);
+            const container = card.querySelector('[data-pool-badges]');
+            container.replaceChildren();
+            group = { signature, items: [] };
+            entries.set(card, group);
+            for (const control of controls ?? [null]) {
+                const trigger = el('button', 'chip h-8 w-8 shrink-0 justify-center p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60');
+                trigger.setAttribute('type', 'button');
+                trigger.dataset.overviewPoolControls = '';
+                if (control) {
+                    trigger.setAttribute('title', POOL_CONTROLS[control].tag);
+                    if (TONES[control]) trigger.dataset.tone = TONES[control];
+                    trigger.innerHTML = `<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${CONTROL_ICONS[control]}</svg>`;
+                } else {
+                    trigger.textContent = '?';
+                }
+                container.append(trigger);
+                const entry = attach(card, trigger, control);
+                build(entry, control ? [control] : null);
+                group.items.push(entry);
+            }
+            if (restoreFocus) group.items[0]?.trigger.focus({ preventScroll: true });
         }
-        const status = entry.panel.querySelector('[data-overview-deposit-status]');
-        if (!status) return;
-        PoolDepositStatus.renderDetail(status, entry.poolId, 'text-slate-300');
-        if (open === entry) position();
+        for (const entry of group.items) {
+            const status = entry.panel.querySelector('[data-overview-deposit-status]');
+            if (status) PoolDepositStatus.renderDetail(status, poolId, 'text-slate-300');
+        }
+        if (group.items.includes(open)) position();
     },
 
     remove(card) {
-        if (open === entries.get(card)) close(true);
+        if (entries.get(card)?.items.includes(open)) close(true);
     },
 
     close,

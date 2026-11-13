@@ -80,14 +80,19 @@ test('all 12 ASP/GVK configurations use full names, exact shared copy, order and
       const configured = pool('A', flags, mode);
       const [card] = render([configured], [balance('A')]);
       const controls = poolControls(configured);
-      assert.equal(trigger(card).getAttribute('aria-label'), `Pool controls: ${controls.map(key => POOL_CONTROLS[key].tag).join(', ')}`);
-      assert.equal(trigger(card).getAttribute('aria-controls'), panel(card).id);
-      assert.equal(panel(card).children[0].textContent, 'Pool controls');
-      assert.deepEqual(panel(card).querySelectorAll('[data-pool-control-row]').map(row => row.children.map(node => node.textContent)), controls.map(key => [POOL_CONTROLS[key].tag, POOL_CONTROLS[key].impact]));
+      const triggers = card.querySelectorAll('[data-overview-pool-controls]');
+      const panels = card.querySelectorAll('section');
+      assert.equal(triggers.length, controls.length);
       controls.forEach((key, index) => {
-        const badge = panel(card).children[index + 1].children[0];
-        assert.match(badge.className, /\bchip\b/);
-        assert.equal(badge.dataset.tone, key === 'open' ? undefined : ['allowlist', 'blocklist'].includes(key) ? 'info' : 'key');
+        assert.equal(triggers[index].getAttribute('aria-label'), `Pool controls: ${POOL_CONTROLS[key].tag}`);
+        assert.equal(triggers[index].getAttribute('aria-controls'), panels[index].id);
+        assert.equal(panels[index].children[0].textContent, POOL_CONTROLS[key].tag);
+        assert.deepEqual(panels[index].querySelectorAll('[data-pool-control-row]').map(row => row.children.map(node => node.textContent)), [[POOL_CONTROLS[key].tag, POOL_CONTROLS[key].explanation]]);
+        triggers[index].click();
+        assert.equal(panels[index].matches(':popover-open'), true);
+        panels.forEach((other, otherIndex) => {
+          if (otherIndex !== index) assert.equal(other.matches(':popover-open'), false);
+        });
       });
     }
   }
@@ -96,8 +101,8 @@ test('all 12 ASP/GVK configurations use full names, exact shared copy, order and
 test('same-asset cards use their own IDs while a third pool is selected', () => {
   const [a, b] = render();
   assert.notEqual(panel(a).id, panel(b).id);
-  assert.match(trigger(a).getAttribute('aria-label'), /Blocklist, Admin view key · traceable/);
-  assert.match(trigger(b).getAttribute('aria-label'), /Open, Admin view key · view-only/);
+  assert.match(trigger(a).getAttribute('aria-label'), /Blocklist/);
+  assert.match(trigger(b).getAttribute('aria-label'), /Open/);
   const navigated = [];
   const listener = event => navigated.push(event.detail);
   App.events.addEventListener('dashboard:view-pool-controls', listener);
@@ -324,9 +329,9 @@ test('position flips, clamps width/height, scrolls internally, and follows scrol
   assert.equal(panel(a).style.width, '224px');
 });
 
-test('template provides a 36px shield with a tooltip, visible keyboard focus and a focusable details heading', async () => {
+test('template provides wrapping badges with visible keyboard focus and a focusable details heading', async () => {
   const html = await readFile(new URL('../../../app/index.html', import.meta.url), 'utf8');
-  assert.match(html, /data-overview-pool-controls[^>]*class="[^"]*h-9 w-9[^"]*focus-visible:outline-2/);
+  assert.match(html, /data-pool-badges/);
   assert.match(html, /id="move-pool-controls-heading" tabindex="-1"/);
 });
 
@@ -355,7 +360,7 @@ test('live statuses use the card pool ID, update an open popover in place and di
   assert.equal(isOpen(a), true);
   assert.equal(details(a), action);
   assert.equal(document.activeElement, action);
-  assert.match(trigger(a).getAttribute('aria-label'), /Blocklist, Admin view key · traceable/);
+  assert.match(trigger(a).getAttribute('aria-label'), /Blocklist/);
   a.querySelector('[data-quick-flow="deposit"]').click();
   assert.equal(App.state.views.active, 'dashboard');
   assert.equal(App.state.selectedPoolId, 'C');
