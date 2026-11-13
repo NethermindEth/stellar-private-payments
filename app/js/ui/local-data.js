@@ -1,7 +1,7 @@
 import { checkLegacyPlaintextStorage, deleteLegacyStorage, ensureStorage, isStorageUnlocked, lockStorage, manageStorageBackup, STORAGE_STATE_EVENT } from '../wasm-facade.js';
 import { autoLockMinutes, setAutoLockMinutes } from '../storage-timeout.js';
 import { rememberedNoteOwner } from '../account-session.js';
-import { getConnectedAddress } from '../wallet.js';
+import { getConnectedAddress, walletErrorToastOptions } from '../wallet.js';
 import { Wallet } from './navigation.js';
 import { Toast } from './core.js';
 import { confirmAction } from './confirm.js';
@@ -19,7 +19,10 @@ async function unlock() {
     } catch (error) {
         if (error?.code === 'unlock-cancelled') return;
         if (isDbLockedError(String(error))) showDbLockedModal(String(error));
-        else Toast.show(error?.message || 'Could not unlock local data.', 'error');
+        else {
+            const options = walletErrorToastOptions(error);
+            Toast.show(error?.message || 'Could not unlock local data.', 'error', options.linkUrl ? 10_000 : 4000, options);
+        }
     }
 }
 

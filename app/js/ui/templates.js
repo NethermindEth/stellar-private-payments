@@ -28,13 +28,13 @@ export const Templates = {
         const el = App.templates.balanceCard.content.cloneNode(true).firstElementChild;
         const tokenLink = el.querySelector('.balance-token');
         tokenLink.textContent = balance.tokenLabel;
-        tokenLink.href = Utils.explorerContractUrl(balance.tokenContractId);
+        Utils.setExplorerLink(tokenLink, Utils.explorerContractUrl(balance.tokenContractId));
         tokenLink.title = balance.tokenContractId;
         el.querySelector('.balance-amount').textContent = Utils.formatPoolAmount(balance.amount, balance.poolContractId);
         el.querySelector('.balance-notes').textContent = `${balance.noteCount} note${balance.noteCount === 1 ? '' : 's'}`;
         const poolLink = el.querySelector('.balance-pool');
         poolLink.textContent = Utils.shortAddress(balance.poolContractId, 6, 4);
-        poolLink.href = Utils.explorerContractUrl(balance.poolContractId);
+        Utils.setExplorerLink(poolLink, Utils.explorerContractUrl(balance.poolContractId));
         poolLink.title = balance.poolContractId;
 
         el.querySelectorAll('[data-quick-flow], [data-view-notes], [data-view-history]').forEach(btn => {
@@ -51,7 +51,7 @@ export const Templates = {
         feedMeta.textContent = poolLabel
             ? `${poolLabel} · Ledger ${item.ledger}`
             : `Ledger ${item.ledger}`;
-        feedMeta.href = Utils.explorerLedgerUrl(item.ledger);
+        Utils.setExplorerLink(feedMeta, Utils.explorerLedgerUrl(item.ledger));
         return el;
     },
 

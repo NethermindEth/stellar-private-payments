@@ -80,9 +80,10 @@ export const Dashboard = {
         }
         App.events.dispatchEvent(new CustomEvent('profile:updated'));
 
-        if (balancesRes.status === 'rejected' && feedRes.status === 'rejected' && lookupRes.status === 'rejected') {
-            Toast.show('Failed to refresh dashboard data', 'info');
-        }
+        // Polling retries every few seconds; say so once per run of failures.
+        const failed = balancesRes.status === 'rejected' && feedRes.status === 'rejected' && lookupRes.status === 'rejected';
+        if (failed && !this._failing) Toast.show('Couldn\'t refresh the overview. The app keeps retrying.', 'info');
+        this._failing = failed;
     },
 
     renderBalances() {
@@ -151,11 +152,10 @@ export const Dashboard = {
             meta.appendChild(el('span', 'shrink-0', op.createdAt ? new Date(op.createdAt * 1000).toLocaleString() : ''));
             row.appendChild(meta);
 
-            if (op.txHash) {
+            const explorerUrl = op.txHash && Utils.explorerTxUrl(op.txHash);
+            if (explorerUrl) {
                 const a = el('a', 'mt-2 inline-block text-2xs font-medium text-cyan-100 underline underline-offset-4', 'Open in explorer');
-                a.href = Utils.explorerTxUrl(op.txHash);
-                a.target = '_blank';
-                a.rel = 'noreferrer noopener';
+                Utils.setExplorerLink(a, explorerUrl);
                 row.appendChild(a);
             }
             listEl.appendChild(row);

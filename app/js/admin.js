@@ -194,7 +194,7 @@ async function loadExplorerSetting() {
 
 function updateContractLink(linkEl, contractId) {
   if (!linkEl) return;
-  linkEl.href = contractId ? Utils.explorerContractUrl(contractId) : '#';
+  Utils.setExplorerLink(linkEl, contractId ? Utils.explorerContractUrl(contractId) : null);
 }
 
 // -----------------------------
@@ -287,19 +287,19 @@ async function refreshState({ unlock = false } = {}) {
 
     const membershipStorageUrl = membershipState.contractId
       ? Utils.explorerContractStorageUrl(membershipState.contractId)
-      : '#';
+      : null;
     const nonMembershipStorageUrl = nonMembershipState.contractId
       ? Utils.explorerContractStorageUrl(nonMembershipState.contractId)
-      : '#';
+      : null;
 
     membershipRootEl.textContent = membershipState.root || '--';
-    membershipRootEl.href = membershipStorageUrl;
+    Utils.setExplorerLink(membershipRootEl, membershipStorageUrl);
     membershipLevelsEl.textContent = membershipState.levels ?? '--';
-    membershipLevelsEl.href = membershipStorageUrl;
+    Utils.setExplorerLink(membershipLevelsEl, membershipStorageUrl);
     membershipNextIndexEl.textContent = membershipState.nextIndex ?? '--';
-    membershipNextIndexEl.href = membershipStorageUrl;
+    Utils.setExplorerLink(membershipNextIndexEl, membershipStorageUrl);
     nonMembershipRootEl.textContent = nonMembershipState.root || '--';
-    nonMembershipRootEl.href = nonMembershipStorageUrl;
+    Utils.setExplorerLink(nonMembershipRootEl, nonMembershipStorageUrl);
 
     setStatus('State loaded', 'ok');
   } catch (err) {
