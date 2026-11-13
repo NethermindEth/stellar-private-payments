@@ -6,6 +6,7 @@ import { el } from './dom.js';
 import { openModal } from './toast.js';
 import { shortHex } from './notes-view.js';
 import { OverviewPoolControls } from './overview-pool-controls.js';
+import { PoolDepositStatus } from './pool-deposit-status.js';
 
 function poolLabelById(poolContractId) {
     const pool = App.state.pools.find(item => item.poolContractId === poolContractId);
@@ -20,7 +21,21 @@ export const Dashboard = {
         App.events.addEventListener('wallet:ready', () => {
             this.start();
         });
-        App.events.addEventListener('pool:config', () => this.renderBalances());
+        // Pool list changes only on connect, whose wallet:ready refresh reads statuses.
+        App.events.addEventListener('pool:config', () => {
+            this.renderBalances();
+            PoolDepositStatus.renderMoveFunds();
+        });
+        App.events.addEventListener('pool:deposit-status', (event) => {
+            const container = document.getElementById('dashboard-balance-grid');
+            for (const card of container?.children ?? []) {
+                if (event.detail.poolId && card.dataset.poolId !== event.detail.poolId) continue;
+                PoolDepositStatus.renderCard(card);
+                OverviewPoolControls.update(card);
+            }
+            PoolDepositStatus.renderMoveFunds();
+        });
+        App.events.addEventListener('pool:selected', () => PoolDepositStatus.renderMoveFunds());
         App.events.addEventListener('wallet:disconnected', () => {
             this.stop();
             this.clear();
@@ -47,6 +62,7 @@ export const Dashboard = {
 
     clear() {
         OverviewPoolControls.close();
+        PoolDepositStatus.clear();
         document.getElementById('dashboard-balance-grid')?.replaceChildren();
         document.getElementById('dashboard-feed')?.replaceChildren();
     },
@@ -54,6 +70,7 @@ export const Dashboard = {
     async refresh() {
         if (!App.state.wallet.address) return;
         const address = App.state.wallet.address;
+        const statusRefresh = PoolDepositStatus.refresh(client());
         const [balancesRes, feedRes, lookupRes] = await Promise.allSettled([
             client().account().portfolio(),
             client().operationalFeed(5),
@@ -89,6 +106,7 @@ export const Dashboard = {
         const failed = balancesRes.status === 'rejected' && feedRes.status === 'rejected' && lookupRes.status === 'rejected';
         if (failed && !this._failing) Toast.show('Couldn\'t refresh the overview. The app keeps retrying.', 'info');
         this._failing = failed;
+        await statusRefresh;
     },
 
     renderBalances() {
@@ -107,6 +125,7 @@ export const Dashboard = {
             }
             if (container.children[index] !== card) container.insertBefore(card, container.children[index] ?? null);
             OverviewPoolControls.update(card);
+            PoolDepositStatus.renderCard(card);
         });
         for (const card of cards.values()) {
             OverviewPoolControls.remove(card);
@@ -114,29 +133,23 @@ export const Dashboard = {
         }
         OverviewPoolControls.reposition();
         // Moving a card to reflect portfolio ordering can blur its focused child.
-        if (active?.isConnected && container.contains(active) && document.activeElement !== active) active.focus({ preventScroll: true });
+        if (container.contains(active) && document.activeElement !== active) active.focus({ preventScroll: true });
     },
 
+    // Cards are keyed by pool, so `card.dataset.poolId` never changes after creation.
     bindBalanceCard(card) {
+        const { poolId } = card.dataset;
         card.querySelectorAll('[data-quick-flow]').forEach(btn => {
             btn.addEventListener('click', () => {
-                const flow = btn.dataset.quickFlow;
-                const poolId = btn.dataset.poolId;
                 App.events.dispatchEvent(new CustomEvent('dashboard:quick-flow', {
-                    detail: { flow, poolId },
+                    detail: { flow: btn.dataset.quickFlow, poolId },
                 }));
             });
         });
-        card.querySelectorAll('[data-view-notes]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                App.events.dispatchEvent(new CustomEvent('dashboard:view-notes', {
-                    detail: { poolId: btn.dataset.poolId },
-                }));
-            });
+        card.querySelector('[data-view-notes]')?.addEventListener('click', () => {
+            App.events.dispatchEvent(new CustomEvent('dashboard:view-notes', { detail: { poolId } }));
         });
-        card.querySelectorAll('[data-view-history]').forEach(btn => {
-            btn.addEventListener('click', () => this.openHistory(btn.dataset.poolId));
-        });
+        card.querySelector('[data-view-history]')?.addEventListener('click', () => this.openHistory(poolId));
     },
 
     async openHistory(poolId) {

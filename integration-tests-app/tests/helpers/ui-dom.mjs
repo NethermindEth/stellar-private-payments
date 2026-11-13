@@ -47,6 +47,7 @@ export class Element {
   replaceChildren(...nodes) { [...this.children].forEach(node => node.remove()); this.append(...nodes); }
   contains(node) { for (let n = node; n; n = n.parent) if (n === this) return true; return false; }
   matches(selector) {
+    if (selector === ':popover-open') return Boolean(this.popoverOpen);
     if (selector.startsWith('#')) return this.id === selector.slice(1);
     if (selector.startsWith('.')) return this.className.split(' ').includes(selector.slice(1));
     if (selector.startsWith('[')) {
@@ -70,10 +71,11 @@ export class Element {
     if (this !== document) (document.listeners[type] ?? []).forEach(listener => listener(event));
     return event;
   }
-  click() { this.dispatch('click'); }
+  // Like a browser, a disabled control ignores activation.
+  click() { if (!this.disabled) this.dispatch('click'); }
   focus() { document.activeElement = this; }
-  showPopover() {}
-  hidePopover() {}
+  showPopover() { this.popoverOpen = true; }
+  hidePopover() { this.popoverOpen = false; }
   getBoundingClientRect() {
     return this.rect ?? { left: 0, top: 0, right: parseFloat(this.style.width) || 352, bottom: 0, height: Math.min(400, parseFloat(this.style.maxHeight) || 400) };
   }
@@ -101,6 +103,8 @@ export function balanceCard() {
   const card = new Element('article');
   for (const name of ['token', 'pool', 'amount']) card.append(new Element('a', { className: `balance-${name}` }));
   card.append(new Element('button', { className: 'balance-notes', dataset: { viewNotes: '' } }));
+  card.append(new Element('span', { dataset: { poolDepositStatus: '' }, textContent: 'Deposits paused' }));
+  card.append(new Element('span', { dataset: { poolPausedIndicator: '' } }));
   card.append(new Element('button', { dataset: { overviewPoolControls: '' }, rect: { left: 200, right: 244, top: 100, bottom: 144, width: 44, height: 44 } }));
   for (const quickFlow of ['deposit', 'transfer', 'withdraw']) card.append(new Element('button', { dataset: { quickFlow } }));
   card.append(new Element('button', { dataset: { viewHistory: '' } }));

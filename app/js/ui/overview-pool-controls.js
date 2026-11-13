@@ -1,25 +1,11 @@
 import { POOL_CONTROLS, poolControls } from '../pool-policy.js';
 import { App } from './core.js';
-
-const TONES = {
-    open: 'border-white/10 bg-white/[0.04] text-slate-200',
-    allowlist: 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100',
-    blocklist: 'border-cyan-300/30 bg-cyan-400/10 text-cyan-100',
-    viewOnly: 'border-violet-300/30 bg-violet-300/10 text-violet-200',
-    traceable: 'border-violet-300/30 bg-violet-300/10 text-violet-200',
-};
+import { el } from './dom.js';
+import { TONES } from './pool-controls.js';
+import { PoolDepositStatus } from './pool-deposit-status.js';
 
 const entries = new WeakMap();
-let nextId = 0;
 let open = null;
-let initialized = false;
-
-function el(tag, className, text) {
-    const node = document.createElement(tag);
-    node.className = className;
-    if (text != null) node.textContent = text;
-    return node;
-}
 
 function close(restoreFocus = false) {
     if (!open) return;
@@ -28,14 +14,13 @@ function close(restoreFocus = false) {
     open = null;
     trigger.setAttribute('aria-expanded', 'false');
     panel.hidePopover();
-    panel.hidden = true;
     if (restoreFocus && focusInside && trigger.isConnected) trigger.focus({ preventScroll: true });
 }
 
 function position() {
     if (!open) return;
     const { trigger, panel } = open;
-    // Moving an existing card can remove its popover from the top layer.
+    // Opens the panel, or reopens it after moving its card removed it from the top layer.
     if (!panel.matches(':popover-open')) panel.showPopover();
     const viewport = window.visualViewport;
     const left = (viewport?.offsetLeft ?? 0) + 8;
@@ -64,8 +49,7 @@ function attach(card) {
     // otherwise makes fixed positioning relative to that container.
     const panel = el('section', 'fixed inset-auto z-50 m-0 overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-ink-850 p-4 text-sm text-slate-100 shadow-[0_16px_48px_rgba(0,0,0,0.5)]');
     panel.setAttribute('popover', 'manual');
-    panel.id = `overview-pool-controls-${++nextId}`;
-    panel.hidden = true;
+    panel.id = `overview-pool-controls-${card.dataset.poolId}`;
     panel.setAttribute('aria-labelledby', `${panel.id}-heading`);
     trigger.setAttribute('aria-controls', panel.id);
     trigger.setAttribute('aria-expanded', 'false');
@@ -79,8 +63,6 @@ function attach(card) {
         } else {
             close(true);
             open = entry;
-            panel.hidden = false;
-            panel.showPopover();
             trigger.setAttribute('aria-expanded', 'true');
             position();
         }
@@ -88,10 +70,45 @@ function attach(card) {
     return entry;
 }
 
+function build({ trigger, panel, poolId }, controls) {
+    trigger.setAttribute('aria-label', controls
+        ? `Pool controls: ${controls.map((control) => POOL_CONTROLS[control].tag).join(', ')}`
+        : 'Pool controls unavailable');
+    const heading = el('h3', 'font-semibold text-white', 'Pool controls');
+    heading.id = `${panel.id}-heading`;
+    panel.replaceChildren(heading);
+    if (!controls) {
+        panel.append(el('p', 'mt-3 text-slate-300', 'Pool controls unavailable'));
+        return;
+    }
+    for (const control of controls) {
+        const { tag, impact } = POOL_CONTROLS[control];
+        const row = el('div', 'mt-3');
+        row.dataset.poolControlRow = '';
+        const badge = el('span', 'chip px-2.5 py-1 text-xs font-semibold', tag);
+        if (TONES[control]) badge.dataset.tone = TONES[control];
+        row.append(
+            badge,
+            el('p', 'mt-2 text-sm leading-relaxed text-slate-300', impact),
+        );
+        panel.append(row);
+    }
+    // Text and tone are filled in by update(), which also refreshes them on status changes.
+    const depositStatus = el('p', 'mt-3 border-t border-white/10 pt-3 text-sm leading-relaxed');
+    depositStatus.dataset.overviewDepositStatus = '';
+    depositStatus.setAttribute('role', 'status');
+    const details = el('a', 'mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-cyan-100 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60', 'Details in Move funds');
+    details.href = '#move-funds';
+    details.addEventListener('click', (event) => {
+        event.preventDefault();
+        close();
+        App.events.dispatchEvent(new CustomEvent('dashboard:view-pool-controls', { detail: { poolId } }));
+    });
+    panel.append(depositStatus, details);
+}
+
 export const OverviewPoolControls = {
     init() {
-        if (initialized) return;
-        initialized = true;
         document.addEventListener('click', (event) => {
             if (open && !open.trigger.contains(event.target) && !open.panel.contains(event.target)) close();
         });
@@ -108,7 +125,6 @@ export const OverviewPoolControls = {
         App.events.addEventListener('view:changed', (event) => {
             if (event.detail.view !== 'dashboard') close();
         });
-        App.events.addEventListener('wallet:disconnected', () => close());
     },
 
     update(card) {
@@ -116,42 +132,19 @@ export const OverviewPoolControls = {
         const pool = App.state.pools.find((pool) => pool.poolContractId === entry.poolId);
         const controls = pool ? poolControls(pool) : null;
         const signature = JSON.stringify(controls);
-        if (signature === entry.signature) return;
-        if (open === entry) close(true);
-        entry.signature = signature;
-        const { trigger, panel } = entry;
-        trigger.setAttribute('aria-label', controls
-            ? `Pool controls: ${controls.map((control) => POOL_CONTROLS[control].tag).join(', ')}`
-            : 'Pool controls unavailable');
-        const heading = el('h3', 'font-semibold text-white', 'Pool controls');
-        heading.id = `${panel.id}-heading`;
-        panel.replaceChildren(heading);
-        if (!controls) {
-            panel.append(el('p', 'mt-3 text-slate-300', 'Pool controls unavailable'));
-            return;
+        if (signature !== entry.signature) {
+            if (open === entry) close(true);
+            entry.signature = signature;
+            build(entry, controls);
         }
-        for (const control of controls) {
-            const { tag, impact } = POOL_CONTROLS[control];
-            const row = el('div', 'mt-3');
-            row.append(
-                el('span', `inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${TONES[control]}`, tag),
-                el('p', 'mt-2 text-sm leading-relaxed text-slate-300', impact),
-            );
-            panel.append(row);
-        }
-        const details = el('a', 'mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-cyan-100 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60', 'Details in Move funds');
-        details.href = '#move-funds';
-        details.addEventListener('click', (event) => {
-            event.preventDefault();
-            close();
-            App.events.dispatchEvent(new CustomEvent('dashboard:view-pool-controls', { detail: { poolId: entry.poolId } }));
-        });
-        panel.append(details);
+        const status = entry.panel.querySelector('[data-overview-deposit-status]');
+        if (!status) return;
+        PoolDepositStatus.renderDetail(status, entry.poolId, 'text-slate-300');
+        if (open === entry) position();
     },
 
     remove(card) {
         if (open === entries.get(card)) close(true);
-        entries.delete(card);
     },
 
     close,
