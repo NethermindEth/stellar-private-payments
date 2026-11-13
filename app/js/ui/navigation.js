@@ -1,7 +1,7 @@
 import { refreshTokenDecimals } from '../token-metadata.js';
 import { deploymentDefaults } from '../network-config.js';
 import { poolSelectLabel } from '../pool-policy.js';
-import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
+import { connectWallet, getWalletNetwork, startWalletWatcher, walletErrorToastOptions } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, isStorageUnlocked, storageWasLocked } from '../wasm-facade.js';
@@ -553,7 +553,9 @@ export const Wallet = {
                     // Surface it even on auto-connect (the common multi-tab trigger).
                     showDbLockedModal(message);
                 } else if (!auto) {
-                    Toast.show(message || 'Failed to connect wallet', 'error');
+                    const options = walletErrorToastOptions(error);
+                    // An install link needs time to be read and clicked.
+                    Toast.show(message || 'Failed to connect wallet', 'error', options.linkUrl ? 10_000 : 4000, options);
                 }
                 throw error;
             } finally {

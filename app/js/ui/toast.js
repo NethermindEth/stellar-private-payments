@@ -85,8 +85,9 @@ function dismiss(toast) {
     setTimeout(() => toast.remove(), 200);
 }
 
-// Options: `details` adds a Copy details button for the raw error text.
-export function showToast(message, type = 'success', duration = 4000, { origin, transactionHash, linkUrl, details } = {}) {
+// Options: `details` adds a Copy details button for the raw error text;
+// `linkUrl` adds a link, labelled `linkText` (an explorer link by default).
+export function showToast(message, type = 'success', duration = 4000, { origin, transactionHash, linkUrl, linkText, details } = {}) {
     const text = String(friendlyErrorMessage(message) ?? '');
     // Cached: a dialog removed right after close() holds it until its close event.
     container ??= document.getElementById('toast-container');
@@ -107,11 +108,11 @@ export function showToast(message, type = 'success', duration = 4000, { origin, 
 
     const body = Object.assign(el('p', 'break-words', text), { title: text });
     body.dataset.testid = 'toast-message';
-    const link = linkUrl && Object.assign(el('a', 'text-cyan-100 underline underline-offset-4', 'Open explorer'), {
+    const link = linkUrl && Object.assign(el('a', 'text-cyan-100 underline underline-offset-4', linkText || 'Open explorer'), {
         href: linkUrl,
         target: '_blank',
         rel: 'noreferrer',
-        ariaLabel: 'Open transaction in explorer',
+        ariaLabel: linkText || 'Open transaction in explorer',
     });
     const close = Object.assign(el('button', 'text-slate-400 underline underline-offset-4 transition hover:text-slate-200', 'Dismiss'), { type: 'button' });
     const actions = [link, details && copyButton(details), close];
@@ -121,11 +122,12 @@ export function showToast(message, type = 'success', duration = 4000, { origin, 
     if (type === 'error') toast.setAttribute('role', 'alert');
     if (origin) toast.dataset.toastOrigin = origin;
     if (transactionHash) toast.dataset.transactionHash = transactionHash;
+    if (transactionHash && link) toast.dataset.keep = 'true';
     close.addEventListener('click', () => dismiss(toast));
     toast.toastTimer = timer(toast, duration, () => dismiss(toast));
     container.append(toast);
     toast.toastTimer.restart();
     // A submitted transaction's toast holds its only explorer link, so it stays.
-    const evictable = visible.filter((old) => !old.dataset.transactionHash);
+    const evictable = visible.filter((old) => !old.dataset.keep);
     evictable.slice(0, Math.max(0, visible.length + 1 - MAX_TOASTS)).forEach(dismiss);
 }
