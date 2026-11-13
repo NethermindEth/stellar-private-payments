@@ -225,6 +225,8 @@ node integration-tests-app/tests/browser/overview-pool-controls.mjs /tmp/overvie
 
 It checks desktop and mobile keyboard/touch interaction, selection and focus
 after navigation, refresh preservation, and scrolling in small viewports.
+It also checks live deposit pause/unpause status, failed reads, and Deposit
+button behavior during SDK preflight, with transfers and withdrawals available.
 
 ## The tests
 

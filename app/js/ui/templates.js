@@ -42,10 +42,6 @@ export const Templates = {
         poolLink.textContent = Utils.shortAddress(balance.poolContractId, 6, 4);
         poolLink.href = Utils.explorerContractUrl(balance.poolContractId);
         poolLink.title = balance.poolContractId;
-
-        el.querySelectorAll('[data-quick-flow], [data-view-notes], [data-view-history]').forEach(btn => {
-            btn.dataset.poolId = balance.poolContractId;
-        });
     },
 
     createFeedCard(item, poolLabel) {

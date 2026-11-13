@@ -15,6 +15,7 @@ import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
 import { Dashboard } from './dashboard.js';
+import { PoolDepositStatus } from './pool-deposit-status.js';
 import { getTransactionErrorMessage } from './errors.js';
 import { poolErrorMessage } from '../pool-errors.js';
 import { disclosedCopy } from '../disclosure-notes.js';
@@ -485,6 +486,8 @@ export const Transactions = {
                 Toast.show((terms && poolErrorMessage(error, terms)) ?? getTransactionErrorMessage(error, 'Deposit'), 'error', 7000, { origin: 'deposit' });
             } finally {
                 setLoading(button, false);
+                // Keeps the button disabled if the pool was paused mid-deposit.
+                PoolDepositStatus.renderMoveFunds();
             }
         }
 
