@@ -384,7 +384,7 @@ test('pause and unpause changes update both views without affecting an in-flight
   depositButton.dataset.status = 'idle';
   PoolDepositStatus.renderMoveFunds();
   assert.equal(depositButton.disabled, false);
-  assert.equal(moveDepositStatus.textContent, 'Deposits are enabled.');
+  assert.equal(moveDepositStatus.hidden, true);
   assert.equal(a.querySelector('[data-pool-deposit-status]').hidden, true);
 });
 
