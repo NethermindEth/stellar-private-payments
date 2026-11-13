@@ -26,6 +26,12 @@ export const Templates = {
 
     createBalanceCard(balance) {
         const el = App.templates.balanceCard.content.cloneNode(true).firstElementChild;
+        this.updateBalanceCard(el, balance);
+        return el;
+    },
+
+    updateBalanceCard(el, balance) {
+        el.dataset.poolId = balance.poolContractId;
         const tokenLink = el.querySelector('.balance-token');
         tokenLink.textContent = balance.tokenLabel;
         tokenLink.href = Utils.explorerContractUrl(balance.tokenContractId);
@@ -36,11 +42,6 @@ export const Templates = {
         poolLink.textContent = Utils.shortAddress(balance.poolContractId, 6, 4);
         poolLink.href = Utils.explorerContractUrl(balance.poolContractId);
         poolLink.title = balance.poolContractId;
-
-        el.querySelectorAll('[data-quick-flow], [data-view-notes], [data-view-history]').forEach(btn => {
-            btn.dataset.poolId = balance.poolContractId;
-        });
-        return el;
     },
 
     createFeedCard(item, poolLabel) {
