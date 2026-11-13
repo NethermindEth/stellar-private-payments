@@ -1,58 +1,61 @@
 {
-    "name": "stellar-private-payments",
-    "version": "0.3.0",
-    "description": "Stellar Private Payments browser SDK",
-    "license": "Apache-2.0",
-    "type": "module",
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/NethermindEth/stellar-private-payments.git",
-        "directory": "sdk/web"
+  "name": "stellar-private-payments",
+  "version": "0.3.0",
+  "description": "Stellar Private Payments browser SDK",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NethermindEth/stellar-private-payments.git",
+    "directory": "sdk/web"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./js/index.js",
+  "types": "./js/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./js/types/index.d.ts",
+      "import": "./js/index.js"
     },
-    "publishConfig": {
-        "access": "public"
+    "./wasm": {
+      "types": "./js/types/crates/stellar_private_payments_web.d.ts",
+      "import": "./dist/stellar_private_payments_web.js"
     },
-    "main": "./js/index.js",
-    "types": "./js/types/index.d.ts",
-    "exports": {
-        ".": {
-            "types": "./js/types/index.d.ts",
-            "import": "./js/index.js"
-        },
-        "./wasm": {
-            "types": "./js/types/crates/stellar_private_payments_web.d.ts",
-            "import": "./dist/stellar_private_payments_web.js"
-        },
-        "./varial": {
-            "types": "./js/types/varial.d.ts",
-            "import": "./js/varial.js"
-        },
-        "./freighter": {
-            "types": "./js/types/freighter.d.ts",
-            "import": "./js/freighter.js"
-        },
-        "./circuits/*": "./dist/circuits/*",
-        "./workers/*": "./dist/workers/*"
+    "./varial": {
+      "types": "./js/types/varial.d.ts",
+      "import": "./js/varial.js"
     },
-    "files": ["dist/", "js/"],
-    "scripts": {
-        "build": "bash scripts/build.sh",
-        "check:artifacts": "node scripts/check-wasm-types.js",
-        "check:bindgen": "node scripts/check-bindgen-types.js",
-        "check:types": "tsc -p tsconfig.json",
-        "check:package": "node scripts/check-sqlite3mc-package.js",
-        "test:amounts": "node --test tests/amounts.test.mjs",
-        "prepublishOnly": "npm run build && npm run check:artifacts && npm run check:bindgen && npm run check:types && npm run check:package"
+    "./freighter": {
+      "types": "./js/types/freighter.d.ts",
+      "import": "./js/freighter.js"
     },
-    "peerDependencies": {
-        "@stellar/varial-sdk": "^7.0.0"
-    },
-    "peerDependenciesMeta": {
-        "@stellar/varial-sdk": {
-            "optional": true
-        }
-    },
-    "devDependencies": {
-        "typescript": "^6.0.3"
+    "./circuits/*": "./dist/circuits/*",
+    "./workers/*": "./dist/workers/*"
+  },
+  "files": [
+    "dist/",
+    "js/"
+  ],
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "check:artifacts": "node scripts/check-wasm-types.js",
+    "check:bindgen": "node scripts/check-bindgen-types.js",
+    "check:types": "tsc -p tsconfig.json",
+    "check:package": "node scripts/check-sqlite3mc-package.js",
+    "test:amounts": "node --test tests/amounts.test.mjs",
+    "prepublishOnly": "npm run build && npm run check:artifacts && npm run check:bindgen && npm run check:types && npm run check:package"
+  },
+  "peerDependencies": {
+    "@stellar/varial-sdk": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@stellar/varial-sdk": {
+      "optional": true
     }
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
 }

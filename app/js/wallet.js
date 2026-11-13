@@ -1,5 +1,5 @@
-import { loadDeploymentConfig } from "./wasm-facade.js";
-import { validateNetwork } from "./network-config.js";
+import { loadDeploymentConfig } from './wasm-facade.js';
+import { validateNetwork } from './network-config.js';
 /**
  * Wallet adapter boundary for the Varial browser extension.
  *
@@ -25,10 +25,10 @@ import {
     setAllowed,
     signAuthEntry,
     signTransaction,
-    signMessage,
-} from "@stellar/varial-sdk";
+    signMessage
+} from '@stellar/varial-sdk';
 
-import { verifySignerAddress } from "./wallet-signer-guard.js";
+import { verifySignerAddress } from './wallet-signer-guard.js';
 
 /**
  * Request wallet access and return the active public key.
@@ -40,15 +40,10 @@ import { verifySignerAddress } from "./wallet-signer-guard.js";
 async function assertVarialInstalled() {
     const conn = await isConnected();
     if (conn?.error) {
-        throw normalizeWalletError(
-            conn.error,
-            "Failed to check Varial connection",
-        );
+        throw normalizeWalletError(conn.error, "Failed to check Varial connection");
     }
     if (!conn?.isConnected) {
-        throw new Error(
-            "Varial not detected. Install from https://www.varial.app/",
-        );
+        throw new Error("Varial not detected. Install from https://www.varial.app/");
     }
 }
 
@@ -68,29 +63,20 @@ async function ensureVarialReady(opts = {}) {
 
     const allowed = await isAllowed();
     if (allowed?.error) {
-        throw normalizeWalletError(
-            allowed.error,
-            "Failed to check Varial allow-list",
-        );
+        throw normalizeWalletError(allowed.error, "Failed to check Varial allow-list");
     }
 
     if (!allowed?.isAllowed) {
         const set = await setAllowed();
         if (set?.error) {
-            throw normalizeWalletError(
-                set.error,
-                "Varial access could not be granted",
-            );
+            throw normalizeWalletError(set.error, "Varial access could not be granted");
         }
     }
 
     if (requestAddress) {
         const access = await requestAccess();
         if (access?.error) {
-            throw normalizeWalletError(
-                access.error,
-                "Varial access request failed",
-            );
+            throw normalizeWalletError(access.error, "Varial access request failed");
         }
         if (!access?.address) {
             throw new Error("No public key returned");
@@ -108,7 +94,7 @@ async function ensureVarialReady(opts = {}) {
  * @returns {Promise<string>} - Connected Stellar public key (G...).
  */
 export async function connectWallet() {
-    return await ensureVarialReady({ requestAddress: true });
+    return await ensureVarialReady({requestAddress: true});
 }
 
 /**
@@ -140,10 +126,7 @@ export async function getWalletAddress() {
     await ensureVarialReady();
     const res = await getAddress();
     if (res?.error) {
-        throw normalizeWalletError(
-            res.error,
-            "Failed to get active Varial address",
-        );
+        throw normalizeWalletError(res.error, "Failed to get active Varial address");
     }
     if (!res?.address) {
         throw new Error("No public key returned");
@@ -167,16 +150,13 @@ export function startWalletWatcher(opts) {
     const res = watcher.watch((info) => {
         if (info?.error) return;
         try {
-            onChange?.({
-                address:
-                    typeof info?.address === "string" ? info.address : null,
-            });
+            onChange?.({ address: typeof info?.address === 'string' ? info.address : null });
         } catch (e) {
-            console.warn("[Wallet] watch callback failed:", e);
+            console.warn('[Wallet] watch callback failed:', e);
         }
     });
     if (res?.error) {
-        throw normalizeWalletError(res.error, "Failed to start wallet watcher");
+        throw normalizeWalletError(res.error, 'Failed to start wallet watcher');
     }
     return () => watcher.stop();
 }
@@ -194,30 +174,23 @@ export function startWalletWatcher(opts) {
 export async function getWalletNetwork() {
     const details = await getNetwork();
     if (details?.error) {
-        throw normalizeWalletError(
-            details.error,
-            "Failed to get Varial network details",
-        );
+        throw normalizeWalletError(details.error, "Failed to get Varial network details");
     }
 
     const { network, networkPassphrase } = details;
     const config = await loadDeploymentConfig();
     validateNetwork(config, networkPassphrase);
-    if (typeof config.rpcUrl !== "string" || !config.rpcUrl.trim()) {
-        throw new Error("Deployment config is missing rpcUrl");
+    if (typeof config.rpcUrl !== 'string' || !config.rpcUrl.trim()) {
+        throw new Error('Deployment config is missing rpcUrl');
     }
     let rpcUrl;
     try {
         rpcUrl = new URL(config.rpcUrl);
     } catch {
-        throw new Error(
-            "Deployment config rpcUrl must be an absolute HTTP or HTTPS URL",
-        );
+        throw new Error('Deployment config rpcUrl must be an absolute HTTP or HTTPS URL');
     }
-    if (rpcUrl.protocol !== "http:" && rpcUrl.protocol !== "https:") {
-        throw new Error(
-            "Deployment config rpcUrl must be an absolute HTTP or HTTPS URL",
-        );
+    if (rpcUrl.protocol !== 'http:' && rpcUrl.protocol !== 'https:') {
+        throw new Error('Deployment config rpcUrl must be an absolute HTTP or HTTPS URL');
     }
     return { network, networkPassphrase, sorobanRpcUrl: config.rpcUrl };
 }
@@ -244,11 +217,11 @@ function normalizeWalletError(error, fallbackMessage = "Wallet error") {
     // their fallback strings free of reject/declin/denied/cancel wording, or an
     // arbitrary wallet failure will be reported to the user as a cancellation.
     if (error?.code === -4) {
-        err.code = "USER_REJECTED";
+        err.code = 'USER_REJECTED';
     } else if (/reject|declin|denied|cancel/.test(lower)) {
-        err.code = "USER_REJECTED";
+        err.code = 'USER_REJECTED';
     } else {
-        err.code = "WALLET_ERROR";
+        err.code = 'WALLET_ERROR';
     }
     err.cause = error;
     return err;
@@ -268,14 +241,11 @@ function normalizeWalletError(error, fallbackMessage = "Wallet error") {
 export async function signWalletTransaction(transactionXdr, opts = {}) {
     await ensureVarialReady();
 
-    const { signedTxXdr, signerAddress, error } = await signTransaction(
-        transactionXdr,
-        opts,
-    );
+    const { signedTxXdr, signerAddress, error } = await signTransaction(transactionXdr, opts);
     if (error) {
-        throw normalizeWalletError(error, "Transaction signature failed");
+        throw normalizeWalletError(error, 'Transaction signature failed');
     }
-    verifySignerAddress("signTransaction", opts.address, signerAddress);
+    verifySignerAddress('signTransaction', opts.address, signerAddress);
 
     return { signedTxXdr, signerAddress };
 }
@@ -294,14 +264,11 @@ export async function signWalletTransaction(transactionXdr, opts = {}) {
 export async function signWalletAuthEntry(entryXdr, opts = {}) {
     await ensureVarialReady();
 
-    const { signedAuthEntry, signerAddress, error } = await signAuthEntry(
-        entryXdr,
-        opts,
-    );
+    const { signedAuthEntry, signerAddress, error } = await signAuthEntry(entryXdr, opts);
     if (error) {
-        throw normalizeWalletError(error, "Auth entry signature failed");
+        throw normalizeWalletError(error, 'Auth entry signature failed');
     }
-    verifySignerAddress("signAuthEntry", opts.address, signerAddress);
+    verifySignerAddress('signAuthEntry', opts.address, signerAddress);
 
     return { signedAuthEntry, signerAddress };
 }
@@ -323,12 +290,9 @@ export async function signWalletMessage(message, opts = {}) {
         await ensureVarialReady();
     }
 
-    console.log(
-        "[Wallet] Requesting message signature for:",
-        message.substring(0, 30) + "...",
-    );
+    console.log('[Wallet] Requesting message signature for:', message.substring(0, 30) + '...');
     const result = await signMessage(message, varialOpts);
-    console.log("[Wallet] signMessage result:", {
+    console.log('[Wallet] signMessage result:', {
         hasSignedMessage: !!result?.signedMessage,
         hasError: !!result?.error,
         error: result?.error,
@@ -336,19 +300,19 @@ export async function signWalletMessage(message, opts = {}) {
 
     const { signedMessage, signerAddress, error } = result || {};
     if (error) {
-        throw normalizeWalletError(error, "Message signature failed");
+        throw normalizeWalletError(error, 'Message signature failed');
     }
     // If SignMessage returns null. Older Varial versions return a null
     // signature instead of an error payload when the user declines, so classify
     // this as a rejection via the structured code rather than by wording the
     // message so that a substring matcher happens to catch it.
     if (!signedMessage) {
-        const err = new Error("No signature returned by the wallet.");
-        err.code = "USER_REJECTED";
+        const err = new Error('No signature returned by the wallet.');
+        err.code = 'USER_REJECTED';
         throw err;
     }
 
-    verifySignerAddress("signMessage", varialOpts.address, signerAddress);
+    verifySignerAddress('signMessage', varialOpts.address, signerAddress);
 
     return { signedMessage, signerAddress };
 }

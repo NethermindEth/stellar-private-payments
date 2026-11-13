@@ -15,8 +15,7 @@
  * @returns {string[]} A new list.
  */
 export function addSigner(signers = [], address, owner) {
-    if (!address || address === owner || signers.includes(address))
-        return [...signers];
+    if (!address || address === owner || signers.includes(address)) return [...signers];
     return [...signers, address];
 }
 
@@ -39,9 +38,7 @@ export function removeSigner(signers = [], address) {
  * @returns {string | null}
  */
 export function activeSuggestion({ active, owner, signers = [] }) {
-    return active && owner && active !== owner && !signers.includes(active)
-        ? active
-        : null;
+    return active && owner && active !== owner && !signers.includes(active) ? active : null;
 }
 
 /**
@@ -62,9 +59,7 @@ export function chosenSigner({ selected, owner, signers = [], active = null }) {
     if (!owner || !selected) return null;
     if (selected === owner) return owner;
     if (signers.includes(selected)) return selected;
-    return selected === activeSuggestion({ active, owner, signers })
-        ? selected
-        : null;
+    return selected === activeSuggestion({ active, owner, signers }) ? selected : null;
 }
 
 /**
@@ -85,6 +80,6 @@ export function withdrawalLinksAccounts({ owner, signer, recipient }) {
 /** Privacy guidance when the deposit account signs a non-deposit transaction. */
 export function signingPrivacyWarning({ owner, signer }) {
     return owner && signer === owner
-        ? "Signing with your deposit account can link this transaction to your deposits. Use an unrelated signing account for better privacy."
-        : "";
+        ? 'Signing with your deposit account can link this transaction to your deposits. Use an unrelated signing account for better privacy.'
+        : '';
 }

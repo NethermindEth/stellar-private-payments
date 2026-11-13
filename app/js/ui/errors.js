@@ -1,6 +1,6 @@
 /**
  * Error handling utilities for user-friendly transaction error messages.
- *
+ * 
  * Maps contract error codes and common failure patterns to human-readable messages.
  * @module ui/errors
  */
@@ -12,39 +12,39 @@
 export const CONTRACT_ERRORS = {
     // Pool contract errors
     pool: {
-        7: "Proof verification failed. The ZK proof is invalid.",
-        8: "Invalid merkle root. The pool state may have changed.",
-        9: "Note already spent. This is a double-spend attempt.",
-        18: "Deposits into this pool are paused. Withdrawals and transfers still work.",
-        20: "No admin transfer is pending.",
-        21: "The contract does not run the code this pool accepts.",
-        22: "The pool holds less than this would pay out, so it refused. Tell the pool operator.",
-        23: "The claim asks for more than the fees collected, most likely because another claim went through first. The Pools tab's Fees column now shows what is left to claim.",
-        24: "The pool does not pay itself or its token contract. Choose another recipient.",
+        7: 'Proof verification failed. The ZK proof is invalid.',
+        8: 'Invalid merkle root. The pool state may have changed.',
+        9: 'Note already spent. This is a double-spend attempt.',
+        18: 'Deposits into this pool are paused. Withdrawals and transfers still work.',
+        20: 'No admin transfer is pending.',
+        21: 'The contract does not run the code this pool accepts.',
+        22: 'The pool holds less than this would pay out, so it refused. Tell the pool operator.',
+        23: 'The claim asks for more than the fees collected, most likely because another claim went through first. The Pools tab\'s Fees column now shows what is left to claim.',
+        24: 'The pool does not pay itself or its token contract. Choose another recipient.',
     },
-    // Groth16 verifier errors
+    // Groth16 verifier errors 
     verifier: {
-        0: "Proof verification failed.",
+        0: 'Proof verification failed.',
     },
-    // ASP Non-Membership errors
+    // ASP Non-Membership errors 
     aspNonMembership: {
-        2: "Key not found in ASP tree.",
-        3: "A key is already on the blocklist.",
-        4: "ASP non-membership proof verification failed.",
-        7: "No admin transfer is pending.",
+        2: 'Key not found in ASP tree.',
+        3: 'A key is already on the blocklist.',
+        4: 'ASP non-membership proof verification failed.',
+        7: 'No admin transfer is pending.',
     },
     // ASP Membership errors
     aspMembership: {
-        6: "No admin transfer is pending.",
+        6: 'No admin transfer is pending.',
     },
     // Public key registry errors
     registry: {
-        1: "The keys to register are malformed.",
-        2: "Only an account address can register keys.",
-        3: "The note key is not in its canonical form.",
-        4: "The encryption key is not in its canonical form.",
-        5: "This address is already registered with different keys, and a registration can't be changed.",
-        6: "The registry rejected the proof that you hold your note key.",
+        1: 'The keys to register are malformed.',
+        2: 'Only an account address can register keys.',
+        3: 'The note key is not in its canonical form.',
+        4: 'The encryption key is not in its canonical form.',
+        5: 'This address is already registered with different keys, and a registration can\'t be changed.',
+        6: 'The registry rejected the proof that you hold your note key.',
     },
 };
 
@@ -59,106 +59,78 @@ const ERROR_PATTERNS = [
         // and by wallet-signer-guard.js for the app's own wallet calls.
         test: (msg) => {
             const lower = msg.toLowerCase();
-            return (
-                lower.includes("not the requested") ||
-                lower.includes("signed with a different account")
-            );
+            return lower.includes('not the requested') ||
+                   lower.includes('signed with a different account');
         },
-        message:
-            "The account chosen to sign and pay isn't in Varial, so it signed with another account. Add the account to Varial or pick another one.",
+        message: 'The account chosen to sign and pay isn\'t in Varial, so it signed with another account. Add the account to Varial or pick another one.',
     },
     {
         // Pool InvalidProof (#7) or Verifier InvalidProof (#0)
         test: (msg) => {
             const lower = msg.toLowerCase();
-            return (
-                (lower.includes("contract") && lower.includes("#7")) ||
-                (lower.includes("contract") &&
-                    lower.includes("#0") &&
-                    lower.includes("verif"))
-            );
+            return (lower.includes('contract') && lower.includes('#7')) ||
+                   (lower.includes('contract') && lower.includes('#0') && lower.includes('verif'));
         },
-        message:
-            "Proof verification failed. This can happen if the pool state changed during proof generation. Please ensure your membership in the proper ASP tree is synced and try again.",
+        message: 'Proof verification failed. This can happen if the pool state changed during proof generation. Please ensure your membership in the proper ASP tree is synced and try again.',
     },
     {
         // Double-spend attempt (#9)
-        test: (msg) =>
-            msg.toLowerCase().includes("#9") &&
-            msg.toLowerCase().includes("contract"),
-        message:
-            "This note has already been spent. Please refresh your notes and try with different inputs.",
+        test: (msg) => msg.toLowerCase().includes('#9') && msg.toLowerCase().includes('contract'),
+        message: 'This note has already been spent. Please refresh your notes and try with different inputs.',
     },
     {
         // Invalid merkle root (#8)
-        test: (msg) =>
-            msg.toLowerCase().includes("#8") &&
-            msg.toLowerCase().includes("contract"),
-        message:
-            "Pool state has changed. Please wait for sync to complete and try again.",
+        test: (msg) => msg.toLowerCase().includes('#8') && msg.toLowerCase().includes('contract'),
+        message: 'Pool state has changed. Please wait for sync to complete and try again.',
     },
     {
         // Deposits paused (#18)
-        test: (msg) =>
-            msg.toLowerCase().includes("#18") &&
-            msg.toLowerCase().includes("contract"),
+        test: (msg) => msg.toLowerCase().includes('#18') && msg.toLowerCase().includes('contract'),
         message: CONTRACT_ERRORS.pool[18],
     },
     {
         // The pool reads an allowlist the manifest does not name. Must precede
         // the network entry, which also matches the SDK's "fetch chain context".
-        test: (msg) =>
-            msg.toLowerCase().includes("deployment manifest does not name"),
-        message:
-            "This pool now uses an allowlist this version of the app does not know. Reload the page. If that does not help, the operator has not published the updated deployment yet.",
+        test: (msg) => msg.toLowerCase().includes('deployment manifest does not name'),
+        message: 'This pool now uses an allowlist this version of the app does not know. Reload the page. If that does not help, the operator has not published the updated deployment yet.',
     },
     {
         // ASP membership issues
         test: (msg) => {
             const lower = msg.toLowerCase();
-            return (
-                lower.includes("membership") &&
-                (lower.includes("not found") || lower.includes("leaf"))
-            );
+            return lower.includes('membership') && (lower.includes('not found') || lower.includes('leaf'));
         },
-        message:
-            "Your ASP membership could not be verified. Ensure you are registered in the Attestation Service Provider.",
+        message: 'Your ASP membership could not be verified. Ensure you are registered in the Attestation Service Provider.',
     },
     {
         // Simulation failures
         test: (msg) => {
             const lower = msg.toLowerCase();
-            return lower.includes("simulation") && lower.includes("fail");
+            return lower.includes('simulation') && lower.includes('fail');
         },
-        message:
-            "Transaction simulation failed. The contract rejected the transaction.",
+        message: 'Transaction simulation failed. The contract rejected the transaction.',
     },
     {
         // Insufficient balance / resource exhaustion
         test: (msg) => {
             const lower = msg.toLowerCase();
-            return (
-                lower.includes("insufficient") ||
-                (lower.includes("resource") && lower.includes("exceed"))
-            );
+            return lower.includes('insufficient') || 
+                   (lower.includes('resource') && lower.includes('exceed'));
         },
-        message:
-            "Insufficient balance or resources. Ensure you have enough XLM to cover the transaction fee.",
+        message: 'Insufficient balance or resources. Ensure you have enough XLM to cover the transaction fee.',
     },
     {
         // Network/RPC errors. Matching a bare "network" would also swallow our
         // own messages that name the Stellar network, e.g. an unfunded signer.
         test: (msg) => {
             const lower = msg.toLowerCase();
-            return (
-                lower.includes("network error") ||
-                lower.includes("networkerror") ||
-                lower.includes("timeout") ||
-                lower.includes("fetch") ||
-                lower.includes("connection")
-            );
+            return lower.includes('network error') ||
+                   lower.includes('networkerror') ||
+                   lower.includes('timeout') ||
+                   lower.includes('fetch') ||
+                   lower.includes('connection');
         },
-        message: "Network error. Please check your connection and try again.",
+        message: 'Network error. Please check your connection and try again.',
     },
     // NOTE: user rejection is deliberately NOT a pattern here. It is decided by
     // isUserCancelledError(), which prefers the structured SEP-0043 code over
@@ -169,21 +141,17 @@ const ERROR_PATTERNS = [
         // Merkle proof not found
         test: (msg) => {
             const lower = msg.toLowerCase();
-            return lower.includes("merkle proof") && lower.includes("not");
+            return lower.includes('merkle proof') && lower.includes('not');
         },
-        message:
-            "Merkle proof not found. Please sync the pool state and try again.",
+        message: 'Merkle proof not found. Please sync the pool state and try again.',
     },
     {
         // Pool state out of sync
         test: (msg) => {
             const lower = msg.toLowerCase();
-            return (
-                lower.includes("out of sync") || lower.includes("root mismatch")
-            );
+            return lower.includes('out of sync') || lower.includes('root mismatch');
         },
-        message:
-            "Pool state is out of sync. Please wait for sync to complete and try again.",
+        message: 'Pool state is out of sync. Please wait for sync to complete and try again.',
     },
 ];
 
@@ -193,11 +161,10 @@ const ERROR_PATTERNS = [
  * @returns {string} The error message
  */
 export function getErrorMessage(error) {
-    if (!error) return "";
-    if (typeof error === "string") return error;
+    if (!error) return '';
+    if (typeof error === 'string') return error;
     if (error instanceof Error) return error.message || String(error);
-    if (typeof error === "object" && "message" in error)
-        return String(error.message);
+    if (typeof error === 'object' && 'message' in error) return String(error.message);
     return String(error);
 }
 
@@ -220,9 +187,8 @@ export function getErrorMessage(error) {
  */
 function walletProvidedMessage(error) {
     const cause = error?.cause;
-    if (typeof cause === "string" && cause) return cause;
-    if (cause && typeof cause === "object" && cause.message)
-        return String(cause.message);
+    if (typeof cause === 'string' && cause) return cause;
+    if (cause && typeof cause === 'object' && cause.message) return String(cause.message);
     return getErrorMessage(error);
 }
 
@@ -232,14 +198,10 @@ function walletProvidedMessage(error) {
  * @returns {boolean} True if this is a proof verification error
  */
 export function isProofVerificationError(message) {
-    const msg = (message || "").toLowerCase();
+    const msg = (message || '').toLowerCase();
     // Pool contract InvalidProof is #7; verifier InvalidProof is #0.
-    return (
-        (msg.includes("contract") && msg.includes("#7")) ||
-        (msg.includes("contract") &&
-            msg.includes("#0") &&
-            msg.includes("verif"))
-    );
+    return (msg.includes('contract') && msg.includes('#7')) ||
+           (msg.includes('contract') && msg.includes('#0') && msg.includes('verif'));
 }
 
 /**
@@ -253,16 +215,14 @@ export function isUserCancelledError(error) {
     // The structured code is authoritative; the substring check below is only a
     // fallback for wallets/versions that do not set it, and deliberately looks
     // at the wallet's own text rather than the full composed message.
-    if (error && (error.code === -4 || error.code === "USER_REJECTED")) {
+    if (error && (error.code === -4 || error.code === 'USER_REJECTED')) {
         return true;
     }
     const msg = walletProvidedMessage(error).toLowerCase();
-    return (
-        msg.includes("rejected") ||
-        msg.includes("denied") ||
-        msg.includes("cancelled") ||
-        msg.includes("user_rejected")
-    );
+    return msg.includes('rejected') ||
+           msg.includes('denied') ||
+           msg.includes('cancelled') ||
+           msg.includes('user_rejected');
 }
 
 /**
@@ -271,7 +231,7 @@ export function isUserCancelledError(error) {
  * @param {string} [operationType='Transaction'] - Type of operation (Deposit, Withdraw, etc.)
  * @returns {string} User-friendly error message
  */
-export function getFriendlyErrorMessage(error, operationType = "Transaction") {
+export function getFriendlyErrorMessage(error, operationType = 'Transaction') {
     const rawMessage = getErrorMessage(error);
     if (!rawMessage) return `${operationType} failed. Please try again.`;
 
@@ -280,7 +240,7 @@ export function getFriendlyErrorMessage(error, operationType = "Transaction") {
     // ERROR_PATTERNS. Checked before the pattern list to match
     // getTransactionErrorMessage, which also short-circuits on cancellation.
     if (isUserCancelledError(error)) {
-        return "Transaction was cancelled.";
+        return 'Transaction was cancelled.';
     }
 
     // Check against known error patterns
@@ -289,11 +249,10 @@ export function getFriendlyErrorMessage(error, operationType = "Transaction") {
             return pattern.message;
         }
     }
-
+    
     // Try to extract contract error code
-    const contractErrorMatch =
-        rawMessage.match(/Error\(Contract,\s*#(\d+)\)/i) ||
-        rawMessage.match(/contract.*#(\d+)/i);
+    const contractErrorMatch = rawMessage.match(/Error\(Contract,\s*#(\d+)\)/i) ||
+                               rawMessage.match(/contract.*#(\d+)/i);
     if (contractErrorMatch) {
         const errorCode = parseInt(contractErrorMatch[1], 10);
         // Check pool errors first (most common)
@@ -301,14 +260,14 @@ export function getFriendlyErrorMessage(error, operationType = "Transaction") {
             return CONTRACT_ERRORS.pool[errorCode];
         }
     }
-
+    
     // If the message is very long or contains technical details, truncate it
     if (rawMessage.length > 150) {
         // Try to extract just the meaningful part
-        const shortMsg = rawMessage.split("\n")[0].slice(0, 100);
+        const shortMsg = rawMessage.split('\n')[0].slice(0, 100);
         return `${operationType} failed: ${shortMsg}...`;
     }
-
+    
     // Return the original message with the operation type prefix
     return `${operationType} failed: ${rawMessage}`;
 }
@@ -320,33 +279,32 @@ export function getFriendlyErrorMessage(error, operationType = "Transaction") {
  */
 export function getRegistrationErrorMessage(error) {
     if (isUserCancelledError(error)) {
-        return "Registration cancelled.";
+        return 'Registration cancelled.';
     }
     const rawMessage = getErrorMessage(error);
     // Only the first host error failed the call; the event log may hold others.
     const hostError = rawMessage.match(/Error\((\w+),\s*#?(\w+)\)/);
-    if (hostError?.[1] === "Contract") {
-        const registryMessage =
-            CONTRACT_ERRORS.registry[parseInt(hostError[2], 10)];
+    if (hostError?.[1] === 'Contract') {
+        const registryMessage = CONTRACT_ERRORS.registry[parseInt(hostError[2], 10)];
         if (registryMessage) return registryMessage;
     }
     // ed25519_verify traps with this when a signature doesn't verify.
-    if (hostError?.[1] === "Crypto" && hostError[2] === "InvalidInput") {
-        return "The registry rejected a signature. Sign the registration message with the account you are registering.";
+    if (hostError?.[1] === 'Crypto' && hostError[2] === 'InvalidInput') {
+        return 'The registry rejected a signature. Sign the registration message with the account you are registering.';
     }
-    if (rawMessage.includes("public key registry uses key derivation domain")) {
-        return "The address book was deployed for other keys than this app uses. Reload the page. If that does not help, the operator has not published a matching deployment yet.";
+    if (rawMessage.includes('public key registry uses key derivation domain')) {
+        return 'The address book was deployed for other keys than this app uses. Reload the page. If that does not help, the operator has not published a matching deployment yet.';
     }
-    if (rawMessage.includes("signature was not made by the note owner")) {
-        return "The registration message was signed by another account. Sign it with the account you are registering.";
+    if (rawMessage.includes('signature was not made by the note owner')) {
+        return 'The registration message was signed by another account. Sign it with the account you are registering.';
     }
-    return getFriendlyErrorMessage(error, "Registration");
+    return getFriendlyErrorMessage(error, 'Registration');
 }
 
 /**
  * Gets an appropriate toast message for a transaction error.
  * This is the main function to use in catch blocks.
- *
+ * 
  * @param {Error|string|unknown} error - The error object
  * @param {string} operationType - Type of operation (Deposit, Withdraw, Transfer, Transaction)
  * @returns {string} Message suitable for displaying in a toast
@@ -356,6 +314,7 @@ export function getTransactionErrorMessage(error, operationType) {
     if (isUserCancelledError(error)) {
         return `${operationType} cancelled.`;
     }
-
+    
     return getFriendlyErrorMessage(error, operationType);
 }
+

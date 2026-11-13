@@ -91,25 +91,25 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
   `);
   let facadeSource = await readFile(facadeUrl, 'utf8');
   facadeSource = facadeSource
-    .replace(/['"]stellar-private-payments['"]/, JSON.stringify(appSdkUrl))
-    .replace(/['"]stellar-private-payments\/varial['"]/, JSON.stringify(url('export class VarialSigner {}')))
-    .replace(/['"]@stellar\/stellar-sdk['"]/, JSON.stringify(url('export const StrKey = { decodeEd25519PublicKey() { return new Uint8Array(32); } };')))
-    .replace(/['"]app-circuit-lock['"]/, JSON.stringify(url(`export default ${JSON.stringify(lock)}`)))
-    .replace(/['"]\.\/storage-lock\.js['"]/, JSON.stringify(url('export async function closeAndReload() {}')))
-    .replace(/['"]\.\/storage-timeout\.js['"]/, JSON.stringify(url('export function startAutoLock() { return () => {}; } export async function loadAutoLockSetting() {} export function clearAutoLockSetting() {}')))
-    .replace(/['"]\.\/storage-key\.js['"]/, JSON.stringify(url('export async function openWalletStorage({ storage }) { return storage.open(); }')))
-    .replace(/['"]\.\/storage-account-dialog\.js['"]/, JSON.stringify(url('export async function confirmStorageAccount() {}')))
-    .replace(/['"]\.\/storage-signature\.js['"]/, JSON.stringify(url('export async function verifyStorageSignature() {}')))
-    .replace(/['"]\.\/private-signers\.js['"]/, JSON.stringify(url('export async function migratePrivateSigners() {}')))
-    .replace(/['"]\.\/storage-backup\.js['"]/, JSON.stringify(url('export const STORAGE_RECORD_KEY = "k"; export async function exportStorageBackup() {} export async function importStorageBackup() {} export function parseBackup() {} export async function resetStorage() {} export async function hasEncryptedStorage() { return false; } export async function hasLegacyPlaintextStorage() { return false; } export async function removeLegacyPlaintextStorage() {} export async function acquireStorageLease() { return async () => {}; }')))
-    .replace(/['"]\.\/wallet\.js['"]/, JSON.stringify(url('export async function getWalletAddress() {} export async function signWalletMessage() {} export function startWalletWatcher() {}')));
+    .replace("'stellar-private-payments'", JSON.stringify(appSdkUrl))
+    .replace("'stellar-private-payments/varial'", JSON.stringify(url('export class VarialSigner {}')))
+    .replace("'@stellar/stellar-sdk'", JSON.stringify(url('export const StrKey = { decodeEd25519PublicKey() { return new Uint8Array(32); } };')))
+    .replace("'app-circuit-lock'", JSON.stringify(url(`export default ${JSON.stringify(lock)}`)))
+    .replace("'./storage-lock.js'", JSON.stringify(url('export async function closeAndReload() {}')))
+    .replace("'./storage-timeout.js'", JSON.stringify(url('export function startAutoLock() { return () => {}; } export async function loadAutoLockSetting() {} export function clearAutoLockSetting() {}')))
+    .replace("'./storage-key.js'", JSON.stringify(url('export async function openWalletStorage({ storage }) { return storage.open(); }')))
+    .replace("'./storage-account-dialog.js'", JSON.stringify(url('export async function confirmStorageAccount() {}')))
+    .replace("'./storage-signature.js'", JSON.stringify(url('export async function verifyStorageSignature() {}')))
+    .replace("'./private-signers.js'", JSON.stringify(url('export async function migratePrivateSigners() {}')))
+    .replace("'./storage-backup.js'", JSON.stringify(url('export const STORAGE_RECORD_KEY = "k"; export async function exportStorageBackup() {} export async function importStorageBackup() {} export function parseBackup() {} export async function resetStorage() {} export async function hasEncryptedStorage() { return false; } export async function hasLegacyPlaintextStorage() { return false; } export async function removeLegacyPlaintextStorage() {} export async function acquireStorageLease() { return async () => {}; }')))
+    .replace("'./wallet.js'", JSON.stringify(url('export async function getWalletAddress() {} export async function signWalletMessage() {} export function startWalletWatcher() {}')));
   for (const name of ['network-config', 'app-storage']) {
     let moduleSource = await readFile(new URL(`../../../app/js/${name}.js`, import.meta.url), 'utf8');
     if (name === 'network-config') {
       const defaults = await readFile(new URL('../../../sdk/native/src/network_defaults.json', import.meta.url), 'utf8');
-      moduleSource = moduleSource.replace(/import knownNetworks from [^;]+;/, `const knownNetworks = ${defaults};`);
+      moduleSource = moduleSource.replace("import knownNetworks from '../../sdk/native/src/network_defaults.json' with { type: 'json' };", `const knownNetworks = ${defaults};`);
     }
-    facadeSource = facadeSource.replace(new RegExp(`["']\\./${name}\\.js["']`), JSON.stringify(url(moduleSource)));
+    facadeSource = facadeSource.replace(`'./${name}.js'`, JSON.stringify(url(moduleSource)));
   }
   const previous = { fetch: globalThis.fetch, window: globalThis.window, document: globalThis.document, sessionStorage: globalThis.sessionStorage };
   const requests = [];

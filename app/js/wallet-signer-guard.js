@@ -32,6 +32,6 @@ export function verifySignerAddress(method, requested, reported) {
     const err = new Error(
         `${method}: the wallet signed with a different account than the one requested.`,
     );
-    err.code = "SIGNER_ADDRESS_MISMATCH";
+    err.code = 'SIGNER_ADDRESS_MISMATCH';
     throw err;
 }

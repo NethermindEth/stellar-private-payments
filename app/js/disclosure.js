@@ -1,25 +1,25 @@
 import {
-    DisclosureRequest,
-    client,
-    isRuntimeReady,
-    getCurrentRpcUrl,
-    loadDeploymentConfig,
-    readTokenDecimals,
-    verifySelectiveDisclosure,
-} from "./wasm-facade.js";
+  DisclosureRequest,
+  client,
+  isRuntimeReady,
+  getCurrentRpcUrl,
+  loadDeploymentConfig,
+  readTokenDecimals,
+  verifySelectiveDisclosure,
+} from './wasm-facade.js';
 import {
-    connectWallet,
-    getConnectedAddress,
-    getWalletNetwork,
-} from "./wallet.js";
-import { isDbLockedError, showDbLockedModal } from "./db-locked.js";
-import { getActivePoolContractId } from "./ui/pool.js";
-import { filterNotes, createNoteRow, formatAmount } from "./ui/notes-view.js";
-import { App, Toast } from "./ui/core.js";
-import { onEnter } from "./ui/keys.js";
-import { createDisclosureMetadata } from "./disclosure-metadata.js";
-import { disclosedCopy, preselectNotes, sameNote } from "./disclosure-notes.js";
-import { refreshTokenDecimals } from "./token-metadata.js";
+  connectWallet,
+  getConnectedAddress,
+  getWalletNetwork,
+} from './wallet.js';
+import { isDbLockedError, showDbLockedModal } from './db-locked.js';
+import { getActivePoolContractId } from './ui/pool.js';
+import { filterNotes, createNoteRow, formatAmount } from './ui/notes-view.js';
+import { App, Toast } from './ui/core.js';
+import { onEnter } from './ui/keys.js';
+import { createDisclosureMetadata } from './disclosure-metadata.js';
+import { disclosedCopy, preselectNotes, sameNote } from './disclosure-notes.js';
+import { refreshTokenDecimals } from './token-metadata.js';
 
 // ---------------------------------------------------------------------------
 // Canonical constants
@@ -27,38 +27,37 @@ import { refreshTokenDecimals } from "./token-metadata.js";
 
 // Source of truth: sdk/native/src/zk/disclosure/mod.rs (test: vk_hash_matches_committed_keys)
 const CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES = {
-    selectiveDisclosure_1:
-        "0x6fc11e281a749639762df720450be1182051c93d83e6cff36248896508d85ee2",
-    selectiveDisclosure_2:
-        "0x0a4def6573b3982661a2afc082f07cbd88baaa61734c612291434a771879f75e",
-    selectiveDisclosure_3:
-        "0x15b9f433d8277ed0d26a1fa7ffdb6b2c540c593e1aa30f803b4afaedaeb00ed6",
-    selectiveDisclosure_4:
-        "0x67657478aa435c5fb7248a8d447e71f69ff6e065d7dc682a17befc34d5b50ea7",
+  selectiveDisclosure_1:
+    '0x6fc11e281a749639762df720450be1182051c93d83e6cff36248896508d85ee2',
+  selectiveDisclosure_2:
+    '0x0a4def6573b3982661a2afc082f07cbd88baaa61734c612291434a771879f75e',
+  selectiveDisclosure_3:
+    '0x15b9f433d8277ed0d26a1fa7ffdb6b2c540c593e1aa30f803b4afaedaeb00ed6',
+  selectiveDisclosure_4:
+    '0x67657478aa435c5fb7248a8d447e71f69ff6e065d7dc682a17befc34d5b50ea7',
 };
 
-import { deploymentDefaults } from "./network-config.js";
+import { deploymentDefaults } from './network-config.js';
 
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
-const BN254_PRIME =
-    21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+const BN254_PRIME = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
 const state = {
-    notes: [],
-    pools: [],
-    selectedNotes: [],
-    noteStatusFilter: "all",
-    notePoolFilter: null,
-    notesLoading: false,
-    notesError: null,
-    generating: false,
-    generateError: null,
-    generateStage: null,
-    generateStageMessage: null,
-    lastReceipt: null,
+  notes: [],
+  pools: [],
+  selectedNotes: [],
+  noteStatusFilter: 'all',
+  notePoolFilter: null,
+  notesLoading: false,
+  notesError: null,
+  generating: false,
+  generateError: null,
+  generateStage: null,
+  generateStageMessage: null,
+  lastReceipt: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -69,185 +68,128 @@ let networkChip;
 let walletChip;
 let connectBtn;
 
+
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
 
 function shortAddress(address) {
-    if (!address) return "Disconnected";
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  if (!address) return 'Disconnected';
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 // DOM builders (used instead of innerHTML).
-const SVG_NS = "http://www.w3.org/2000/svg";
+const SVG_NS = 'http://www.w3.org/2000/svg';
 function svgEl(tag, attrs = {}, children = []) {
-    const node = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
-    for (const c of children) node.appendChild(c);
-    return node;
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  for (const c of children) node.appendChild(c);
+  return node;
 }
 // Create an element with optional class and text. Text always goes through
 // textContent, so it is never interpreted as HTML.
 function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text != null) node.textContent = String(text);
-    return node;
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = String(text);
+  return node;
 }
 // Create an element and append DOM-node children. `children` only ever
 // contains Nodes (or null) built via el()/svgEl() — never raw strings — so
 // nothing untrusted reaches appendChild as markup.
 function elc(tag, className, children) {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    for (const child of children) {
-        if (child instanceof Node) node.appendChild(child);
-    }
-    return node;
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  for (const child of children) {
+    if (child instanceof Node) node.appendChild(child);
+  }
+  return node;
 }
 function spinnerEl() {
-    return el(
-        "span",
-        "w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin",
-    );
+  return el('span', 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin');
 }
 function checkCircleIcon(cls) {
-    return svgEl(
-        "svg",
-        {
-            class: cls,
-            viewBox: "0 0 24 24",
-            fill: "none",
-            stroke: "currentColor",
-            "stroke-width": "2",
-        },
-        [
-            svgEl("path", { d: "M22 11.08V12a10 10 0 1 1-5.93-9.14" }),
-            svgEl("polyline", { points: "22 4 12 14.01 9 11.01" }),
-        ],
-    );
+  return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+    svgEl('path', { d: 'M22 11.08V12a10 10 0 1 1-5.93-9.14' }),
+    svgEl('polyline', { points: '22 4 12 14.01 9 11.01' }),
+  ]);
 }
 function xCircleIcon(cls) {
-    return svgEl(
-        "svg",
-        {
-            class: cls,
-            viewBox: "0 0 24 24",
-            fill: "none",
-            stroke: "currentColor",
-            "stroke-width": "2",
-        },
-        [
-            svgEl("circle", { cx: "12", cy: "12", r: "10" }),
-            svgEl("line", { x1: "15", y1: "9", x2: "9", y2: "15" }),
-            svgEl("line", { x1: "9", y1: "9", x2: "15", y2: "15" }),
-        ],
-    );
+  return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+    svgEl('circle', { cx: '12', cy: '12', r: '10' }),
+    svgEl('line', { x1: '15', y1: '9', x2: '9', y2: '15' }),
+    svgEl('line', { x1: '9', y1: '9', x2: '15', y2: '15' }),
+  ]);
 }
 function alertTriangleIcon(cls) {
-    return svgEl(
-        "svg",
-        {
-            class: cls,
-            viewBox: "0 0 24 24",
-            fill: "none",
-            stroke: "currentColor",
-            "stroke-width": "2",
-        },
-        [
-            svgEl("path", {
-                d: "M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z",
-            }),
-            svgEl("line", { x1: "12", y1: "9", x2: "12", y2: "13" }),
-            svgEl("line", { x1: "12", y1: "17", x2: "12.01", y2: "17" }),
-        ],
-    );
+  return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+    svgEl('path', { d: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z' }),
+    svgEl('line', { x1: '12', y1: '9', x2: '12', y2: '13' }),
+    svgEl('line', { x1: '12', y1: '17', x2: '12.01', y2: '17' }),
+  ]);
 }
 function shieldIcon(cls) {
-    return svgEl(
-        "svg",
-        {
-            class: cls,
-            viewBox: "0 0 24 24",
-            fill: "none",
-            stroke: "currentColor",
-            "stroke-width": "2",
-        },
-        [
-            svgEl("path", { d: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" }),
-            svgEl("polyline", { points: "22 4 12 14.01 9 11.01" }),
-        ],
-    );
+  return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+    svgEl('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' }),
+    svgEl('polyline', { points: '22 4 12 14.01 9 11.01' }),
+  ]);
 }
+
+
 
 // ---------------------------------------------------------------------------
 // Wallet
 // ---------------------------------------------------------------------------
 
 async function loadNotes() {
-    if (!App.state.wallet.address || !isRuntimeReady()) return;
-    state.notesLoading = true;
-    state.notesError = null;
+  if (!App.state.wallet.address || !isRuntimeReady()) return;
+  state.notesLoading = true;
+  state.notesError = null;
 
-    const generateContainer = document.getElementById("disclosure-generate");
-    if (generateContainer) mountGenerate(generateContainer);
+  const generateContainer = document.getElementById('disclosure-generate');
+  if (generateContainer) mountGenerate(generateContainer);
 
-    try {
-        const LIMIT = 200;
-        const config = client().contractConfig();
-        state.pools = Array.isArray(config?.pools) ? config.pools : [];
-        const pools = state.pools;
-        const list = await client().account().userNotes(LIMIT);
-        const notes = Array.isArray(list) ? list : [];
+  try {
+    const LIMIT = 200;
+    const config = client().contractConfig();
+    state.pools = Array.isArray(config?.pools) ? config.pools : [];
+    const pools = state.pools;
+    const list = await client().account().userNotes(LIMIT);
+    const notes = Array.isArray(list) ? list : [];
 
-        state.notes = notes.map((n) => ({
-            id: n.id,
-            poolContractId: n.poolContractId,
-            amount: n.amount,
-            spent: !!n.spent,
-            leafIndex: n.leafIndex ?? 0,
-            createdAtLedger: n.createdAtLedger ?? 0,
-        }));
+    state.notes = notes.map((n) => ({
+      id: n.id,
+      poolContractId: n.poolContractId,
+      amount: n.amount,
+      spent: !!n.spent,
+      leafIndex: n.leafIndex ?? 0,
+      createdAtLedger: n.createdAtLedger ?? 0,
+    }));
 
-        const notePools = new Set(
-            state.notes.map((note) => note.poolContractId),
-        );
-        void refreshTokenDecimals(
-            pools.filter((pool) => notePools.has(pool.poolContractId)),
-            client().account(),
-            () => state.pools === pools,
-            () =>
-                App.events.dispatchEvent(
-                    new CustomEvent("disclosure:metadata"),
-                ),
-        );
+    const notePools = new Set(state.notes.map(note => note.poolContractId));
+    void refreshTokenDecimals(pools.filter(pool => notePools.has(pool.poolContractId)),
+      client().account(), () => state.pools === pools,
+      () => App.events.dispatchEvent(new CustomEvent('disclosure:metadata')));
 
-        // Apply query-param preselection if present
-        const query = parseQueryParams();
-        if (query.commitments && query.commitments.length > 0) {
-            const matches = preselectNotes(
-                state.notes,
-                query.commitments,
-                query.pool,
-            );
-            if (matches.length > 0) {
-                state.selectedNotes = matches;
-            } else {
-                state.notesError =
-                    "Preselected notes not found or not owned by this account.";
-            }
-        }
-    } catch (e) {
-        console.warn("[Disclosure] loadNotes failed:", e);
+    // Apply query-param preselection if present
+    const query = parseQueryParams();
+    if (query.commitments && query.commitments.length > 0) {
+      const matches = preselectNotes(state.notes, query.commitments, query.pool);
+      if (matches.length > 0) {
+        state.selectedNotes = matches;
+      } else {
         state.notesError =
-            "Failed to load notes. The indexer may still be syncing.";
-    } finally {
-        state.notesLoading = false;
-        const generateContainer = document.getElementById(
-            "disclosure-generate",
-        );
-        if (generateContainer) mountGenerate(generateContainer);
+          'Preselected notes not found or not owned by this account.';
+      }
     }
+  } catch (e) {
+    console.warn('[Disclosure] loadNotes failed:', e);
+    state.notesError = 'Failed to load notes. The indexer may still be syncing.';
+  } finally {
+    state.notesLoading = false;
+    const generateContainer = document.getElementById('disclosure-generate');
+    if (generateContainer) mountGenerate(generateContainer);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -255,25 +197,16 @@ async function loadNotes() {
 // ---------------------------------------------------------------------------
 
 function parseQueryParams() {
-    const searchParams = new URLSearchParams(window.location.search);
-    const hashString = window.location.hash.includes("?")
-        ? window.location.hash.split("?")[1]
-        : "";
-    const hashParams = new URLSearchParams(hashString);
-
-    const commitments = hashParams
-        .getAll("commitment")
-        .concat(searchParams.getAll("commitment"))
-        .filter(Boolean);
-    return {
-        commitments: commitments.length > 0 ? commitments : null,
-        pool: hashParams.get("pool") || searchParams.get("pool"),
-        verify:
-            hashParams.get("verify") === "1" ||
-            searchParams.get("verify") === "1" ||
-            hashParams.get("verify") === "true" ||
-            searchParams.get("verify") === "true",
-    };
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashString = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
+  const hashParams = new URLSearchParams(hashString);
+  
+  const commitments = hashParams.getAll('commitment').concat(searchParams.getAll('commitment')).filter(Boolean);
+  return {
+    commitments: commitments.length > 0 ? commitments : null,
+    pool: hashParams.get('pool') || searchParams.get('pool'),
+    verify: hashParams.get('verify') === '1' || searchParams.get('verify') === '1' || hashParams.get('verify') === 'true' || searchParams.get('verify') === 'true',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -281,760 +214,636 @@ function parseQueryParams() {
 // ---------------------------------------------------------------------------
 
 function poolDecimals(poolContractId) {
-    return state.pools.find((pool) => pool.poolContractId === poolContractId)
-        ?.decimals;
+  return state.pools.find(pool => pool.poolContractId === poolContractId)?.decimals;
 }
 
 // Token symbol for a pool, derived from the deployment config's asset descriptor.
 function tokenLabelForPool(poolContractId) {
-    const pool = (state.pools || []).find(
-        (p) => p.poolContractId === poolContractId,
-    );
-    const asset = pool?.asset || {};
-    if (asset.kind === "native") return "XLM";
-    if (asset.kind === "classic") return asset.code || "Asset";
-    if (asset.kind === "contract") return asset.symbol || "Token";
-    return "Token";
+  const pool = (state.pools || []).find((p) => p.poolContractId === poolContractId);
+  const asset = pool?.asset || {};
+  if (asset.kind === 'native') return 'XLM';
+  if (asset.kind === 'classic') return asset.code || 'Asset';
+  if (asset.kind === 'contract') return asset.symbol || 'Token';
+  return 'Token';
 }
 
 function shortCommitment(hex) {
-    if (!hex || hex.length < 10) return hex || "--";
-    return `${hex.slice(0, 8)}…${hex.slice(-4)}`;
+  if (!hex || hex.length < 10) return hex || '--';
+  return `${hex.slice(0, 8)}…${hex.slice(-4)}`;
 }
 
 // Filter controls for the Generate selector: spent-status buttons plus a
 // token/pool select (shown only when the account holds notes across more than
 // one pool). Mutating a control updates state and re-renders in place.
 function buildGenerateFilters(container) {
-    const wrap = el("div", "flex flex-wrap items-center gap-2 mb-3");
+  const wrap = el('div', 'flex flex-wrap items-center gap-2 mb-3');
 
-    const statusGroup = el(
-        "div",
-        "inline-flex rounded-lg border border-dark-700 bg-dark-800 p-0.5",
+  const statusGroup = el('div', 'inline-flex rounded-lg border border-dark-700 bg-dark-800 p-0.5');
+  const statuses = [
+    { key: 'all', label: 'All' },
+    { key: 'unspent', label: 'Available' },
+    { key: 'spent', label: 'Spent' },
+  ];
+  statuses.forEach(({ key, label }) => {
+    const active = state.noteStatusFilter === key;
+    const btn = el(
+      'button',
+      `px-3 py-1 text-xs rounded-md transition-colors ${
+        active ? 'bg-brand-500/20 text-brand-300' : 'text-dark-400 hover:text-dark-200'
+      }`,
+      label,
     );
-    const statuses = [
-        { key: "all", label: "All" },
-        { key: "unspent", label: "Available" },
-        { key: "spent", label: "Spent" },
-    ];
-    statuses.forEach(({ key, label }) => {
-        const active = state.noteStatusFilter === key;
-        const btn = el(
-            "button",
-            `px-3 py-1 text-xs rounded-md transition-colors ${
-                active
-                    ? "bg-brand-500/20 text-brand-300"
-                    : "text-dark-400 hover:text-dark-200"
-            }`,
-            label,
-        );
-        btn.type = "button";
-        btn.dataset.testid = `disclosure-filter-${key}`;
-        btn.addEventListener("click", () => {
-            state.noteStatusFilter = key;
-            mountGenerate(container);
-        });
-        statusGroup.appendChild(btn);
+    btn.type = 'button';
+    btn.dataset.testid = `disclosure-filter-${key}`;
+    btn.addEventListener('click', () => {
+      state.noteStatusFilter = key;
+      mountGenerate(container);
     });
-    wrap.appendChild(statusGroup);
+    statusGroup.appendChild(btn);
+  });
+  wrap.appendChild(statusGroup);
 
-    const poolIds = [...new Set(state.notes.map((n) => n.poolContractId))];
-    if (poolIds.length > 1) {
-        const select = el(
-            "select",
-            "text-xs bg-dark-800 border border-dark-700 rounded-lg pl-3 pr-8 py-1.5 text-dark-200",
-        );
-        const optAll = el("option", null, "All tokens");
-        optAll.value = "";
-        select.appendChild(optAll);
-        poolIds.forEach((pid) => {
-            const opt = el("option", null, tokenLabelForPool(pid));
-            opt.value = pid;
-            select.appendChild(opt);
-        });
-        select.value = state.notePoolFilter || "";
-        select.addEventListener("change", () => {
-            state.notePoolFilter = select.value || null;
-            mountGenerate(container);
-        });
-        wrap.appendChild(select);
-    }
+  const poolIds = [...new Set(state.notes.map((n) => n.poolContractId))];
+  if (poolIds.length > 1) {
+    const select = el(
+      'select',
+      'text-xs bg-dark-800 border border-dark-700 rounded-lg pl-3 pr-8 py-1.5 text-dark-200',
+    );
+    const optAll = el('option', null, 'All tokens');
+    optAll.value = '';
+    select.appendChild(optAll);
+    poolIds.forEach((pid) => {
+      const opt = el('option', null, tokenLabelForPool(pid));
+      opt.value = pid;
+      select.appendChild(opt);
+    });
+    select.value = state.notePoolFilter || '';
+    select.addEventListener('change', () => {
+      state.notePoolFilter = select.value || null;
+      mountGenerate(container);
+    });
+    wrap.appendChild(select);
+  }
 
-    return wrap;
+  return wrap;
 }
 
 export function mountGenerate(container) {
-    container.replaceChildren();
+  container.replaceChildren();
 
-    const heading = document.createElement("h2");
-    heading.id = "generate-heading";
-    heading.className =
-        "text-sm uppercase tracking-[0.25em] text-brand-400 mb-4";
-    heading.textContent = "Generate Disclosure Receipt";
-    container.appendChild(heading);
+  const heading = document.createElement('h2');
+  heading.id = 'generate-heading';
+  heading.className = 'text-sm uppercase tracking-[0.25em] text-brand-400 mb-4';
+  heading.textContent = 'Generate Disclosure Receipt';
+  container.appendChild(heading);
 
-    if (!App.state.wallet.address || !App.state.keys.notePublicKey) {
-        const msg = document.createElement("div");
-        msg.className = "text-sm text-dark-400";
-        msg.textContent =
-            "Connect your Varial wallet to generate disclosure receipts for your notes.";
-        container.appendChild(msg);
-        return;
-    }
+  if (!App.state.wallet.address || !App.state.keys.notePublicKey) {
+    const msg = document.createElement('div');
+    msg.className = 'text-sm text-dark-400';
+    msg.textContent =
+      'Connect your Varial wallet to generate disclosure receipts for your notes.';
+    container.appendChild(msg);
+    return;
+  }
 
-    // Wallet status line
-    const statusLine = el("div", "text-xs text-dark-500 mb-4");
-    statusLine.append(
-        "Connected: ",
-        el(
-            "span",
-            "font-mono text-dark-300",
-            shortAddress(App.state.wallet.address),
-        ),
+  // Wallet status line
+  const statusLine = el('div', 'text-xs text-dark-500 mb-4');
+  statusLine.append('Connected: ', el('span', 'font-mono text-dark-300', shortAddress(App.state.wallet.address)));
+  container.appendChild(statusLine);
+
+  if (state.notesLoading) {
+    const spinner = el('div', 'text-sm text-dark-400 flex items-center gap-2');
+    spinner.append(spinnerEl(), 'Loading notes…');
+    container.appendChild(spinner);
+    return;
+  }
+
+  if (state.notesError) {
+    const err = document.createElement('div');
+    err.className = 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3';
+    err.textContent = state.notesError;
+    container.appendChild(err);
+    return;
+  }
+
+  if (state.notes.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'text-sm text-dark-400';
+    empty.textContent = 'No notes found for this account.';
+    container.appendChild(empty);
+    return;
+  }
+
+  container.appendChild(buildGenerateFilters(container));
+
+  const notes = filterNotes(state.notes, {
+    status: state.noteStatusFilter,
+    poolId: state.notePoolFilter,
+  });
+
+  // Note picker
+  const pickerLabel = document.createElement('label');
+  pickerLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2';
+  pickerLabel.textContent = `Select up to 4 notes (${notes.length})`;
+  container.appendChild(pickerLabel);
+
+  const list = document.createElement('div');
+  list.className = 'space-y-2 mb-4';
+  list.setAttribute('role', 'group');
+  list.setAttribute('aria-label', 'Notes');
+
+  const isSelected = (note) => state.selectedNotes.some((n) => sameNote(n, note));
+  const atMaxSelection = () => state.selectedNotes.length >= 4;
+
+  if (notes.length === 0) {
+    list.appendChild(
+      el('div', 'text-sm text-dark-400 p-3', 'No notes match this filter.'),
     );
-    container.appendChild(statusLine);
-
-    if (state.notesLoading) {
-        const spinner = el(
-            "div",
-            "text-sm text-dark-400 flex items-center gap-2",
-        );
-        spinner.append(spinnerEl(), "Loading notes…");
-        container.appendChild(spinner);
-        return;
-    }
-
-    if (state.notesError) {
-        const err = document.createElement("div");
-        err.className =
-            "text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3";
-        err.textContent = state.notesError;
-        container.appendChild(err);
-        return;
-    }
-
-    if (state.notes.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "text-sm text-dark-400";
-        empty.textContent = "No notes found for this account.";
-        container.appendChild(empty);
-        return;
-    }
-
-    container.appendChild(buildGenerateFilters(container));
-
-    const notes = filterNotes(state.notes, {
-        status: state.noteStatusFilter,
-        poolId: state.notePoolFilter,
+  } else {
+    notes.forEach((note) => {
+      const selected = isSelected(note);
+      const row = createNoteRow(note, {
+        symbol: tokenLabelForPool(note.poolContractId),
+        decimals: poolDecimals(note.poolContractId),
+        selectable: true,
+        selected,
+        disabled: (!selected && atMaxSelection()) || !sameNote(note, disclosedCopy(state.notes, note)),
+        testId: 'disclosure-note',
+        onToggle: (n, checked) => {
+          if (checked) {
+            if (!isSelected(n)) state.selectedNotes.push(n);
+          } else {
+            state.selectedNotes = state.selectedNotes.filter((x) => !sameNote(x, n));
+          }
+          mountGenerate(container);
+        },
+      });
+      list.appendChild(row);
     });
+  }
 
-    // Note picker
-    const pickerLabel = document.createElement("label");
-    pickerLabel.className =
-        "block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2";
-    pickerLabel.textContent = `Select up to 4 notes (${notes.length})`;
-    container.appendChild(pickerLabel);
+  container.appendChild(list);
 
-    const list = document.createElement("div");
-    list.className = "space-y-2 mb-4";
-    list.setAttribute("role", "group");
-    list.setAttribute("aria-label", "Notes");
-
-    const isSelected = (note) =>
-        state.selectedNotes.some((n) => sameNote(n, note));
-    const atMaxSelection = () => state.selectedNotes.length >= 4;
-
-    if (notes.length === 0) {
-        list.appendChild(
-            el(
-                "div",
-                "text-sm text-dark-400 p-3",
-                "No notes match this filter.",
-            ),
-        );
-    } else {
-        notes.forEach((note) => {
-            const selected = isSelected(note);
-            const row = createNoteRow(note, {
-                symbol: tokenLabelForPool(note.poolContractId),
-                decimals: poolDecimals(note.poolContractId),
-                selectable: true,
-                selected,
-                disabled:
-                    (!selected && atMaxSelection()) ||
-                    !sameNote(note, disclosedCopy(state.notes, note)),
-                testId: "disclosure-note",
-                onToggle: (n, checked) => {
-                    if (checked) {
-                        if (!isSelected(n)) state.selectedNotes.push(n);
-                    } else {
-                        state.selectedNotes = state.selectedNotes.filter(
-                            (x) => !sameNote(x, n),
-                        );
-                    }
-                    mountGenerate(container);
-                },
-            });
-            list.appendChild(row);
-        });
-    }
-
-    container.appendChild(list);
-
-    // Selection summary
-    const selectedChip = el("div", "text-xs text-brand-400 mb-4");
-    const circuitName = `selectiveDisclosure_${
-        state.selectedNotes.length || 1
-    }`;
+  // Selection summary
+  const selectedChip = el('div', 'text-xs text-brand-400 mb-4');
+  const circuitName = `selectiveDisclosure_${state.selectedNotes.length || 1}`;
+  selectedChip.append(
+    el('span', 'text-dark-400', 'Selected: '),
+    `${state.selectedNotes.length} note${state.selectedNotes.length === 1 ? '' : 's'}`,
+  );
+  if (state.selectedNotes.length > 0) {
     selectedChip.append(
-        el("span", "text-dark-400", "Selected: "),
-        `${state.selectedNotes.length} note${
-            state.selectedNotes.length === 1 ? "" : "s"
-        }`,
+      ' · ',
+      el('span', 'font-mono text-dark-300', circuitName),
     );
-    if (state.selectedNotes.length > 0) {
-        selectedChip.append(
-            " · ",
-            el("span", "font-mono text-dark-300", circuitName),
-        );
-    }
-    container.appendChild(selectedChip);
+  }
+  container.appendChild(selectedChip);
 
-    // -------------------------------------------------------------------------
-    // Context form
-    // -------------------------------------------------------------------------
-    const formWrap = document.createElement("div");
-    formWrap.className = "border-t border-dark-800 pt-4 mt-2 space-y-4";
-    formWrap.dataset.testid = "disclosure-generate-form";
+  // -------------------------------------------------------------------------
+  // Context form
+  // -------------------------------------------------------------------------
+  const formWrap = document.createElement('div');
+  formWrap.className = 'border-t border-dark-800 pt-4 mt-2 space-y-4';
+  formWrap.dataset.testid = 'disclosure-generate-form';
 
-    // Helper to build a labeled input
-    const makeField = (id, labelText, opts = {}) => {
-        const wrap = document.createElement("div");
-        wrap.className = "space-y-1";
+  // Helper to build a labeled input
+  const makeField = (id, labelText, opts = {}) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'space-y-1';
 
-        const label = document.createElement("label");
-        label.htmlFor = id;
-        label.className =
-            "block text-xs font-medium text-dark-400 uppercase tracking-wide";
-        label.textContent = labelText;
-        wrap.appendChild(label);
+    const label = document.createElement('label');
+    label.htmlFor = id;
+    label.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide';
+    label.textContent = labelText;
+    wrap.appendChild(label);
 
-        const inputWrap = document.createElement("div");
-        inputWrap.className = "flex gap-2";
+    const inputWrap = document.createElement('div');
+    inputWrap.className = 'flex gap-2';
 
-        const input = document.createElement("input");
-        input.id = id;
-        input.type = opts.type || "text";
-        input.className =
-            "flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500";
-        if (opts.placeholder) input.placeholder = opts.placeholder;
-        if (opts.value) input.value = opts.value;
-        inputWrap.appendChild(input);
+    const input = document.createElement('input');
+    input.id = id;
+    input.type = opts.type || 'text';
+    input.className =
+      'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500';
+    if (opts.placeholder) input.placeholder = opts.placeholder;
+    if (opts.value) input.value = opts.value;
+    inputWrap.appendChild(input);
 
-        if (opts.button) {
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.className =
-                "px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition";
-            btn.textContent = opts.button.label;
-            btn.addEventListener("click", opts.button.onClick);
-            inputWrap.appendChild(btn);
-        }
-
-        wrap.appendChild(inputWrap);
-
-        const errorEl = document.createElement("div");
-        errorEl.id = `${id}-error`;
-        errorEl.className = "text-xs text-rose-400 hidden";
-        wrap.appendChild(errorEl);
-
-        return { wrap, input, errorEl };
-    };
-
-    const authorityField = makeField("authority-label", "Authority label", {
-        placeholder: "e.g. KYC Provider",
-    });
-    formWrap.appendChild(authorityField.wrap);
-
-    const payloadField = makeField(
-        "authority-payload",
-        "Authority identity payload (hex)",
-        {
-            placeholder: "0x...",
-        },
-    );
-    formWrap.appendChild(payloadField.wrap);
-
-    const purposeField = makeField("purpose", "Purpose", {
-        placeholder: "e.g. identity-verification",
-    });
-    formWrap.appendChild(purposeField.wrap);
-
-    const generateRandomNonce = () => {
-        const bytes = new Uint8Array(32);
-        crypto.getRandomValues(bytes);
-        let hex = "";
-        for (const b of bytes) hex += b.toString(16).padStart(2, "0");
-        const val = BigInt("0x" + hex) % BN254_PRIME;
-        return "0x" + val.toString(16).padStart(64, "0");
-    };
-
-    const nonceField = makeField("context-nonce", "Context nonce", {
-        placeholder: "0x...",
-        button: {
-            label: "Random",
-            onClick: () => {
-                nonceField.input.value = generateRandomNonce();
-                nonceField.errorEl.classList.add("hidden");
-            },
-        },
-    });
-    // Default to a random nonce
-    nonceField.input.value = generateRandomNonce();
-    formWrap.appendChild(nonceField.wrap);
-
-    onEnter(authorityField.input, () => payloadField.input.focus());
-    onEnter(payloadField.input, () => purposeField.input.focus());
-    onEnter(purposeField.input, () => nonceField.input.focus());
-
-    // Validation helpers matching DisclosureContext::validate
-    const validateHex = (value, label) => {
-        if (!value.startsWith("0x")) return `${label}: must start with 0x`;
-        const payload = value.slice(2);
-        if (payload.length === 0)
-            return `${label}: hex payload cannot be empty`;
-        if (payload.length % 2 !== 0)
-            return `${label}: hex must have even length`;
-        if (/[A-F]/.test(payload))
-            return `${label}: use lowercase hex digits only`;
-        if (!/^[0-9a-f]*$/.test(payload))
-            return `${label}: invalid hex characters`;
-        return null;
-    };
-
-    const validateForm = () => {
-        let ok = true;
-
-        const setErr = (field, msg) => {
-            field.errorEl.textContent = msg || "";
-            field.errorEl.classList.toggle("hidden", !msg);
-            if (msg) ok = false;
-        };
-
-        const authority = authorityField.input.value.trim();
-        setErr(
-            authorityField,
-            authority ? null : "Authority label is required",
-        );
-
-        const payload = payloadField.input.value.trim();
-        setErr(
-            payloadField,
-            payload
-                ? validateHex(payload, "Identity payload")
-                : "Identity payload is required",
-        );
-
-        const purpose = purposeField.input.value.trim();
-        setErr(purposeField, purpose ? null : "Purpose is required");
-
-        const nonce = nonceField.input.value.trim();
-        setErr(
-            nonceField,
-            nonce ? validateHex(nonce, "Nonce") : "Nonce is required",
-        );
-
-        return ok ? { authority, payload, purpose, nonce } : null;
-    };
-
-    // Progress / result area
-    const progressArea = document.createElement("div");
-    progressArea.id = "generate-progress";
-    progressArea.className = "hidden";
-    progressArea.dataset.testid = "disclosure-generate-progress";
-    progressArea.dataset.state = "idle";
-    formWrap.appendChild(progressArea);
-
-    const resultArea = document.createElement("div");
-    resultArea.id = "generate-result";
-    resultArea.className = "hidden";
-    resultArea.dataset.testid = "disclosure-generate-result";
-    resultArea.dataset.state = "idle";
-    formWrap.appendChild(resultArea);
-
-    const setGenerateState = (stage, message, error = null) => {
-        state.generateStage = stage;
-        state.generateStageMessage = message;
-        state.generateError = error;
-
-        if (stage) {
-            progressArea.dataset.state = error ? "error" : "running";
-            progressArea.classList.remove("hidden");
-            const isError = !!error;
-            const wrap = document.createElement("div");
-            wrap.className = `flex items-center gap-2 text-sm ${
-                isError ? "text-rose-300" : "text-dark-300"
-            }`;
-            if (!isError) {
-                const spinner = document.createElement("span");
-                spinner.className =
-                    "w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin";
-                wrap.appendChild(spinner);
-            }
-            const msg = document.createElement("span");
-            msg.textContent = message;
-            wrap.appendChild(msg);
-            progressArea.replaceChildren(wrap);
-        } else {
-            progressArea.dataset.state = "idle";
-            progressArea.classList.add("hidden");
-            progressArea.replaceChildren();
-        }
-    };
-
-    const parseReceiptAmount = (value) => {
-        try {
-            if (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)) {
-                return BigInt(value);
-            }
-            return BigInt(value);
-        } catch {
-            return null;
-        }
-    };
-
-    const renderDisclosedNotes = (publicInputs, selectedNotesForSymbol) => {
-        const notesWrap = el("div", "space-y-2");
-        notesWrap.appendChild(
-            el(
-                "h3",
-                "text-xs font-medium text-dark-400 uppercase tracking-wide",
-                "Disclosed notes",
-            ),
-        );
-
-        const n = Math.min(
-            publicInputs.noteCommitments?.length || 0,
-            publicInputs.amounts?.length || 0,
-            publicInputs.nullifiers?.length || 0,
-        );
-
-        for (let i = 0; i < n; i += 1) {
-            const symbol = selectedNotesForSymbol[i]?.symbol || "Token";
-            const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
-            const amountText =
-                amountValue != null
-                    ? formatAmount(
-                          amountValue,
-                          symbol,
-                          selectedNotesForSymbol[i]?.decimals,
-                      )
-                    : publicInputs.amounts[i];
-
-            const card = el(
-                "div",
-                "p-3 bg-dark-800 border border-dark-700 rounded-lg space-y-1",
-            );
-            card.dataset.testid = "disclosure-disclosed-note";
-            card.dataset.state = "unspent";
-            card.appendChild(
-                elc("div", "flex justify-between text-xs", [
-                    el("span", "text-dark-500", `Note ${i + 1}`),
-                    el("span", "font-medium text-brand-300", amountText),
-                ]),
-            );
-            card.appendChild(
-                el("div", "text-[10px] text-dark-500", "Commitment"),
-            );
-            card.appendChild(
-                el(
-                    "div",
-                    "text-xs font-mono text-dark-200 break-all",
-                    publicInputs.noteCommitments[i],
-                ),
-            );
-            card.appendChild(
-                el("div", "text-[10px] text-dark-500 mt-1", "Nullifier"),
-            );
-            card.appendChild(
-                el(
-                    "div",
-                    "text-xs font-mono text-dark-200 break-all",
-                    publicInputs.nullifiers[i],
-                ),
-            );
-            notesWrap.appendChild(card);
-        }
-        return notesWrap;
-    };
-
-    const showResult = (receipt) => {
-        state.lastReceipt = receipt;
-        resultArea.classList.remove("hidden");
-        resultArea.dataset.state = "ready";
-        const json = JSON.stringify(receipt, null, 2);
-        const commitmentPrefix = state.selectedNotes.length
-            ? `${state.selectedNotes.length}-note`
-            : "receipt";
-        const date = new Date().toISOString().slice(0, 10);
-        const filename = `disclosure-receipt-${commitmentPrefix}-${date}.json`;
-
-        const selectedNotesForSymbol = state.selectedNotes.map((n) => ({
-            symbol: tokenLabelForPool(n.poolContractId),
-            decimals: poolDecimals(n.poolContractId),
-        }));
-
-        const box = el("div", "space-y-3");
-        box.appendChild(
-            el(
-                "div",
-                "text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-lg p-3",
-                "Disclosure receipt generated successfully.",
-            ),
-        );
-        if (receipt.publicInputs) {
-            box.appendChild(
-                renderDisclosedNotes(
-                    receipt.publicInputs,
-                    selectedNotesForSymbol,
-                ),
-            );
-        }
-        const receiptJson = el(
-            "pre",
-            "p-3 bg-dark-950 border border-dark-800 rounded-lg text-xs font-mono text-dark-200 overflow-auto max-h-64",
-            json,
-        );
-        receiptJson.dataset.testid = "disclosure-receipt-json";
-        box.appendChild(receiptJson);
-        const actions = el("div", "flex gap-2");
-        const dlBtn = el(
-            "button",
-            "px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold hover:bg-brand-400 transition",
-            "Download JSON",
-        );
-        dlBtn.type = "button";
-        dlBtn.id = "btn-download-receipt";
-        const copyBtn = el(
-            "button",
-            "px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition",
-            "Copy to clipboard",
-        );
-        copyBtn.type = "button";
-        copyBtn.id = "btn-copy-receipt";
-        const resetBtn = el(
-            "button",
-            "px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition",
-            "Generate another",
-        );
-        resetBtn.type = "button";
-        resetBtn.id = "btn-reset-generate";
-        actions.append(dlBtn, copyBtn, resetBtn);
-        box.appendChild(actions);
-        resultArea.replaceChildren(box);
-
-        document
-            .getElementById("btn-download-receipt")
-            ?.addEventListener("click", () => {
-                const blob = new Blob([json], { type: "application/json" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = filename;
-                a.click();
-                URL.revokeObjectURL(url);
-                Toast.show("Receipt downloaded", "success");
-            });
-
-        document
-            .getElementById("btn-copy-receipt")
-            ?.addEventListener("click", async () => {
-                try {
-                    await navigator.clipboard.writeText(json);
-                    Toast.show("Copied to clipboard", "success");
-                } catch {
-                    Toast.show("Failed to copy", "error");
-                }
-            });
-
-        document
-            .getElementById("btn-reset-generate")
-            ?.addEventListener("click", () => {
-                state.lastReceipt = null;
-                state.generateError = null;
-                state.generateStage = null;
-                resultArea.classList.add("hidden");
-                resultArea.dataset.state = "idle";
-                resultArea.replaceChildren();
-                progressArea.classList.add("hidden");
-                progressArea.replaceChildren();
-                // Re-enable form
-                generateBtn.disabled = false;
-                generateBtn.textContent = "Generate Disclosure Receipt";
-            });
-    };
-
-    const showGenerateError = (message) => {
-        resultArea.dataset.state = "error";
-        setGenerateState("error", message, true);
-        generateBtn.disabled = false;
-        generateBtn.textContent = "Retry";
-    };
-
-    // Generate button
-    const generateBtn = document.createElement("button");
-    generateBtn.type = "button";
-    generateBtn.dataset.testid = "disclosure-generate-submit";
-    generateBtn.className =
-        "w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed";
-    generateBtn.textContent = "Generate Disclosure Receipt";
-    generateBtn.disabled =
-        state.selectedNotes.length === 0 || state.selectedNotes.length > 4;
-    formWrap.appendChild(generateBtn);
-
-    // Enter in the nonce field bypasses `generateBtn.disabled`, so track the
-    // in-flight state separately to keep a second generate from starting.
-    let generating = false;
-
-    async function executeGenerate(form) {
-        generating = true;
-        generateBtn.disabled = true;
-        resultArea.dataset.state = "generating";
-        generateBtn.textContent = "Generating…";
-        resultArea.classList.add("hidden");
-        state.lastReceipt = null;
-
-        try {
-            const receipt = await generateReceipt(form);
-            if (receipt) {
-                setGenerateState(null);
-                showResult(receipt);
-                generateBtn.textContent = "Generated";
-            } else {
-                // RegisterAtASP path — receipt is null
-                showGenerateError(
-                    "Account not registered with the ASP. Please use the main app to deposit or register your public key before generating a disclosure receipt.",
-                );
-            }
-        } catch (err) {
-            console.error("Generate failed:", err);
-            showGenerateError(err.message || "Generation failed");
-        } finally {
-            generating = false;
-        }
+    if (opts.button) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className =
+        'px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition';
+      btn.textContent = opts.button.label;
+      btn.addEventListener('click', opts.button.onClick);
+      inputWrap.appendChild(btn);
     }
 
-    async function runGenerate() {
-        if (generating) return;
-        if (
-            state.selectedNotes.length === 0 ||
-            state.selectedNotes.length > 4
-        ) {
-            Toast.show("Please select 1 to 4 notes", "error");
-            return;
-        }
+    wrap.appendChild(inputWrap);
 
-        const form = validateForm();
-        if (!form) return;
+    const errorEl = document.createElement('div');
+    errorEl.id = `${id}-error`;
+    errorEl.className = 'text-xs text-rose-400 hidden';
+    wrap.appendChild(errorEl);
 
-        // No confirmation dialog here: receipt generation is a purely off-chain
-        // action (local proving only), so there is nothing on-chain to confirm.
-        await executeGenerate(form);
-    }
+    return { wrap, input, errorEl };
+  };
 
-    onEnter(nonceField.input, runGenerate);
-    generateBtn.addEventListener("click", runGenerate);
+  const authorityField = makeField('authority-label', 'Authority label', {
+    placeholder: 'e.g. KYC Provider',
+  });
+  formWrap.appendChild(authorityField.wrap);
 
-    container.appendChild(formWrap);
-}
+  const payloadField = makeField('authority-payload', 'Authority identity payload (hex)', {
+    placeholder: '0x...',
+  });
+  formWrap.appendChild(payloadField.wrap);
 
-const TX_PROGRESS_EVENT = "stellar-private-payments:tx-progress";
+  const purposeField = makeField('purpose', 'Purpose', {
+    placeholder: 'e.g. identity-verification',
+  });
+  formWrap.appendChild(purposeField.wrap);
 
-async function generateReceipt(form) {
-    if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
-        throw new Error("Select 1 to 4 notes");
-    }
+  const generateRandomNonce = () => {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    let hex = '';
+    for (const b of bytes) hex += b.toString(16).padStart(2, '0');
+    const val = BigInt('0x' + hex) % BN254_PRIME;
+    return '0x' + val.toString(16).padStart(64, '0');
+  };
 
-    const firstPool = state.selectedNotes[0]?.poolContractId;
-    if (state.selectedNotes.some((n) => n.poolContractId !== firstPool)) {
-        throw new Error("All selected notes must belong to the same pool");
-    }
+  const nonceField = makeField('context-nonce', 'Context nonce', {
+    placeholder: '0x...',
+    button: {
+      label: 'Random',
+      onClick: () => {
+        nonceField.input.value = generateRandomNonce();
+        nonceField.errorEl.classList.add('hidden');
+      },
+    },
+  });
+  // Default to a random nonce
+  nonceField.input.value = generateRandomNonce();
+  formWrap.appendChild(nonceField.wrap);
 
-    const progressArea = document.getElementById("generate-progress");
-    const handler = (e) => {
-        const d = e.detail;
-        if (d?.flow !== "disclose" || !d?.message || !progressArea) return;
-        progressArea.classList.remove("hidden");
-        const wrap = document.createElement("div");
-        wrap.className = "flex items-center gap-2 text-sm text-dark-300";
-        const spinner = document.createElement("span");
-        spinner.className =
-            "w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin";
+  onEnter(authorityField.input, () => payloadField.input.focus());
+  onEnter(payloadField.input, () => purposeField.input.focus());
+  onEnter(purposeField.input, () => nonceField.input.focus());
+
+  // Validation helpers matching DisclosureContext::validate
+  const validateHex = (value, label) => {
+    if (!value.startsWith('0x')) return `${label}: must start with 0x`;
+    const payload = value.slice(2);
+    if (payload.length === 0) return `${label}: hex payload cannot be empty`;
+    if (payload.length % 2 !== 0) return `${label}: hex must have even length`;
+    if (/[A-F]/.test(payload)) return `${label}: use lowercase hex digits only`;
+    if (!/^[0-9a-f]*$/.test(payload)) return `${label}: invalid hex characters`;
+    return null;
+  };
+
+  const validateForm = () => {
+    let ok = true;
+
+    const setErr = (field, msg) => {
+      field.errorEl.textContent = msg || '';
+      field.errorEl.classList.toggle('hidden', !msg);
+      if (msg) ok = false;
+    };
+
+    const authority = authorityField.input.value.trim();
+    setErr(authorityField, authority ? null : 'Authority label is required');
+
+    const payload = payloadField.input.value.trim();
+    setErr(payloadField, payload ? validateHex(payload, 'Identity payload') : 'Identity payload is required');
+
+    const purpose = purposeField.input.value.trim();
+    setErr(purposeField, purpose ? null : 'Purpose is required');
+
+    const nonce = nonceField.input.value.trim();
+    setErr(nonceField, nonce ? validateHex(nonce, 'Nonce') : 'Nonce is required');
+
+    return ok
+      ? { authority, payload, purpose, nonce }
+      : null;
+  };
+
+  // Progress / result area
+  const progressArea = document.createElement('div');
+  progressArea.id = 'generate-progress';
+  progressArea.className = 'hidden';
+  progressArea.dataset.testid = 'disclosure-generate-progress';
+  progressArea.dataset.state = 'idle';
+  formWrap.appendChild(progressArea);
+
+  const resultArea = document.createElement('div');
+  resultArea.id = 'generate-result';
+  resultArea.className = 'hidden';
+  resultArea.dataset.testid = 'disclosure-generate-result';
+  resultArea.dataset.state = 'idle';
+  formWrap.appendChild(resultArea);
+
+  const setGenerateState = (stage, message, error = null) => {
+    state.generateStage = stage;
+    state.generateStageMessage = message;
+    state.generateError = error;
+
+    if (stage) {
+      progressArea.dataset.state = error ? 'error' : 'running';
+      progressArea.classList.remove('hidden');
+      const isError = !!error;
+      const wrap = document.createElement('div');
+      wrap.className = `flex items-center gap-2 text-sm ${isError ? 'text-rose-300' : 'text-dark-300'}`;
+      if (!isError) {
+        const spinner = document.createElement('span');
+        spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
         wrap.appendChild(spinner);
-        const msg = document.createElement("span");
-        msg.textContent = d.message;
-        wrap.appendChild(msg);
-        progressArea.replaceChildren(wrap);
-    };
-    window.addEventListener(TX_PROGRESS_EVENT, handler);
+      }
+      const msg = document.createElement('span');
+      msg.textContent = message;
+      wrap.appendChild(msg);
+      progressArea.replaceChildren(wrap);
+    } else {
+      progressArea.dataset.state = 'idle';
+      progressArea.classList.add('hidden');
+      progressArea.replaceChildren();
+    }
+  };
+
+  const parseReceiptAmount = (value) => {
+    try {
+      if (typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value)) {
+        return BigInt(value);
+      }
+      return BigInt(value);
+    } catch {
+      return null;
+    }
+  };
+
+  const renderDisclosedNotes = (publicInputs, selectedNotesForSymbol) => {
+    const notesWrap = el('div', 'space-y-2');
+    notesWrap.appendChild(
+      el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Disclosed notes')
+    );
+
+    const n = Math.min(
+      publicInputs.noteCommitments?.length || 0,
+      publicInputs.amounts?.length || 0,
+      publicInputs.nullifiers?.length || 0
+    );
+
+    for (let i = 0; i < n; i += 1) {
+      const symbol = selectedNotesForSymbol[i]?.symbol || 'Token';
+      const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
+      const amountText = amountValue != null ? formatAmount(amountValue, symbol, selectedNotesForSymbol[i]?.decimals) : publicInputs.amounts[i];
+
+      const card = el('div', 'p-3 bg-dark-800 border border-dark-700 rounded-lg space-y-1');
+      card.dataset.testid = 'disclosure-disclosed-note';
+      card.dataset.state = 'unspent';
+      card.appendChild(
+        elc('div', 'flex justify-between text-xs', [
+          el('span', 'text-dark-500', `Note ${i + 1}`),
+          el('span', 'font-medium text-brand-300', amountText),
+        ])
+      );
+      card.appendChild(
+        el('div', 'text-[10px] text-dark-500', 'Commitment')
+      );
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.noteCommitments[i])
+      );
+      card.appendChild(
+        el('div', 'text-[10px] text-dark-500 mt-1', 'Nullifier')
+      );
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.nullifiers[i])
+      );
+      notesWrap.appendChild(card);
+    }
+    return notesWrap;
+  };
+
+  const showResult = (receipt) => {
+    state.lastReceipt = receipt;
+    resultArea.classList.remove('hidden');
+    resultArea.dataset.state = 'ready';
+    const json = JSON.stringify(receipt, null, 2);
+    const commitmentPrefix = state.selectedNotes.length
+      ? `${state.selectedNotes.length}-note`
+      : 'receipt';
+    const date = new Date().toISOString().slice(0, 10);
+    const filename = `disclosure-receipt-${commitmentPrefix}-${date}.json`;
+
+    const selectedNotesForSymbol = state.selectedNotes.map((n) => ({
+      symbol: tokenLabelForPool(n.poolContractId),
+      decimals: poolDecimals(n.poolContractId),
+    }));
+
+    const box = el('div', 'space-y-3');
+    box.appendChild(el('div', 'text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-lg p-3', 'Disclosure receipt generated successfully.'));
+    if (receipt.publicInputs) {
+      box.appendChild(renderDisclosedNotes(receipt.publicInputs, selectedNotesForSymbol));
+    }
+    const receiptJson = el('pre', 'p-3 bg-dark-950 border border-dark-800 rounded-lg text-xs font-mono text-dark-200 overflow-auto max-h-64', json);
+    receiptJson.dataset.testid = 'disclosure-receipt-json';
+    box.appendChild(receiptJson);
+    const actions = el('div', 'flex gap-2');
+    const dlBtn = el('button', 'px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold hover:bg-brand-400 transition', 'Download JSON');
+    dlBtn.type = 'button';
+    dlBtn.id = 'btn-download-receipt';
+    const copyBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Copy to clipboard');
+    copyBtn.type = 'button';
+    copyBtn.id = 'btn-copy-receipt';
+    const resetBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Generate another');
+    resetBtn.type = 'button';
+    resetBtn.id = 'btn-reset-generate';
+    actions.append(dlBtn, copyBtn, resetBtn);
+    box.appendChild(actions);
+    resultArea.replaceChildren(box);
+
+    document.getElementById('btn-download-receipt')?.addEventListener('click', () => {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      Toast.show('Receipt downloaded', 'success');
+    });
+
+    document.getElementById('btn-copy-receipt')?.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(json);
+        Toast.show('Copied to clipboard', 'success');
+      } catch {
+        Toast.show('Failed to copy', 'error');
+      }
+    });
+
+    document.getElementById('btn-reset-generate')?.addEventListener('click', () => {
+      state.lastReceipt = null;
+      state.generateError = null;
+      state.generateStage = null;
+      resultArea.classList.add('hidden');
+      resultArea.dataset.state = 'idle';
+      resultArea.replaceChildren();
+      progressArea.classList.add('hidden');
+      progressArea.replaceChildren();
+      // Re-enable form
+      generateBtn.disabled = false;
+      generateBtn.textContent = 'Generate Disclosure Receipt';
+    });
+  };
+
+  const showGenerateError = (message) => {
+    resultArea.dataset.state = 'error';
+    setGenerateState('error', message, true);
+    generateBtn.disabled = false;
+    generateBtn.textContent = 'Retry';
+  };
+
+  // Generate button
+  const generateBtn = document.createElement('button');
+  generateBtn.type = 'button';
+  generateBtn.dataset.testid = 'disclosure-generate-submit';
+  generateBtn.className =
+    'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed';
+  generateBtn.textContent = 'Generate Disclosure Receipt';
+  generateBtn.disabled = state.selectedNotes.length === 0 || state.selectedNotes.length > 4;
+  formWrap.appendChild(generateBtn);
+
+  // Enter in the nonce field bypasses `generateBtn.disabled`, so track the
+  // in-flight state separately to keep a second generate from starting.
+  let generating = false;
+
+  async function executeGenerate(form) {
+    generating = true;
+    generateBtn.disabled = true;
+    resultArea.dataset.state = 'generating';
+    generateBtn.textContent = 'Generating…';
+    resultArea.classList.add('hidden');
+    state.lastReceipt = null;
 
     try {
-        // Disclose against the pool the selected note actually belongs to (there can
-        // be multiple pools); falling back to the first enabled pool only if unknown.
-        const config = client().contractConfig();
-        const poolContractId =
-            state.selectedNotes[0]?.poolContractId ||
-            getActivePoolContractId(config);
-        const pool = await client()
-            .account()
-            .pool({ poolContract: poolContractId });
-
-        const req = new DisclosureRequest(
-            state.selectedNotes.map((n) => n.id),
-            form.authority,
-            form.payload,
-            form.purpose,
-            form.nonce,
+      const receipt = await generateReceipt(form);
+      if (receipt) {
+        setGenerateState(null);
+        showResult(receipt);
+        generateBtn.textContent = 'Generated';
+      } else {
+        // RegisterAtASP path — receipt is null
+        showGenerateError(
+          'Account not registered with the ASP. Please use the main app to deposit or register your public key before generating a disclosure receipt.'
         );
-        const receipt = await pool.disclose(req);
-
-        if (!receipt) {
-            return null;
-        }
-
-        // Fail-closed validation: ensure receipt contains valid proof bytes and circuit metadata
-        if (
-            !receipt.proofCompressedHex ||
-            typeof receipt.proofCompressedHex !== "string" ||
-            !receipt.proofCompressedHex.startsWith("0x") ||
-            receipt.proofCompressedHex.length <= 2
-        ) {
-            throw new Error(
-                "Generated disclosure receipt has invalid or missing proof bytes",
-            );
-        }
-
-        if (
-            !receipt.circuit ||
-            !receipt.circuit.vkHash ||
-            typeof receipt.circuit.vkHash !== "string" ||
-            !receipt.circuit.vkHash.startsWith("0x")
-        ) {
-            throw new Error(
-                "Generated disclosure receipt has invalid or missing circuit metadata",
-            );
-        }
-
-        if (!receipt.publicInputs) {
-            throw new Error(
-                "Generated disclosure receipt has missing public inputs",
-            );
-        }
-
-        return receipt;
+      }
+    } catch (err) {
+      console.error('Generate failed:', err);
+      showGenerateError(err.message || 'Generation failed');
     } finally {
-        window.removeEventListener(TX_PROGRESS_EVENT, handler);
+      generating = false;
     }
+  }
+
+  async function runGenerate() {
+    if (generating) return;
+    if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
+      Toast.show('Please select 1 to 4 notes', 'error');
+      return;
+    }
+
+    const form = validateForm();
+    if (!form) return;
+
+    // No confirmation dialog here: receipt generation is a purely off-chain
+    // action (local proving only), so there is nothing on-chain to confirm.
+    await executeGenerate(form);
+  }
+
+  onEnter(nonceField.input, runGenerate);
+  generateBtn.addEventListener('click', runGenerate);
+
+  container.appendChild(formWrap);
+}
+
+const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
+
+async function generateReceipt(form) {
+  if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
+    throw new Error('Select 1 to 4 notes');
+  }
+
+  const firstPool = state.selectedNotes[0]?.poolContractId;
+  if (state.selectedNotes.some((n) => n.poolContractId !== firstPool)) {
+    throw new Error('All selected notes must belong to the same pool');
+  }
+
+  const progressArea = document.getElementById('generate-progress');
+  const handler = (e) => {
+    const d = e.detail;
+    if (d?.flow !== 'disclose' || !d?.message || !progressArea) return;
+    progressArea.classList.remove('hidden');
+    const wrap = document.createElement('div');
+    wrap.className = 'flex items-center gap-2 text-sm text-dark-300';
+    const spinner = document.createElement('span');
+    spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
+    wrap.appendChild(spinner);
+    const msg = document.createElement('span');
+    msg.textContent = d.message;
+    wrap.appendChild(msg);
+    progressArea.replaceChildren(wrap);
+  };
+  window.addEventListener(TX_PROGRESS_EVENT, handler);
+
+  try {
+    // Disclose against the pool the selected note actually belongs to (there can
+    // be multiple pools); falling back to the first enabled pool only if unknown.
+    const config = client().contractConfig();
+    const poolContractId =
+      state.selectedNotes[0]?.poolContractId || getActivePoolContractId(config);
+    const pool = await client().account().pool({ poolContract: poolContractId });
+
+    const req = new DisclosureRequest(
+      state.selectedNotes.map((n) => n.id),
+      form.authority,
+      form.payload,
+      form.purpose,
+      form.nonce,
+    );
+    const receipt = await pool.disclose(req);
+
+    if (!receipt) {
+      return null;
+    }
+
+    // Fail-closed validation: ensure receipt contains valid proof bytes and circuit metadata
+    if (
+      !receipt.proofCompressedHex ||
+      typeof receipt.proofCompressedHex !== 'string' ||
+      !receipt.proofCompressedHex.startsWith('0x') ||
+      receipt.proofCompressedHex.length <= 2
+    ) {
+      throw new Error('Generated disclosure receipt has invalid or missing proof bytes');
+    }
+
+    if (
+      !receipt.circuit ||
+      !receipt.circuit.vkHash ||
+      typeof receipt.circuit.vkHash !== 'string' ||
+      !receipt.circuit.vkHash.startsWith('0x')
+    ) {
+      throw new Error('Generated disclosure receipt has invalid or missing circuit metadata');
+    }
+
+    if (!receipt.publicInputs) {
+      throw new Error('Generated disclosure receipt has missing public inputs');
+    }
+
+    return receipt;
+  } finally {
+    window.removeEventListener(TX_PROGRESS_EVENT, handler);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1042,783 +851,594 @@ async function generateReceipt(form) {
 // ---------------------------------------------------------------------------
 
 export function mountVerify(container) {
-    container.replaceChildren();
+  container.replaceChildren();
 
-    const heading = document.createElement("h2");
-    heading.id = "verify-heading";
-    heading.className =
-        "text-sm uppercase tracking-[0.25em] text-brand-400 mb-4";
-    heading.textContent = "Verify Disclosure Receipt";
-    container.appendChild(heading);
+  const heading = document.createElement('h2');
+  heading.id = 'verify-heading';
+  heading.className = 'text-sm uppercase tracking-[0.25em] text-brand-400 mb-4';
+  heading.textContent = 'Verify Disclosure Receipt';
+  container.appendChild(heading);
 
-    let receipt = null;
-    let receiptError = null;
-    let receiptPoolSymbol = "Token";
-    let verifiedSpentIndices = [];
-    let updateSpentMessage = () => {};
+  let receipt = null;
+  let receiptError = null;
+  let receiptPoolSymbol = 'Token';
+  let verifiedSpentIndices = [];
+  let updateSpentMessage = () => {};
 
-    // -------------------------------------------------------------------------
-    // Import area
-    // -------------------------------------------------------------------------
-    const importWrap = document.createElement("div");
-    importWrap.className = "space-y-3 mb-4";
+  // -------------------------------------------------------------------------
+  // Import area
+  // -------------------------------------------------------------------------
+  const importWrap = document.createElement('div');
+  importWrap.className = 'space-y-3 mb-4';
 
-    // File picker
-    const fileWrap = document.createElement("div");
-    fileWrap.className = "space-y-1";
-    const fileLabel = document.createElement("label");
-    fileLabel.className =
-        "block text-xs font-medium text-dark-400 uppercase tracking-wide";
-    fileLabel.textContent = "Import from file";
-    fileWrap.appendChild(fileLabel);
+  // File picker
+  const fileWrap = document.createElement('div');
+  fileWrap.className = 'space-y-1';
+  const fileLabel = document.createElement('label');
+  fileLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide';
+  fileLabel.textContent = 'Import from file';
+  fileWrap.appendChild(fileLabel);
 
-    const fileInput = document.createElement("input");
-    fileInput.type = "file";
-    fileInput.accept = ".json";
-    fileInput.className =
-        "block w-full text-xs text-dark-300 file:mr-3 file:px-3 file:py-1.5 file:bg-dark-800 file:border file:border-dark-700 file:rounded-lg file:text-dark-200 file:hover:border-brand-500 file:transition";
-    fileWrap.appendChild(fileInput);
-    importWrap.appendChild(fileWrap);
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.json';
+  fileInput.className =
+    'block w-full text-xs text-dark-300 file:mr-3 file:px-3 file:py-1.5 file:bg-dark-800 file:border file:border-dark-700 file:rounded-lg file:text-dark-200 file:hover:border-brand-500 file:transition';
+  fileWrap.appendChild(fileInput);
+  importWrap.appendChild(fileWrap);
 
-    // Paste textarea
-    const pasteWrap = document.createElement("div");
-    pasteWrap.className = "space-y-1";
-    const pasteLabel = document.createElement("label");
-    pasteLabel.className =
-        "block text-xs font-medium text-dark-400 uppercase tracking-wide";
-    pasteLabel.textContent = "Or paste receipt JSON";
-    pasteWrap.appendChild(pasteLabel);
+  // Paste textarea
+  const pasteWrap = document.createElement('div');
+  pasteWrap.className = 'space-y-1';
+  const pasteLabel = document.createElement('label');
+  pasteLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide';
+  pasteLabel.textContent = 'Or paste receipt JSON';
+  pasteWrap.appendChild(pasteLabel);
 
-    const pasteArea = document.createElement("textarea");
-    pasteArea.dataset.testid = "disclosure-receipt-input";
-    pasteArea.rows = 4;
-    pasteArea.className =
-        "w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 resize-y";
-    pasteArea.placeholder = '{ "version": 1, ... }';
-    pasteWrap.appendChild(pasteArea);
-    importWrap.appendChild(pasteWrap);
+  const pasteArea = document.createElement('textarea');
+  pasteArea.dataset.testid = 'disclosure-receipt-input';
+  pasteArea.rows = 4;
+  pasteArea.className =
+    'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 resize-y';
+  pasteArea.placeholder = '{ "version": 1, ... }';
+  pasteWrap.appendChild(pasteArea);
+  importWrap.appendChild(pasteWrap);
 
-    // Load button
-    const loadBtn = document.createElement("button");
-    loadBtn.type = "button";
-    loadBtn.dataset.testid = "disclosure-load-receipt";
-    loadBtn.className =
-        "px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition";
-    loadBtn.textContent = "Load Receipt";
-    importWrap.appendChild(loadBtn);
+  // Load button
+  const loadBtn = document.createElement('button');
+  loadBtn.type = 'button';
+  loadBtn.dataset.testid = 'disclosure-load-receipt';
+  loadBtn.className =
+    'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition';
+  loadBtn.textContent = 'Load Receipt';
+  importWrap.appendChild(loadBtn);
 
-    // Receipt error display
-    const importErrorEl = document.createElement("div");
-    importErrorEl.dataset.testid = "disclosure-receipt-import-error";
-    importErrorEl.className =
-        "text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3 hidden";
-    importWrap.appendChild(importErrorEl);
+  // Receipt error display
+  const importErrorEl = document.createElement('div');
+  importErrorEl.dataset.testid = 'disclosure-receipt-import-error';
+  importErrorEl.className = 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3 hidden';
+  importWrap.appendChild(importErrorEl);
 
-    container.appendChild(importWrap);
+  container.appendChild(importWrap);
 
-    // -------------------------------------------------------------------------
-    // Receipt summary + VK hash (shown after successful import)
-    // -------------------------------------------------------------------------
-    const summaryWrap = document.createElement("div");
-    summaryWrap.className = "hidden space-y-4 mb-4";
-    summaryWrap.dataset.testid = "disclosure-receipt-summary";
-    summaryWrap.dataset.state = "idle";
+  // -------------------------------------------------------------------------
+  // Receipt summary + VK hash (shown after successful import)
+  // -------------------------------------------------------------------------
+  const summaryWrap = document.createElement('div');
+  summaryWrap.className = 'hidden space-y-4 mb-4';
+  summaryWrap.dataset.testid = 'disclosure-receipt-summary';
+  summaryWrap.dataset.state = 'idle';
 
-    const summaryHeading = document.createElement("h3");
-    summaryHeading.className =
-        "text-xs font-medium text-dark-400 uppercase tracking-wide";
-    summaryHeading.textContent = "Receipt Context";
-    summaryWrap.appendChild(summaryHeading);
+  const summaryHeading = document.createElement('h3');
+  summaryHeading.className = 'text-xs font-medium text-dark-400 uppercase tracking-wide';
+  summaryHeading.textContent = 'Receipt Context';
+  summaryWrap.appendChild(summaryHeading);
 
-    const summaryGrid = document.createElement("div");
-    summaryGrid.className = "grid grid-cols-1 sm:grid-cols-2 gap-3";
-    summaryWrap.appendChild(summaryGrid);
+  const summaryGrid = document.createElement('div');
+  summaryGrid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-3';
+  summaryWrap.appendChild(summaryGrid);
 
-    // VK hash field (canonical default, editable override)
-    const vkWrap = document.createElement("div");
-    vkWrap.className = "space-y-1";
-    const vkLabel = document.createElement("label");
-    vkLabel.className =
-        "block text-xs font-medium text-dark-400 uppercase tracking-wide";
-    vkLabel.textContent = "Expected VK hash";
-    vkWrap.appendChild(vkLabel);
+  // VK hash field (canonical default, editable override)
+  const vkWrap = document.createElement('div');
+  vkWrap.className = 'space-y-1';
+  const vkLabel = document.createElement('label');
+  vkLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide';
+  vkLabel.textContent = 'Expected VK hash';
+  vkWrap.appendChild(vkLabel);
 
-    const vkInputWrap = document.createElement("div");
-    vkInputWrap.className = "flex gap-2";
+  const vkInputWrap = document.createElement('div');
+  vkInputWrap.className = 'flex gap-2';
 
-    const vkInput = document.createElement("input");
-    vkInput.type = "text";
-    vkInput.value =
-        CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES.selectiveDisclosure_1;
-    vkInput.readOnly = true;
-    vkInput.className =
-        "flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60";
-    vkInputWrap.appendChild(vkInput);
+  const vkInput = document.createElement('input');
+  vkInput.type = 'text';
+  vkInput.value = CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES.selectiveDisclosure_1;
+  vkInput.readOnly = true;
+  vkInput.className =
+    'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60';
+  vkInputWrap.appendChild(vkInput);
 
-    const vkOverrideBtn = document.createElement("button");
-    vkOverrideBtn.type = "button";
-    vkOverrideBtn.className =
-        "px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition";
-    vkOverrideBtn.textContent = "Override";
-    vkOverrideBtn.addEventListener("click", () => {
-        vkInput.readOnly = !vkInput.readOnly;
-        vkOverrideBtn.textContent = vkInput.readOnly ? "Override" : "Lock";
-        if (!vkInput.readOnly) vkInput.focus();
+  const vkOverrideBtn = document.createElement('button');
+  vkOverrideBtn.type = 'button';
+  vkOverrideBtn.className =
+    'px-3 py-2 bg-dark-700 border border-dark-600 rounded-lg text-xs font-medium hover:border-brand-500 hover:text-brand-400 transition';
+  vkOverrideBtn.textContent = 'Override';
+  vkOverrideBtn.addEventListener('click', () => {
+    vkInput.readOnly = !vkInput.readOnly;
+    vkOverrideBtn.textContent = vkInput.readOnly ? 'Override' : 'Lock';
+    if (!vkInput.readOnly) vkInput.focus();
+  });
+  vkInputWrap.appendChild(vkOverrideBtn);
+
+  vkWrap.appendChild(vkInputWrap);
+
+  const vkErrorEl = document.createElement('div');
+  vkErrorEl.className = 'text-xs text-rose-400 hidden';
+  vkWrap.appendChild(vkErrorEl);
+  summaryWrap.appendChild(vkWrap);
+
+  // -------------------------------------------------------------------------
+  // RPC endpoint (only used when no wallet is connected)
+  // -------------------------------------------------------------------------
+  const rpcDetails = document.createElement('details');
+  rpcDetails.className = 'text-xs';
+  const rpcSummary = document.createElement('summary');
+  rpcSummary.className = 'cursor-pointer text-dark-400 hover:text-brand-400 select-none';
+  rpcSummary.textContent = 'Advanced: RPC endpoint';
+  rpcDetails.appendChild(rpcSummary);
+
+  const rpcWrap = document.createElement('div');
+  rpcWrap.className = 'mt-2 space-y-1';
+  const rpcInput = document.createElement('input');
+  rpcInput.type = 'text';
+  rpcInput.value = deploymentDefaults.rpcUrl;
+  rpcInput.className =
+    'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60';
+  rpcWrap.appendChild(rpcInput);
+
+  const rpcHintEl = document.createElement('div');
+  rpcHintEl.className = 'text-[10px] text-dark-500';
+  rpcWrap.appendChild(rpcHintEl);
+
+  rpcDetails.appendChild(rpcWrap);
+  summaryWrap.appendChild(rpcDetails);
+
+  const updateRpcFieldState = () => {
+    const walletActive = isRuntimeReady() && App.state.wallet.connected;
+    rpcInput.disabled = walletActive;
+    rpcHintEl.textContent = walletActive
+      ? "Using the connected wallet's Soroban RPC network. No separate connection is needed to verify."
+      : 'No wallet connection is required to verify. The proof and receipt context are checked locally; this public endpoint confirms the Merkle root is recognized on-chain, checks whether nullifiers are spent, and reads token precision.';
+  };
+  updateRpcFieldState();
+  App.events.addEventListener('wallet:ready', updateRpcFieldState);
+  App.events.addEventListener('wallet:disconnected', updateRpcFieldState);
+
+  // Verify button
+  const verifyBtn = document.createElement('button');
+  verifyBtn.type = 'button';
+  verifyBtn.dataset.testid = 'disclosure-verify-submit';
+  verifyBtn.className =
+    'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed';
+  verifyBtn.textContent = 'Verify Receipt';
+  summaryWrap.appendChild(verifyBtn);
+
+  // Disclosed notes section (populated after loading a receipt)
+  const disclosedNotesWrap = document.createElement('div');
+  disclosedNotesWrap.className = 'hidden space-y-2';
+  disclosedNotesWrap.dataset.testid = 'disclosure-disclosed-notes';
+  summaryWrap.appendChild(disclosedNotesWrap);
+
+  container.appendChild(summaryWrap);
+
+  // -------------------------------------------------------------------------
+  // Results area
+  // -------------------------------------------------------------------------
+  const resultsWrap = document.createElement('div');
+  resultsWrap.className = 'hidden space-y-3';
+  resultsWrap.dataset.testid = 'disclosure-verification-results';
+  resultsWrap.dataset.state = 'idle';
+  container.appendChild(resultsWrap);
+
+  // -------------------------------------------------------------------------
+  // Helpers
+  // -------------------------------------------------------------------------
+  const showImportError = (msg) => {
+    importErrorEl.textContent = msg;
+    importErrorEl.classList.remove('hidden');
+    summaryWrap.classList.add('hidden');
+    summaryWrap.dataset.state = 'error';
+    resultsWrap.classList.add('hidden');
+  };
+
+  const clearImportError = () => {
+    importErrorEl.classList.add('hidden');
+    importErrorEl.textContent = '';
+  };
+
+  const validateReceiptShape = (r) => {
+    if (typeof r.version !== 'number') return 'Missing or invalid receipt version';
+    if (r.version !== 1) return `Unsupported disclosure receipt version: expected 1, got ${r.version}`;
+
+    if (!r.circuit || typeof r.circuit !== 'object') return 'Missing circuit metadata';
+    if (!r.circuit.name) return 'Missing or empty circuit name';
+    if (!r.circuit.vkHash || typeof r.circuit.vkHash !== 'string')
+      return 'Missing or invalid vkHash';
+    const vkHex = r.circuit.vkHash;
+    if (!vkHex.startsWith('0x') || vkHex.length !== 66 || !/^[0-9a-f]+$/.test(vkHex.slice(2)))
+      return 'Invalid vkHash: expected 0x-prefixed 32-byte lowercase hex';
+
+    if (!r.proofCompressedHex || typeof r.proofCompressedHex !== 'string')
+      return 'Missing proofCompressedHex';
+    const proofHex = r.proofCompressedHex;
+    if (!proofHex.startsWith('0x') || proofHex.length !== 258 || !/^[0-9a-f]+$/.test(proofHex.slice(2)))
+      return 'Invalid proof: expected 0x-prefixed 128-byte lowercase hex';
+
+    if (!r.context || typeof r.context !== 'object') return 'Missing receipt context';
+    if (!r.publicInputs || typeof r.publicInputs !== 'object') return 'Missing public inputs';
+
+    if (typeof r.circuit.nNotes !== 'number' || r.circuit.nNotes < 1 || r.circuit.nNotes > 4)
+      return 'Missing or invalid circuit.nNotes (expected 1..4)';
+
+    const nNotes = r.circuit.nNotes;
+    const validateArray = (name) => {
+      const arr = r.publicInputs[name];
+      if (!Array.isArray(arr)) return `publicInputs.${name} must be an array`;
+      if (arr.length !== nNotes)
+        return `publicInputs.${name} length mismatch: expected ${nNotes}, got ${arr.length}`;
+      for (let i = 0; i < arr.length; i += 1) {
+        if (typeof arr[i] !== 'string') return `publicInputs.${name}[${i}] must be a string`;
+      }
+      return null;
+    };
+
+    for (const name of ['roots', 'noteCommitments', 'nullifiers', 'amounts']) {
+      const err = validateArray(name);
+      if (err) return err;
+    }
+
+    if (typeof r.publicInputs.extContextHash !== 'string')
+      return 'publicInputs.extContextHash must be a string';
+
+    return null;
+  };
+
+  const parseReceiptAmount = (value) => {
+    try {
+      if (typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value)) {
+        return BigInt(value);
+      }
+      return BigInt(value);
+    } catch {
+      return null;
+    }
+  };
+
+  const renderDisclosedNotesVerify = (publicInputs, symbol = 'Token', spentIndices = []) => {
+    disclosedNotesWrap.replaceChildren();
+    disclosedNotesWrap.classList.remove('hidden');
+    disclosedNotesWrap.appendChild(
+      el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Disclosed notes')
+    );
+
+    const n = Math.min(
+      publicInputs.noteCommitments?.length || 0,
+      publicInputs.amounts?.length || 0,
+      publicInputs.nullifiers?.length || 0
+    );
+
+    for (let i = 0; i < n; i += 1) {
+      const isSpent = spentIndices.includes(i);
+      const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
+      const amountText = amountValue != null ? formatAmount(amountValue, symbol, metadata.value.decimals) : publicInputs.amounts[i];
+
+      const card = el('div', `p-3 border rounded-lg space-y-1.5 ${
+        isSpent
+          ? 'bg-amber-500/5 border-amber-500/30'
+          : 'bg-dark-800 border-dark-700'
+      }`);
+      card.dataset.testid = 'disclosure-disclosed-note';
+      card.dataset.state = isSpent ? 'spent' : 'unspent';
+      card.appendChild(
+        elc('div', 'flex justify-between text-xs', [
+          el('span', 'text-dark-500', `Note ${i + 1}`),
+          elc('div', 'flex items-center gap-2', [
+            isSpent
+              ? el('span', 'text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded', 'Spent')
+              : null,
+            el('span', `font-medium ${isSpent ? 'text-amber-300 line-through' : 'text-brand-300'}`, amountText),
+          ]),
+        ])
+      );
+      card.appendChild(el('div', 'text-[10px] text-dark-500', 'Commitment'));
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.noteCommitments[i])
+      );
+      card.appendChild(el('div', 'text-[10px] text-dark-500 mt-1', 'Nullifier'));
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.nullifiers[i])
+      );
+      disclosedNotesWrap.appendChild(card);
+    }
+  };
+
+  const renderSummary = (r) => {
+    summaryGrid.replaceChildren();
+
+    const defaultVkHash =
+      CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES[r.circuit.name] ||
+      CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES.selectiveDisclosure_1;
+    if (vkInput.readOnly) {
+      vkInput.value = defaultVkHash;
+    }
+
+    const poolSymbol = metadata.value.symbol;
+    receiptPoolSymbol = poolSymbol;
+    const totalAmount = r.publicInputs?.amounts?.reduce((sum, value) => {
+      const v = parseReceiptAmount(value);
+      return v != null ? sum + v : sum;
+    }, 0n);
+    const amountSummary = totalAmount != null ? formatAmount(totalAmount, poolSymbol, metadata.value.decimals) : '—';
+    const nullifierCount = r.publicInputs?.nullifiers?.length ?? 0;
+
+    const items = [
+      { label: 'Network', value: r.context.network },
+      { label: 'Pool address', value: r.context.poolAddress },
+      { label: 'Authority', value: r.context.authorityLabel },
+      { label: 'Purpose', value: r.context.purpose },
+      { label: 'Nonce', value: r.context.contextNonce },
+      { label: 'Issued at (unverified)', value: r.issuedAt },
+      { label: 'Circuit', value: r.circuit.name },
+      { label: 'Receipt VK hash', value: shortCommitment(r.circuit.vkHash) },
+      { label: 'Disclosed amount', value: amountSummary },
+      { label: 'Nullifiers', value: `${nullifierCount} disclosed` },
+    ];
+    items.forEach((item) => {
+      const cell = el('div', 'p-2 bg-dark-800 border border-dark-700 rounded-lg');
+      cell.append(
+        el('div', 'text-[10px] uppercase tracking-wide text-dark-500', item.label),
+        el('div', 'text-xs font-mono text-dark-200 break-all', String(item.value)),
+      );
+      summaryGrid.appendChild(cell);
     });
-    vkInputWrap.appendChild(vkOverrideBtn);
 
-    vkWrap.appendChild(vkInputWrap);
+    if (r.publicInputs) {
+      renderDisclosedNotesVerify(r.publicInputs, poolSymbol, verifiedSpentIndices);
+    }
+  };
 
-    const vkErrorEl = document.createElement("div");
-    vkErrorEl.className = "text-xs text-rose-400 hidden";
-    vkWrap.appendChild(vkErrorEl);
-    summaryWrap.appendChild(vkWrap);
+  const metadata = createDisclosureMetadata(loadDeploymentConfig, readTokenDecimals, () => {
+    if (!receipt) return;
+    renderSummary(receipt);
+    updateSpentMessage();
+  });
+  const verificationRpcUrl = () => isRuntimeReady() && App.state.wallet.connected
+    ? getCurrentRpcUrl()
+    : rpcInput.value.trim() || DEFAULT_TESTNET_RPC_URL;
+  const refreshMetadata = () => {
+    if (receipt) void metadata.refresh(verificationRpcUrl(), receipt.context.poolAddress, receipt.context.network);
+  };
+  const refreshVerificationNetwork = () => {
+    verifiedSpentIndices = [];
+    updateSpentMessage = () => {};
+    resultsWrap.classList.add('hidden');
+    resultsWrap.dataset.state = 'idle';
+    refreshMetadata();
+  };
+  rpcInput.addEventListener('change', refreshVerificationNetwork);
+  App.events.addEventListener('wallet:ready', refreshVerificationNetwork);
+  App.events.addEventListener('wallet:disconnected', refreshVerificationNetwork);
 
-    // -------------------------------------------------------------------------
-    // RPC endpoint (only used when no wallet is connected)
-    // -------------------------------------------------------------------------
-    const rpcDetails = document.createElement("details");
-    rpcDetails.className = "text-xs";
-    const rpcSummary = document.createElement("summary");
-    rpcSummary.className =
-        "cursor-pointer text-dark-400 hover:text-brand-400 select-none";
-    rpcSummary.textContent = "Advanced: RPC endpoint";
-    rpcDetails.appendChild(rpcSummary);
+  const loadReceipt = (raw) => {
+    clearImportError();
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      showImportError(`Invalid JSON: ${e.message}`);
+      return;
+    }
 
-    const rpcWrap = document.createElement("div");
-    rpcWrap.className = "mt-2 space-y-1";
-    const rpcInput = document.createElement("input");
-    rpcInput.type = "text";
-    rpcInput.value = deploymentDefaults.rpcUrl;
-    rpcInput.className =
-        "w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60";
-    rpcWrap.appendChild(rpcInput);
+    const shapeErr = validateReceiptShape(parsed);
+    if (shapeErr) {
+      showImportError(shapeErr);
+      return;
+    }
 
-    const rpcHintEl = document.createElement("div");
-    rpcHintEl.className = "text-[10px] text-dark-500";
-    rpcWrap.appendChild(rpcHintEl);
+    receipt = parsed;
+    receiptError = null;
+    verifiedSpentIndices = [];
+    updateSpentMessage = () => {};
+    refreshMetadata();
+    summaryWrap.classList.remove('hidden');
+    summaryWrap.dataset.state = 'ready';
+    resultsWrap.classList.add('hidden');
+    resultsWrap.dataset.state = 'idle';
+  };
 
-    rpcDetails.appendChild(rpcWrap);
-    summaryWrap.appendChild(rpcDetails);
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => loadReceipt(ev.target.result);
+    reader.onerror = () => showImportError('Failed to read file');
+    reader.readAsText(file);
+  });
 
-    const updateRpcFieldState = () => {
-        const walletActive = isRuntimeReady() && App.state.wallet.connected;
-        rpcInput.disabled = walletActive;
-        rpcHintEl.textContent = walletActive
-            ? "Using the connected wallet's Soroban RPC network. No separate connection is needed to verify."
-            : "No wallet connection is required to verify. The proof and receipt context are checked locally; this public endpoint confirms the Merkle root is recognized on-chain, checks whether nullifiers are spent, and reads token precision.";
-    };
-    updateRpcFieldState();
-    App.events.addEventListener("wallet:ready", updateRpcFieldState);
-    App.events.addEventListener("wallet:disconnected", updateRpcFieldState);
+  loadBtn.addEventListener('click', () => {
+    loadReceipt(pasteArea.value.trim());
+  });
 
-    // Verify button
-    const verifyBtn = document.createElement("button");
-    verifyBtn.type = "button";
-    verifyBtn.dataset.testid = "disclosure-verify-submit";
-    verifyBtn.className =
-        "w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed";
-    verifyBtn.textContent = "Verify Receipt";
-    summaryWrap.appendChild(verifyBtn);
+  // -------------------------------------------------------------------------
+  // Verification (Step 4.2)
+  // -------------------------------------------------------------------------
+  verifyBtn.addEventListener('click', async () => {
+    if (!receipt) {
+      Toast.show('Load a receipt first', 'error');
+      return;
+    }
 
-    // Disclosed notes section (populated after loading a receipt)
-    const disclosedNotesWrap = document.createElement("div");
-    disclosedNotesWrap.className = "hidden space-y-2";
-    disclosedNotesWrap.dataset.testid = "disclosure-disclosed-notes";
-    summaryWrap.appendChild(disclosedNotesWrap);
+    const expectedVkHash = vkInput.value.trim();
+    if (!expectedVkHash) {
+      vkErrorEl.textContent = 'Expected VK hash is required';
+      vkErrorEl.classList.remove('hidden');
+      return;
+    }
+    if (
+      !expectedVkHash.startsWith('0x') ||
+      expectedVkHash.length !== 66 ||
+      !/^[0-9a-f]+$/.test(expectedVkHash.slice(2))
+    ) {
+      vkErrorEl.textContent = 'Invalid VK hash: expected 0x-prefixed 32-byte lowercase hex';
+      vkErrorEl.classList.remove('hidden');
+      return;
+    }
+    vkErrorEl.classList.add('hidden');
 
-    container.appendChild(summaryWrap);
+    const verifyingReceipt = receipt;
+    const verifyingRpc = verificationRpcUrl();
+    updateSpentMessage = () => {};
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = 'Verifying…';
+    resultsWrap.classList.remove('hidden');
+    resultsWrap.dataset.state = 'verifying';
+    const verifyingRow = el('div', 'flex items-center gap-2 text-sm text-dark-300');
+    verifyingRow.append(spinnerEl(), el('span', null, 'Running verification checks…'));
+    resultsWrap.replaceChildren(verifyingRow);
 
-    // -------------------------------------------------------------------------
-    // Results area
-    // -------------------------------------------------------------------------
-    const resultsWrap = document.createElement("div");
-    resultsWrap.className = "hidden space-y-3";
-    resultsWrap.dataset.testid = "disclosure-verification-results";
-    resultsWrap.dataset.state = "idle";
-    container.appendChild(resultsWrap);
+    try {
+      const walletClient = isRuntimeReady() && App.state.wallet.connected ? client() : null;
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-    const showImportError = (msg) => {
-        importErrorEl.textContent = msg;
-        importErrorEl.classList.remove("hidden");
-        summaryWrap.classList.add("hidden");
-        summaryWrap.dataset.state = "error";
-        resultsWrap.classList.add("hidden");
-    };
+      const report = walletClient
+        ? await walletClient.verifySelectiveDisclosure(JSON.stringify(receipt), expectedVkHash)
+        : await verifySelectiveDisclosure(
+            rpcInput.value.trim() || deploymentDefaults.rpcUrl,
+            JSON.stringify(receipt),
+            expectedVkHash
+          );
 
-    const clearImportError = () => {
-        importErrorEl.classList.add("hidden");
-        importErrorEl.textContent = "";
-    };
+      if (receipt !== verifyingReceipt || verificationRpcUrl() !== verifyingRpc) return;
+      const proofOk = !!report.proofVerified;
+      const contextOk = !!report.contextVerified;
+      const rootOk = !!report.knownRootStatus;
+      const unspentOk = !!report.nullifiersUnspent;
+      const spentIndices = Array.isArray(report.spentNullifierIndices)
+        ? report.spentNullifierIndices.map((i) => Number(i))
+        : [];
+      verifiedSpentIndices = spentIndices;
+      const fullyVerified = proofOk && contextOk && rootOk && unspentOk;
 
-    const validateReceiptShape = (r) => {
-        if (typeof r.version !== "number")
-            return "Missing or invalid receipt version";
-        if (r.version !== 1)
-            return `Unsupported disclosure receipt version: expected 1, got ${r.version}`;
+      resultsWrap.replaceChildren();
 
-        if (!r.circuit || typeof r.circuit !== "object")
-            return "Missing circuit metadata";
-        if (!r.circuit.name) return "Missing or empty circuit name";
-        if (!r.circuit.vkHash || typeof r.circuit.vkHash !== "string")
-            return "Missing or invalid vkHash";
-        const vkHex = r.circuit.vkHash;
-        if (
-            !vkHex.startsWith("0x") ||
-            vkHex.length !== 66 ||
-            !/^[0-9a-f]+$/.test(vkHex.slice(2))
-        )
-            return "Invalid vkHash: expected 0x-prefixed 32-byte lowercase hex";
+      const list = document.createElement('ul');
+      list.className = 'space-y-2';
+      list.setAttribute('role', 'list');
+      list.setAttribute('aria-label', 'Verification results');
 
-        if (!r.proofCompressedHex || typeof r.proofCompressedHex !== "string")
-            return "Missing proofCompressedHex";
-        const proofHex = r.proofCompressedHex;
-        if (
-            !proofHex.startsWith("0x") ||
-            proofHex.length !== 258 ||
-            !/^[0-9a-f]+$/.test(proofHex.slice(2))
-        )
-            return "Invalid proof: expected 0x-prefixed 128-byte lowercase hex";
-
-        if (!r.context || typeof r.context !== "object")
-            return "Missing receipt context";
-        if (!r.publicInputs || typeof r.publicInputs !== "object")
-            return "Missing public inputs";
-
-        if (
-            typeof r.circuit.nNotes !== "number" ||
-            r.circuit.nNotes < 1 ||
-            r.circuit.nNotes > 4
-        )
-            return "Missing or invalid circuit.nNotes (expected 1..4)";
-
-        const nNotes = r.circuit.nNotes;
-        const validateArray = (name) => {
-            const arr = r.publicInputs[name];
-            if (!Array.isArray(arr))
-                return `publicInputs.${name} must be an array`;
-            if (arr.length !== nNotes)
-                return `publicInputs.${name} length mismatch: expected ${nNotes}, got ${arr.length}`;
-            for (let i = 0; i < arr.length; i += 1) {
-                if (typeof arr[i] !== "string")
-                    return `publicInputs.${name}[${i}] must be a string`;
-            }
-            return null;
-        };
-
-        for (const name of [
-            "roots",
-            "noteCommitments",
-            "nullifiers",
-            "amounts",
-        ]) {
-            const err = validateArray(name);
-            if (err) return err;
+      const makeCheck = (label, pass, failText, passText, failSeverity = 'error') => {
+        const isInfo = !pass && failSeverity === 'info';
+        const li = el('li', `flex items-start gap-3 p-3 rounded-lg border ${
+          pass
+            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+            : isInfo
+              ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+              : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+        }`);
+        li.dataset.testid = `disclosure-check-${label}`;
+        li.dataset.state = pass ? 'pass' : 'fail';
+        const iconWrap = el('div', 'mt-0.5 w-4 h-4 flex-shrink-0');
+        if (pass) {
+          iconWrap.appendChild(checkCircleIcon('w-4 h-4'));
+        } else if (isInfo) {
+          iconWrap.appendChild(alertTriangleIcon('w-4 h-4'));
+        } else {
+          iconWrap.appendChild(xCircleIcon('w-4 h-4'));
         }
-
-        if (typeof r.publicInputs.extContextHash !== "string")
-            return "publicInputs.extContextHash must be a string";
-
-        return null;
-    };
-
-    const parseReceiptAmount = (value) => {
-        try {
-            if (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)) {
-                return BigInt(value);
-            }
-            return BigInt(value);
-        } catch {
-            return null;
-        }
-    };
-
-    const renderDisclosedNotesVerify = (
-        publicInputs,
-        symbol = "Token",
-        spentIndices = [],
-    ) => {
-        disclosedNotesWrap.replaceChildren();
-        disclosedNotesWrap.classList.remove("hidden");
-        disclosedNotesWrap.appendChild(
-            el(
-                "h3",
-                "text-xs font-medium text-dark-400 uppercase tracking-wide",
-                "Disclosed notes",
-            ),
+        const textWrap = el('div');
+        textWrap.append(
+          el('div', 'text-sm font-medium', pass ? passText[0] : passText[1]),
+          el('div', 'text-xs opacity-80 mt-0.5', pass ? passText[2] : failText),
         );
+        li.append(iconWrap, textWrap);
+        return li;
+      };
 
-        const n = Math.min(
-            publicInputs.noteCommitments?.length || 0,
-            publicInputs.amounts?.length || 0,
-            publicInputs.nullifiers?.length || 0,
-        );
-
-        for (let i = 0; i < n; i += 1) {
-            const isSpent = spentIndices.includes(i);
-            const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
-            const amountText =
-                amountValue != null
-                    ? formatAmount(amountValue, symbol, metadata.value.decimals)
-                    : publicInputs.amounts[i];
-
-            const card = el(
-                "div",
-                `p-3 border rounded-lg space-y-1.5 ${
-                    isSpent
-                        ? "bg-amber-500/5 border-amber-500/30"
-                        : "bg-dark-800 border-dark-700"
-                }`,
-            );
-            card.dataset.testid = "disclosure-disclosed-note";
-            card.dataset.state = isSpent ? "spent" : "unspent";
-            card.appendChild(
-                elc("div", "flex justify-between text-xs", [
-                    el("span", "text-dark-500", `Note ${i + 1}`),
-                    elc("div", "flex items-center gap-2", [
-                        isSpent
-                            ? el(
-                                  "span",
-                                  "text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded",
-                                  "Spent",
-                              )
-                            : null,
-                        el(
-                            "span",
-                            `font-medium ${
-                                isSpent
-                                    ? "text-amber-300 line-through"
-                                    : "text-brand-300"
-                            }`,
-                            amountText,
-                        ),
-                    ]),
-                ]),
-            );
-            card.appendChild(
-                el("div", "text-[10px] text-dark-500", "Commitment"),
-            );
-            card.appendChild(
-                el(
-                    "div",
-                    "text-xs font-mono text-dark-200 break-all",
-                    publicInputs.noteCommitments[i],
-                ),
-            );
-            card.appendChild(
-                el("div", "text-[10px] text-dark-500 mt-1", "Nullifier"),
-            );
-            card.appendChild(
-                el(
-                    "div",
-                    "text-xs font-mono text-dark-200 break-all",
-                    publicInputs.nullifiers[i],
-                ),
-            );
-            disclosedNotesWrap.appendChild(card);
+      list.appendChild(
+        makeCheck(
+          'proof',
+          proofOk,
+          'The proof does not verify. The receipt may be forged or the verifying key does not match.',
+          ['Proof valid', 'Proof invalid', 'The cryptographic proof verifies against the registered circuit\'s verifying key.']
+        )
+      );
+      list.appendChild(
+        makeCheck(
+          'context',
+          contextOk,
+          'The receipt context was altered or re-bound after the proof was created.',
+          ['Context valid', 'Context mismatch', 'The declared authority/purpose/nonce context re-derives to the hash the proof committed to.']
+        )
+      );
+      list.appendChild(
+        makeCheck(
+          'root',
+          rootOk,
+          'At least one Merkle root is no longer in the pool\'s known-root history. The receipt may be old or refer to a different pool.',
+          ['Root fresh', 'Root stale or unknown', 'Every root in the receipt is still in the pool\'s on-chain root history.']
+        )
+      );
+      const unspentFailText = () => {
+        if (spentIndices.length === 0) {
+          return 'At least one disclosed nullifier has already been spent on-chain. The note(s) are no longer unspent.';
         }
-    };
-
-    const renderSummary = (r) => {
-        summaryGrid.replaceChildren();
-
-        const defaultVkHash =
-            CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES[r.circuit.name] ||
-            CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES.selectiveDisclosure_1;
-        if (vkInput.readOnly) {
-            vkInput.value = defaultVkHash;
-        }
-
-        const poolSymbol = metadata.value.symbol;
-        receiptPoolSymbol = poolSymbol;
-        const totalAmount = r.publicInputs?.amounts?.reduce((sum, value) => {
-            const v = parseReceiptAmount(value);
-            return v != null ? sum + v : sum;
-        }, 0n);
-        const amountSummary =
-            totalAmount != null
-                ? formatAmount(totalAmount, poolSymbol, metadata.value.decimals)
-                : "—";
-        const nullifierCount = r.publicInputs?.nullifiers?.length ?? 0;
-
-        const items = [
-            { label: "Network", value: r.context.network },
-            { label: "Pool address", value: r.context.poolAddress },
-            { label: "Authority", value: r.context.authorityLabel },
-            { label: "Purpose", value: r.context.purpose },
-            { label: "Nonce", value: r.context.contextNonce },
-            { label: "Issued at (unverified)", value: r.issuedAt },
-            { label: "Circuit", value: r.circuit.name },
-            {
-                label: "Receipt VK hash",
-                value: shortCommitment(r.circuit.vkHash),
-            },
-            { label: "Disclosed amount", value: amountSummary },
-            { label: "Nullifiers", value: `${nullifierCount} disclosed` },
-        ];
-        items.forEach((item) => {
-            const cell = el(
-                "div",
-                "p-2 bg-dark-800 border border-dark-700 rounded-lg",
-            );
-            cell.append(
-                el(
-                    "div",
-                    "text-[10px] uppercase tracking-wide text-dark-500",
-                    item.label,
-                ),
-                el(
-                    "div",
-                    "text-xs font-mono text-dark-200 break-all",
-                    String(item.value),
-                ),
-            );
-            summaryGrid.appendChild(cell);
+        const spentAmounts = spentIndices.map((idx) => {
+          const v = parseReceiptAmount(receipt.publicInputs.amounts[idx]);
+          return v != null ? formatAmount(v, receiptPoolSymbol, metadata.value.decimals) : receipt.publicInputs.amounts[idx];
         });
+        const noteLabels = spentIndices.map((idx) => `Note ${idx + 1}`);
+        return `Disclosed ${noteLabels.join(', ')} ${spentIndices.length === 1 ? 'has' : 'have'} already been spent on-chain (${spentAmounts.join(', ')}).`;
+      };
 
-        if (r.publicInputs) {
-            renderDisclosedNotesVerify(
-                r.publicInputs,
-                poolSymbol,
-                verifiedSpentIndices,
-            );
-        }
-    };
+      const unspentCheck = makeCheck(
+        'unspent',
+        unspentOk,
+        unspentFailText(),
+        ['Nullifiers unspent', 'Nullifier already spent', 'None of the disclosed nullifiers are marked spent in the pool\'s contract state.'],
+        'info'
+      );
+      list.appendChild(unspentCheck);
+      updateSpentMessage = () => {
+        if (!unspentOk) unspentCheck.lastElementChild.lastElementChild.textContent = unspentFailText();
+      };
 
-    const metadata = createDisclosureMetadata(
-        loadDeploymentConfig,
-        readTokenDecimals,
-        () => {
-            if (!receipt) return;
-            renderSummary(receipt);
-            updateSpentMessage();
-        },
-    );
-    const verificationRpcUrl = () =>
-        isRuntimeReady() && App.state.wallet.connected
-            ? getCurrentRpcUrl()
-            : rpcInput.value.trim() || DEFAULT_TESTNET_RPC_URL;
-    const refreshMetadata = () => {
-        if (receipt)
-            void metadata.refresh(
-                verificationRpcUrl(),
-                receipt.context.poolAddress,
-                receipt.context.network,
-            );
-    };
-    const refreshVerificationNetwork = () => {
-        verifiedSpentIndices = [];
-        updateSpentMessage = () => {};
-        resultsWrap.classList.add("hidden");
-        resultsWrap.dataset.state = "idle";
-        refreshMetadata();
-    };
-    rpcInput.addEventListener("change", refreshVerificationNetwork);
-    App.events.addEventListener("wallet:ready", refreshVerificationNetwork);
-    App.events.addEventListener(
-        "wallet:disconnected",
-        refreshVerificationNetwork,
-    );
+      resultsWrap.appendChild(list);
 
-    const loadReceipt = (raw) => {
-        clearImportError();
-        let parsed;
-        try {
-            parsed = JSON.parse(raw);
-        } catch (e) {
-            showImportError(`Invalid JSON: ${e.message}`);
-            return;
-        }
+      if (receipt.publicInputs) {
+        renderDisclosedNotesVerify(receipt.publicInputs, receiptPoolSymbol, spentIndices);
+      }
 
-        const shapeErr = validateReceiptShape(parsed);
-        if (shapeErr) {
-            showImportError(shapeErr);
-            return;
-        }
-
-        receipt = parsed;
-        receiptError = null;
-        verifiedSpentIndices = [];
-        updateSpentMessage = () => {};
-        refreshMetadata();
-        summaryWrap.classList.remove("hidden");
-        summaryWrap.dataset.state = "ready";
-        resultsWrap.classList.add("hidden");
-        resultsWrap.dataset.state = "idle";
-    };
-
-    fileInput.addEventListener("change", (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => loadReceipt(ev.target.result);
-        reader.onerror = () => showImportError("Failed to read file");
-        reader.readAsText(file);
-    });
-
-    loadBtn.addEventListener("click", () => {
-        loadReceipt(pasteArea.value.trim());
-    });
-
-    // -------------------------------------------------------------------------
-    // Verification (Step 4.2)
-    // -------------------------------------------------------------------------
-    verifyBtn.addEventListener("click", async () => {
-        if (!receipt) {
-            Toast.show("Load a receipt first", "error");
-            return;
-        }
-
-        const expectedVkHash = vkInput.value.trim();
-        if (!expectedVkHash) {
-            vkErrorEl.textContent = "Expected VK hash is required";
-            vkErrorEl.classList.remove("hidden");
-            return;
-        }
-        if (
-            !expectedVkHash.startsWith("0x") ||
-            expectedVkHash.length !== 66 ||
-            !/^[0-9a-f]+$/.test(expectedVkHash.slice(2))
-        ) {
-            vkErrorEl.textContent =
-                "Invalid VK hash: expected 0x-prefixed 32-byte lowercase hex";
-            vkErrorEl.classList.remove("hidden");
-            return;
-        }
-        vkErrorEl.classList.add("hidden");
-
-        const verifyingReceipt = receipt;
-        const verifyingRpc = verificationRpcUrl();
-        updateSpentMessage = () => {};
-        verifyBtn.disabled = true;
-        verifyBtn.textContent = "Verifying…";
-        resultsWrap.classList.remove("hidden");
-        resultsWrap.dataset.state = "verifying";
-        const verifyingRow = el(
-            "div",
-            "flex items-center gap-2 text-sm text-dark-300",
-        );
-        verifyingRow.append(
-            spinnerEl(),
-            el("span", null, "Running verification checks…"),
-        );
-        resultsWrap.replaceChildren(verifyingRow);
-
-        try {
-            const walletClient =
-                isRuntimeReady() && App.state.wallet.connected
-                    ? client()
-                    : null;
-
-            const report = walletClient
-                ? await walletClient.verifySelectiveDisclosure(
-                      JSON.stringify(receipt),
-                      expectedVkHash,
-                  )
-                : await verifySelectiveDisclosure(
-                      rpcInput.value.trim() || deploymentDefaults.rpcUrl,
-                      JSON.stringify(receipt),
-                      expectedVkHash,
-                  );
-
-            if (
-                receipt !== verifyingReceipt ||
-                verificationRpcUrl() !== verifyingRpc
-            )
-                return;
-            const proofOk = !!report.proofVerified;
-            const contextOk = !!report.contextVerified;
-            const rootOk = !!report.knownRootStatus;
-            const unspentOk = !!report.nullifiersUnspent;
-            const spentIndices = Array.isArray(report.spentNullifierIndices)
-                ? report.spentNullifierIndices.map((i) => Number(i))
-                : [];
-            verifiedSpentIndices = spentIndices;
-            const fullyVerified = proofOk && contextOk && rootOk && unspentOk;
-
-            resultsWrap.replaceChildren();
-
-            const list = document.createElement("ul");
-            list.className = "space-y-2";
-            list.setAttribute("role", "list");
-            list.setAttribute("aria-label", "Verification results");
-
-            const makeCheck = (
-                label,
-                pass,
-                failText,
-                passText,
-                failSeverity = "error",
-            ) => {
-                const isInfo = !pass && failSeverity === "info";
-                const li = el(
-                    "li",
-                    `flex items-start gap-3 p-3 rounded-lg border ${
-                        pass
-                            ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300"
-                            : isInfo
-                            ? "bg-amber-500/10 border-amber-500/40 text-amber-300"
-                            : "bg-rose-500/10 border-rose-500/40 text-rose-300"
-                    }`,
-                );
-                li.dataset.testid = `disclosure-check-${label}`;
-                li.dataset.state = pass ? "pass" : "fail";
-                const iconWrap = el("div", "mt-0.5 w-4 h-4 flex-shrink-0");
-                if (pass) {
-                    iconWrap.appendChild(checkCircleIcon("w-4 h-4"));
-                } else if (isInfo) {
-                    iconWrap.appendChild(alertTriangleIcon("w-4 h-4"));
-                } else {
-                    iconWrap.appendChild(xCircleIcon("w-4 h-4"));
-                }
-                const textWrap = el("div");
-                textWrap.append(
-                    el(
-                        "div",
-                        "text-sm font-medium",
-                        pass ? passText[0] : passText[1],
-                    ),
-                    el(
-                        "div",
-                        "text-xs opacity-80 mt-0.5",
-                        pass ? passText[2] : failText,
-                    ),
-                );
-                li.append(iconWrap, textWrap);
-                return li;
-            };
-
-            list.appendChild(
-                makeCheck(
-                    "proof",
-                    proofOk,
-                    "The proof does not verify. The receipt may be forged or the verifying key does not match.",
-                    [
-                        "Proof valid",
-                        "Proof invalid",
-                        "The cryptographic proof verifies against the registered circuit's verifying key.",
-                    ],
-                ),
-            );
-            list.appendChild(
-                makeCheck(
-                    "context",
-                    contextOk,
-                    "The receipt context was altered or re-bound after the proof was created.",
-                    [
-                        "Context valid",
-                        "Context mismatch",
-                        "The declared authority/purpose/nonce context re-derives to the hash the proof committed to.",
-                    ],
-                ),
-            );
-            list.appendChild(
-                makeCheck(
-                    "root",
-                    rootOk,
-                    "At least one Merkle root is no longer in the pool's known-root history. The receipt may be old or refer to a different pool.",
-                    [
-                        "Root fresh",
-                        "Root stale or unknown",
-                        "Every root in the receipt is still in the pool's on-chain root history.",
-                    ],
-                ),
-            );
-            const unspentFailText = () => {
-                if (spentIndices.length === 0) {
-                    return "At least one disclosed nullifier has already been spent on-chain. The note(s) are no longer unspent.";
-                }
-                const spentAmounts = spentIndices.map((idx) => {
-                    const v = parseReceiptAmount(
-                        receipt.publicInputs.amounts[idx],
-                    );
-                    return v != null
-                        ? formatAmount(
-                              v,
-                              receiptPoolSymbol,
-                              metadata.value.decimals,
-                          )
-                        : receipt.publicInputs.amounts[idx];
-                });
-                const noteLabels = spentIndices.map((idx) => `Note ${idx + 1}`);
-                return `Disclosed ${noteLabels.join(", ")} ${
-                    spentIndices.length === 1 ? "has" : "have"
-                } already been spent on-chain (${spentAmounts.join(", ")}).`;
-            };
-
-            const unspentCheck = makeCheck(
-                "unspent",
-                unspentOk,
-                unspentFailText(),
-                [
-                    "Nullifiers unspent",
-                    "Nullifier already spent",
-                    "None of the disclosed nullifiers are marked spent in the pool's contract state.",
-                ],
-                "info",
-            );
-            list.appendChild(unspentCheck);
-            updateSpentMessage = () => {
-                if (!unspentOk)
-                    unspentCheck.lastElementChild.lastElementChild.textContent =
-                        unspentFailText();
-            };
-
-            resultsWrap.appendChild(list);
-
-            if (receipt.publicInputs) {
-                renderDisclosedNotesVerify(
-                    receipt.publicInputs,
-                    receiptPoolSymbol,
-                    spentIndices,
-                );
-            }
-
-            if (fullyVerified) {
-                const badge = el(
-                    "div",
-                    "mt-3 p-3 bg-emerald-500/10 border border-emerald-500/40 rounded-lg text-emerald-300 text-sm font-medium flex items-center gap-2",
-                );
-                badge.setAttribute("role", "status");
-                badge.append(
-                    shieldIcon("w-5 h-5"),
-                    el(
-                        "span",
-                        null,
-                        "Fully verified — this receipt is trustworthy.",
-                    ),
-                );
-                resultsWrap.appendChild(badge);
-            }
-            resultsWrap.dataset.state = "complete";
-        } catch (err) {
-            if (
-                receipt !== verifyingReceipt ||
-                verificationRpcUrl() !== verifyingRpc
-            )
-                return;
-            console.error("Verification failed:", err);
-            if (isDbLockedError(err?.message)) {
-                showDbLockedModal(err.message);
-            }
-            resultsWrap.replaceChildren(
-                el(
-                    "div",
-                    "text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3",
-                    `Verification could not be completed: ${
-                        err.message || "Unknown error"
-                    }`,
-                ),
-            );
-            resultsWrap.dataset.state = "error";
-        } finally {
-            verifyBtn.disabled = false;
-            verifyBtn.textContent = "Verify Receipt";
-        }
-    });
+      if (fullyVerified) {
+        const badge = el('div', 'mt-3 p-3 bg-emerald-500/10 border border-emerald-500/40 rounded-lg text-emerald-300 text-sm font-medium flex items-center gap-2');
+        badge.setAttribute('role', 'status');
+        badge.append(shieldIcon('w-5 h-5'), el('span', null, 'Fully verified — this receipt is trustworthy.'));
+        resultsWrap.appendChild(badge);
+      }
+      resultsWrap.dataset.state = 'complete';
+    } catch (err) {
+      if (receipt !== verifyingReceipt || verificationRpcUrl() !== verifyingRpc) return;
+      console.error('Verification failed:', err);
+      if (isDbLockedError(err?.message)) {
+        showDbLockedModal(err.message);
+      }
+      resultsWrap.replaceChildren(
+        el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3',
+          `Verification could not be completed: ${err.message || 'Unknown error'}`),
+      );
+      resultsWrap.dataset.state = 'error';
+    } finally {
+      verifyBtn.disabled = false;
+      verifyBtn.textContent = 'Verify Receipt';
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1826,56 +1446,49 @@ export function mountVerify(container) {
 // ---------------------------------------------------------------------------
 
 export async function initDisclosure() {
-    await loadDeploymentConfig();
-    const query = parseQueryParams();
+  await loadDeploymentConfig();
+  const query = parseQueryParams();
 
-    const generateContainer = document.getElementById("disclosure-generate");
-    const verifyContainer = document.getElementById("disclosure-verify");
+  const generateContainer = document.getElementById('disclosure-generate');
+  const verifyContainer = document.getElementById('disclosure-verify');
 
+  if (generateContainer) mountGenerate(generateContainer);
+  if (verifyContainer) mountVerify(verifyContainer);
+
+  if (query.verify && verifyContainer) {
+    verifyContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  App.events.addEventListener('disclosure:metadata', () => {
+    generateContainer?.querySelectorAll('[data-note-id]').forEach(row => {
+      const note = state.notes.find(note =>
+        note.id === row.dataset.noteId && note.poolContractId === row.dataset.poolId);
+      const label = row.querySelector('[data-note-amount]');
+      if (note && label) {
+        label.textContent = formatAmount(note.amount, tokenLabelForPool(note.poolContractId), poolDecimals(note.poolContractId));
+      }
+    });
+  });
+  App.events.addEventListener('wallet:ready', () => {
+    loadNotes();
+  });
+  
+  App.events.addEventListener('wallet:disconnected', () => {
+    state.notes = [];
+    state.pools = [];
+    state.selectedNotes = [];
     if (generateContainer) mountGenerate(generateContainer);
-    if (verifyContainer) mountVerify(verifyContainer);
-
-    if (query.verify && verifyContainer) {
-        verifyContainer.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  App.events.addEventListener('disclosure:select-note', (event) => {
+    const { noteId, poolId } = event.detail;
+    const matches = preselectNotes(state.notes, [noteId], poolId);
+    if (matches.length > 0) {
+      state.selectedNotes = matches;
+      if (generateContainer) mountGenerate(generateContainer);
     }
+  });
 
-    App.events.addEventListener("disclosure:metadata", () => {
-        generateContainer?.querySelectorAll("[data-note-id]").forEach((row) => {
-            const note = state.notes.find(
-                (note) =>
-                    note.id === row.dataset.noteId &&
-                    note.poolContractId === row.dataset.poolId,
-            );
-            const label = row.querySelector("[data-note-amount]");
-            if (note && label) {
-                label.textContent = formatAmount(
-                    note.amount,
-                    tokenLabelForPool(note.poolContractId),
-                    poolDecimals(note.poolContractId),
-                );
-            }
-        });
-    });
-    App.events.addEventListener("wallet:ready", () => {
-        loadNotes();
-    });
-
-    App.events.addEventListener("wallet:disconnected", () => {
-        state.notes = [];
-        state.pools = [];
-        state.selectedNotes = [];
-        if (generateContainer) mountGenerate(generateContainer);
-    });
-    App.events.addEventListener("disclosure:select-note", (event) => {
-        const { noteId, poolId } = event.detail;
-        const matches = preselectNotes(state.notes, [noteId], poolId);
-        if (matches.length > 0) {
-            state.selectedNotes = matches;
-            if (generateContainer) mountGenerate(generateContainer);
-        }
-    });
-
-    if (App.state.wallet.connected) {
-        loadNotes();
-    }
+  if (App.state.wallet.connected) {
+    loadNotes();
+  }
 }
