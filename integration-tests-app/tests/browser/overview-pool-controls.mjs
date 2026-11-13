@@ -14,11 +14,7 @@ import { gotoDashboard, gotoMoveFlow, gotoMoveFunds } from '../../src/navigation
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const css = await readFile(process.argv[2], 'utf8');
-const html = (await readFile(join(root, 'app/index.html'), 'utf8'))
-  .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '')
-  .replace(/<link\b[^>]*>/g, '')
-  .replace('</head>', '<link rel="stylesheet" href="/app.css"></head>')
-  .replace('</body>', '<script src="/fixture.js"></script></body>');
+const sourceHtml = await readFile(join(root, 'app/index.html'), 'utf8');
 const bundle = await build({
   stdin: {
     resolveDir: root,
@@ -92,6 +88,27 @@ const bundle = await build({
     },
   }],
 });
+const browser = await chromium.launch({ channel: 'chrome', headless: true });
+const preparationPage = await browser.newPage();
+let html;
+try {
+  html = await preparationPage.evaluate(source => {
+    // Parse into an inert document so production scripts never execute. The
+    // HTML parser handles tag casing and markup structure before node removal.
+    const doc = new DOMParser().parseFromString(source, 'text/html');
+    doc.querySelectorAll('script, link').forEach(node => node.remove());
+    const stylesheet = doc.createElement('link');
+    stylesheet.rel = 'stylesheet';
+    stylesheet.href = '/app.css';
+    doc.head.append(stylesheet);
+    const fixture = doc.createElement('script');
+    fixture.src = '/fixture.js';
+    doc.body.append(fixture);
+    return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+  }, sourceHtml);
+} finally {
+  await preparationPage.close();
+}
 const server = createServer((request, response) => {
   const [type, data] = request.url === '/fixture.js' ? ['text/javascript', bundle.outputFiles[0].text]
     : request.url === '/app.css' ? ['text/css', css] : ['text/html', html];
@@ -100,7 +117,6 @@ const server = createServer((request, response) => {
 await new Promise(done => server.listen(0, '127.0.0.1', done));
 const url = `http://127.0.0.1:${server.address().port}`;
 const screenshotDir = await mkdtemp(join(tmpdir(), 'overview-controls-'));
-const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const pool = (poolContractId, policyFlags = [], gvkMode = 'off') => ({ poolContractId, policyFlags, gvkMode, asset: { kind: 'native' }, decimals: 7 });
 const pools = [pool('A', ['blocklist'], 'traceable'), pool('B', [], 'viewOnly'), pool('C', ['allowlist', 'blocklist'])];
 const balance = id => ({ poolContractId: id, tokenContractId: 'TOKEN', tokenLabel: 'XLM', amount: '10000000', noteCount: 1 });
