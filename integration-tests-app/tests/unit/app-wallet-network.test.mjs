@@ -1,31 +1,33 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { registerHooks } from 'node:module';
 
-const moduleUrl = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
 const walletUrl = new URL('../../../app/js/wallet.js', import.meta.url);
-const source = await readFile(walletUrl, 'utf8');
+let nextWalletId = 0;
 
 async function walletWith(reply, config = { network: 'custom', networkPassphrase: 'identity', rpcUrl: 'https://deployment.example/rpc' }) {
-  // Deliberately expose only getNetwork for network queries: importing the
-  // Varial-specific getNetworkDetails must fail this regression test.
-  const varial = moduleUrl(`
-    export async function getNetwork() { return ${JSON.stringify(reply)}; }
-    export const WatchWalletChanges = class {};
-    export const getAddress = () => {};
-    export const isAllowed = () => {};
-    export const isConnected = () => {};
-    export const requestAccess = () => {};
-    export const setAllowed = () => {};
-    export const signAuthEntry = () => {};
-    export const signTransaction = () => {};
-    export const signMessage = () => {};
-  `);
-  return import(moduleUrl(source
-    .replace(/['"]@stellar\/varial-sdk['"]/, JSON.stringify(varial))
-    .replace(/['"]\.\/wasm-facade\.js['"]/, JSON.stringify(moduleUrl(`export async function loadDeploymentConfig() { return ${JSON.stringify(config)}; }`)))
-    .replace(/['"]\.\/network-config\.js['"]/, JSON.stringify(new URL('../../../app/js/network-config.js', import.meta.url).href))
-    .replace(/['"]\.\/wallet-signer-guard\.js['"]/, JSON.stringify(new URL('../../../app/js/wallet-signer-guard.js', import.meta.url).href))));
+  const id = ++nextWalletId;
+  const isolatedWalletUrl = new URL(`?test=${id}`, walletUrl).href;
+  const mockUrl = new URL(`./fixtures/app-wallet-network.mjs?test=${id}`, import.meta.url).href;
+  const mocks = await import(mockUrl);
+  mocks.configure(reply, config);
+
+  // Resolve only this wallet instance's dependencies. Mock values stay data;
+  // no test input is interpolated into JavaScript source.
+  const hooks = registerHooks({
+    resolve(specifier, context, nextResolve) {
+      if (context.parentURL === isolatedWalletUrl
+          && (specifier === '@stellar/varial-sdk' || specifier === './wasm-facade.js')) {
+        return { url: mockUrl, shortCircuit: true };
+      }
+      return nextResolve(specifier, context);
+    },
+  });
+  try {
+    return await import(isolatedWalletUrl);
+  } finally {
+    hooks.deregister();
+  }
 }
 
 test('SEP network identity uses deployment RPC without requiring wallet URLs', async () => {
@@ -77,4 +79,13 @@ test('deployment RPC supports local HTTP endpoints', async () => {
     { network: 'custom', networkPassphrase: 'identity', rpcUrl },
   );
   assert.equal((await wallet.getWalletNetwork()).sorobanRpcUrl, rpcUrl);
+});
+
+test('mock responses preserve code-like strings as data', async () => {
+  const network = '\'"` ${throw new Error("must remain data")} \\ </script>\n\u2028\u2029';
+  const config = { network, networkPassphrase: network, rpcUrl: 'https://deployment.example/rpc' };
+  const wallet = await walletWith({ network, networkPassphrase: network }, config);
+  assert.deepEqual(await wallet.getWalletNetwork(), {
+    network, networkPassphrase: network, sorobanRpcUrl: config.rpcUrl,
+  });
 });
