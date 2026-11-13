@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { createLogger } from '../src/logger.mjs';
 import { assert } from '../src/assert.mjs';
 import { gotoDashboard } from '../src/navigation.mjs';
+import { readAccessState } from '../src/appState.mjs';
 
 const knownNetworks = JSON.parse(await readFile(new URL('../../sdk/native/src/network_defaults.json', import.meta.url), 'utf8'));
 
@@ -18,14 +19,16 @@ const log = createLogger('01-connect');
 
 export async function run({ page }) {
   await gotoDashboard(page);
-  // After a successful connect the wallet button is hidden and the address
-  // text replaces it in the settings button. These elements already have stable
-  // ids, so use them directly instead of adding redundant data-testid attrs.
-  const connectBtnVisible = await page
+  // After a successful connect the account button has nothing left to offer,
+  // the address replaces it in the settings button, and storage can be locked.
+  const accessState = await readAccessState(page);
+  assert(accessState === 'ready', `access state is "${accessState}" after connecting`);
+  const accountBtnVisible = await page
     .locator('#wallet-btn')
     .isVisible()
     .catch(() => false);
-  assert(!connectBtnVisible, '"Connect Freighter" button is still visible after connecting');
+  assert(!accountBtnVisible, 'the account button is still visible after connecting');
+  assert(await page.getByTestId('storage-lock-btn').isVisible(), 'no lock control after connecting');
 
   const walletText = await page
     .locator('#wallet-text')

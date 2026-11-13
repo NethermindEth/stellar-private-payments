@@ -96,7 +96,7 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
     .replace("'@stellar/stellar-sdk'", JSON.stringify(url('export const StrKey = { decodeEd25519PublicKey() { return new Uint8Array(32); } };')))
     .replace("'app-circuit-lock'", JSON.stringify(url(`export default ${JSON.stringify(lock)}`)))
     .replace("'./storage-lock.js'", JSON.stringify(url('export async function closeAndReload() {}')))
-    .replace("'./storage-timeout.js'", JSON.stringify(url('export function startAutoLock() { return () => {}; } export async function loadAutoLockSetting() {} export function clearAutoLockSetting() {}')))
+    .replace("'./storage-timeout.js'", JSON.stringify(url('export function startAutoLock() { return () => {}; } export async function loadAutoLockSetting() {} export function clearAutoLockSetting() {} export function autoLockMinutes() { return 5; }')))
     .replace("'./storage-key.js'", JSON.stringify(url('export async function openWalletStorage({ storage }) { return storage.open(); }')))
     .replace("'./storage-account-dialog.js'", JSON.stringify(url('export async function confirmStorageAccount() {}')))
     .replace("'./storage-signature.js'", JSON.stringify(url('export async function verifyStorageSignature() {}')))

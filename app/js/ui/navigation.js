@@ -113,6 +113,8 @@ function setActiveView(view) {
         panel.dataset.state = active ? 'active' : 'inactive';
     });
 
+    App.events.dispatchEvent(new CustomEvent('view:changed', { detail: { view } }));
+
     if (view === 'disclosure' && !disclosureLoaded) {
         disclosureLoaded = true;
         import('../disclosure.js').then(m => {
@@ -203,24 +205,25 @@ async function loadRuntimeState() {
 function renderWallet() {
     const connected = App.state.wallet.connected;
     const walletText = document.getElementById('wallet-text');
-    const walletBtn = document.getElementById('wallet-btn');
     const walletAddress = document.getElementById('settings-wallet-address');
     walletText.textContent = connected ? Utils.shortAddress(App.state.wallet.address, 8, 6) : '';
     walletText.hidden = !connected;
-    walletBtn.hidden = connected;
     walletAddress.textContent = App.state.wallet.address || 'Not connected';
     document.getElementById('network-name').textContent = (deploymentDefaults.displayName || deploymentDefaults.network || 'NETWORK').toUpperCase();
     renderSyncStatus();
 }
 
-// Sync indicator lives inside the network pill: grey/Offline when disconnected,
-// pulsing amber/Syncing until the registry is caught up, green/Synced after.
+// Sync indicator lives inside the network pill: hidden until a wallet connects,
+// then grey/Locked, pulsing amber/Syncing until the registry is caught up, and
+// green/Synced after.
 function renderSyncStatus() {
     const dot = document.getElementById('sync-dot');
     const text = document.getElementById('sync-status');
     if (!dot || !text) return;
-    if (!App.state.wallet.connected) {
-        text.textContent = 'Offline';
+    const connected = App.state.wallet.connected;
+    document.querySelectorAll('[data-sync-part]').forEach(part => { part.hidden = !connected; });
+    if (!connected) {
+        text.textContent = '';
         delete dot.dataset.tone;
         return;
     }
@@ -453,15 +456,11 @@ export const Wallet = {
     _connectPromise: null,
     _stopWatcher: null,
 
+    // The account button (#wallet-btn) is driven by ui/access.js.
     init() {
-        document.getElementById('wallet-btn')?.addEventListener('click', () => {
-            if (App.state.wallet.connected) {
-                this.openSettings();
-            } else {
-                this.connect({ auto: false }).catch(() => {});
-            }
-        });
         renderWallet();
+        // The network name comes from deployments.json; show it before any wallet connects.
+        void loadDeploymentConfig().then(renderWallet).catch(() => {});
     },
 
     /**
@@ -500,15 +499,16 @@ export const Wallet = {
                 renderWallet();
                 void refreshPublicIdentity();
 
-                // After locking, a reconnect on load restores only the public
-                // wallet session. A user's own Connect click also asks to unlock;
-                // cancelling that leaves the wallet connected but locked.
+                // A reconnect on load restores only the public wallet session;
+                // storage waits for the user's Unlock instead of prompting on
+                // its own. After locking, a user's own Connect click also asks
+                // to unlock; cancelling that leaves the wallet connected but locked.
                 if (storageWasLocked() && !isStorageUnlocked() && !auto) {
                     await ensureStorage({ unlock: true }).catch(error => {
                         if (error?.code !== 'unlock-cancelled') throw error;
                     });
                 }
-                if (storageWasLocked() && !isStorageUnlocked()) {
+                if ((auto || storageWasLocked()) && !isStorageUnlocked()) {
                     rememberNoteOwner(address);
                     document.body.dataset.walletState = 'locked';
                     this.startWatcher();

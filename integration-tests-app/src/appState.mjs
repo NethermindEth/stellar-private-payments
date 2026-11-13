@@ -8,6 +8,8 @@ import { waitForCondition } from './waits.mjs';
 export const APP_RUNTIME_READY_TIMEOUT_MS = 60_000;
 
 const WALLET_STATE_ATTRIBUTE = 'data-wallet-state';
+const ACCESS_STATE_ATTRIBUTE = 'data-access-state';
+export const ACCESS_STATES = ['welcome', 'returning', 'connecting', 'locked', 'ready'];
 const ONBOARDING_MODAL_SELECTOR = '#onboarding-modal';
 const BOOTNODE_CONSENT_MODAL_SELECTOR = '#bootnode-consent-modal';
 
@@ -73,19 +75,34 @@ export async function waitForWalletRuntimeReady(page, {
   return result.value;
 }
 
-/** A locked app deliberately hides the dashboard; wait for the initialized shell. */
+/**
+ * What the app asks of the user before its data views open, from
+ * `body[data-access-state]`: `welcome` (first visit), `returning` (a store
+ * exists but no wallet is connected), `connecting`, `locked` (wallet connected,
+ * storage locked) or `ready` (storage open). `unknown` until the app sets it.
+ */
+export async function readAccessState(page) {
+  return (await page.locator('body').getAttribute(ACCESS_STATE_ATTRIBUTE).catch(() => null)) || 'unknown';
+}
+
+/** Wait until the app shell has loaded and published its access state. */
 export async function waitForAppShell(page, { timeoutMs = 10_000, waitOptions = {} } = {}) {
   return waitForCondition({
     operation: 'app:load', timeoutMs, intervalMs: 100, ...waitOptions,
-    observe: async () => {
-      const control = page.getByTestId('storage-lock-btn');
-      return {
-        readyState: await page.evaluate(() => document.readyState),
-        controlVisible: await control.isVisible().catch(() => false),
-        storageState: await control.getAttribute('data-state').catch(() => null),
-      };
-    },
-    isReady: ({ readyState, controlVisible, storageState }) =>
-      readyState === 'complete' && controlVisible && ['locked', 'unlocked'].includes(storageState),
+    observe: async () => ({
+      readyState: await page.evaluate(() => document.readyState),
+      accessState: await readAccessState(page),
+    }),
+    isReady: ({ readyState, accessState }) => readyState === 'complete' && ACCESS_STATES.includes(accessState),
+  });
+}
+
+/** Wait for a specific access state, e.g. `locked` after a lock reload. */
+export async function waitForAccessState(page, expected, { timeoutMs = 30_000, waitOptions = {} } = {}) {
+  const wanted = [expected].flat();
+  return waitForCondition({
+    operation: `app:access-${wanted.join('|')}`, timeoutMs, intervalMs: 100, ...waitOptions,
+    observe: () => readAccessState(page),
+    isReady: state => wanted.includes(state),
   });
 }

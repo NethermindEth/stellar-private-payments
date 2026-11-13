@@ -17,6 +17,7 @@ import {
   APP_RUNTIME_READY_TIMEOUT_MS,
   isBootnodeConsentVisible,
   isOnboardingWizardVisible,
+  readAccessState,
   readAppLifecycle,
   waitForAppShell,
   waitForWalletRuntimeReady,
@@ -54,6 +55,8 @@ export {
 export {
   APP_RUNTIME_READY_TIMEOUT_MS,
   isBootnodeConsentVisible,
+  readAccessState,
+  waitForAccessState,
   isOnboardingWizardVisible,
   readAppLifecycle,
   waitForWalletRuntimeReady,
@@ -112,18 +115,19 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
   await page.waitForLoadState('domcontentloaded');
   await waitForAppShell(page);
 
-  // The button remains in the DOM while connected; visibility distinguishes
-  // the disconnected state. Use its stable identity rather than button text.
-  const connectBtn = page.locator('#wallet-btn');
+  // The account button's action follows the app's access state (connect,
+  // unlock or none); match on that, never on its label.
+  const accountBtn = page.locator('#wallet-btn');
+  const accountAction = () => accountBtn.getAttribute('data-access-action').catch(() => null);
   let clickedConnect = false;
-  if (await connectBtn.isVisible().catch(() => false)) {
+  if (await accountAction() === 'connect') {
     try {
-      // Automatic connection may hide the button between the visibility check
-      // and the click.
-      await connectBtn.click({ timeout: 5_000 });
+      // Automatic connection may change the action between the check and
+      // the click.
+      await accountBtn.click({ timeout: 5_000 });
       clickedConnect = true;
     } catch (err) {
-      if (await connectBtn.isVisible().catch(() => false)) throw err;
+      if (await accountAction() === 'connect') throw err;
     }
   }
   if (clickedConnect) {
@@ -148,9 +152,8 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
       if (error) throw new Error(`app connection failed: ${error}`);
       // A previously locked tab restores the wallet without opening storage.
       // Provisioning needs a usable runtime, so explicitly unlock that session.
-      if (await page.locator('body').getAttribute('data-wallet-state') === 'locked') {
-        const unlock = page.getByTestId('storage-lock-btn');
-        if (await unlock.isEnabled()) await unlock.click();
+      if (await readAccessState(page) === 'locked' && await accountAction() === 'unlock') {
+        if (await accountBtn.isEnabled()) await accountBtn.click();
       }
       // Storage unlock precedes onboarding and needs its own wallet approval.
       if (await page.locator('body').getAttribute('data-storage-state') === 'unlocking') {
@@ -196,8 +199,9 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
     // An address can render before the runtime and selected pool are usable.
     await waitForWalletRuntimeReady(page, { timeoutMs: APP_RUNTIME_READY_TIMEOUT_MS });
 
-    if (await connectBtn.isVisible().catch(() => false)) {
-      throw new Error('connectApp: "Connect Freighter" is still shown after connecting — connection did not succeed');
+    const accessState = await readAccessState(page);
+    if (accessState !== 'ready' || await accountAction() !== 'none') {
+      throw new Error(`connectApp: access state is "${accessState}" after connecting — connection did not succeed`);
     }
   }
 
@@ -221,6 +225,9 @@ async function main() {
   const testFile = args.find((a) => !a.startsWith('--'));
   if (!testFile) throw new Error('runner: no test file given');
   const testModule = await import(path.resolve(testFile));
+  // A test can set `connectFirst = false` to assert on the app before it
+  // connects; it then calls the `connectApp` helper itself.
+  const connectFirst = testModule.connectFirst !== false;
   // A test can set `rawOnboarding = true` to get an account that is funded
   // and imported but NOT pre-seeded, so the app's real onboarding wizard
   // opens on connect — for the one test that exercises that wizard directly
@@ -246,15 +253,17 @@ async function main() {
     await importAccount(context, driver.secret());
 
     const page = context.pages().find((p) => p.url().startsWith('https://')) || (await context.newPage());
-    const address = await connectApp(page, { context });
-    log.info('connected:', address);
+    if (connectFirst) {
+      const address = await connectApp(page, { context });
+      log.info('connected:', address);
+    }
 
     log.info('test:', testFile);
     await testModule.run({
       context,
       page,
       driver,
-      connectApp,
+      connectApp: (target = page, opts = {}) => connectApp(target, { context, ...opts }),
       waitForFreighterApproval,
       waitForAnyFreighterApproval,
       approveOrWatch,

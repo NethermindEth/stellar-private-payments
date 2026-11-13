@@ -1,5 +1,5 @@
 import { closeAndReload } from './storage-lock.js';
-import { startAutoLock, loadAutoLockSetting, clearAutoLockSetting } from './storage-timeout.js';
+import { startAutoLock, loadAutoLockSetting, clearAutoLockSetting, autoLockMinutes } from './storage-timeout.js';
 /**
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, `Account`, and app persistence.
  *
@@ -52,20 +52,49 @@ let stopAutoLock = null;
 let storageLocking = false;
 export const STORAGE_STATE_EVENT = 'spp:storage-state';
 const LOCKED_SESSION_KEY = 'spp.storageLocked';
+// Set only when inactivity caused the lock, so the locked page can say why.
+const IDLE_LOCK_SESSION_KEY = 'spp.idleLockMinutes';
 export function storageWasLocked() {
     return sessionStorage.getItem(LOCKED_SESSION_KEY) === 'true';
 }
+/** Minutes of inactivity that locked storage, or null if it was locked another way. */
+export function idleLockMinutes() {
+    const minutes = Number(sessionStorage.getItem(IDLE_LOCK_SESSION_KEY));
+    return storageWasLocked() && minutes > 0 ? minutes : null;
+}
+function markStorageLocked(idleMinutes = null) {
+    sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
+    if (idleMinutes) sessionStorage.setItem(IDLE_LOCK_SESSION_KEY, String(idleMinutes));
+    else sessionStorage.removeItem(IDLE_LOCK_SESSION_KEY);
+}
+function clearStorageLocked() {
+    sessionStorage.removeItem(LOCKED_SESSION_KEY);
+    sessionStorage.removeItem(IDLE_LOCK_SESSION_KEY);
+}
 export function isStorageUnlocked() { return !!storageHandle && !storageLocking; }
+/**
+ * Which local storage this app opens. The SDK can also be built with plaintext
+ * storage (`Storage.openPlaintext`), but the app opens only encrypted storage.
+ */
+export const STORAGE_MODE = 'encrypted';
+/** Whether this browser already holds the app's local store. Needs no signature. */
+export async function localStoreExists() {
+    const root = await navigator.storage?.getDirectory?.();
+    return root ? hasEncryptedStorage(root) : false;
+}
 function setStorageState(state) {
     document.body.dataset.storageState = state;
     window.dispatchEvent(new Event(STORAGE_STATE_EVENT));
 }
 
-/** Close the worker, then reload to discard all decrypted UI and WASM state. */
-export async function lockStorage() {
+/**
+ * Close the worker, then reload to discard all decrypted UI and WASM state.
+ * @param {{ idleMinutes?: number | null }} [opts] - set when inactivity triggered the lock
+ */
+export async function lockStorage({ idleMinutes = null } = {}) {
     if (storageLocking) return;
     storageLocking = true;
-    sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
+    markStorageLocked(idleMinutes);
     stopAutoLock?.();
     stopAutoLock = null;
     clearAutoLockSetting();
@@ -245,8 +274,8 @@ export async function ensureStorage({ unlock = false } = {}) {
                 }
                 appStorageInstance = settings;
                 storageHandle = handle;
-                sessionStorage.removeItem(LOCKED_SESSION_KEY);
-                stopAutoLock = startAutoLock(() => void lockStorage());
+                clearStorageLocked();
+                stopAutoLock = startAutoLock(() => void lockStorage({ idleMinutes: autoLockMinutes() }));
                 await checkLegacyPlaintextStorage().catch(() => {});
                 setStorageState('ready');
                 installStoragePauseOnUnload();
@@ -296,7 +325,7 @@ export async function manageStorageBackup(action, text) {
     const backup = action === 'import' ? parseBackup(text) : null;
     if (!['export', 'import', 'reset'].includes(action)) throw new Error('Unknown storage action.');
     storageLocking = true;
-    if (wasUnlocked || action !== 'export') sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
+    if (wasUnlocked || action !== 'export') markStorageLocked();
     setStorageState('locking');
     try {
         await ensureWasmInit();
@@ -324,7 +353,7 @@ export async function manageStorageBackup(action, text) {
                 await release();
                 await resetStorage({ root });
                 // Nothing is left to unlock; the next connect creates new storage.
-                sessionStorage.removeItem(LOCKED_SESSION_KEY);
+                clearStorageLocked();
                 return;
             }
             try { await importStorageBackup({ backup, root, validate: async record => {
