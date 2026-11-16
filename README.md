@@ -110,7 +110,7 @@ curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
 To install a specific release
 
 ```bash
-curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh -s -- --version cli-v0.4.0
 ```
 
 or the latest prerelease
