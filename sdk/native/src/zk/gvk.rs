@@ -290,12 +290,12 @@ impl GlobalViewKeyMemo {
     }
 }
 
-/// Validates admin key `D` per `GlobalViewKeyEncryption`: on-curve and not
-/// low-order (`x(8·D) ≠ 0`).
+/// Validates admin key `D`: on-curve, not low-order (`x(8·D) ≠ 0`) and in the
+/// prime-order subgroup.
 pub fn validate_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Result<()> {
     let point = babyjub::point_from_coords(
         field_to_scalar(&admin_pub_key.x),
-        field_to_scalar(&admin_pub_key.y),
+        field_kto_scalar(&admin_pub_key.y),
     );
     if !point.is_on_curve() {
         bail!("admin public key is not on the Baby JubJub curve");
@@ -304,6 +304,9 @@ pub fn validate_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Resul
         .ok_or_else(|| anyhow!("admin public key is not a valid Baby JubJub point"))?;
     if eight_d.x.is_zero() {
         bail!("admin public key has low order");
+    }
+    if !point.is_in_prime_subgroup() {
+        bail!("admin public key is not in the prime-order subgroup");
     }
     Ok(())
 }
@@ -575,6 +578,30 @@ mod tests {
         let d_priv = field(987_654_321);
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         validate_global_view_public_key(&admin).expect("valid for gvk");
+    }
+
+    /// A subgroup point shifted by the order-2 point is accepted by the circuit
+    /// but not here.
+    #[test]
+    fn validate_pub_gvk_rejects_torsion_component() {
+        let admin =
+            BabyJubJubPoint::from_priv_scalar(&field(987_654_321)).expect("valid admin key");
+        let (x, y) = admin.to_coords();
+        let order_two = babyjub::point_from_coords(Scalar::zero(), -Scalar::from(1u64));
+        let shifted =
+            babyjub::add(babyjub::point_from_coords(x, y), order_two).expect("valid addition");
+        let (sx, sy) = babyjub::point_to_coords(shifted);
+        let shifted = BabyJubJubPoint::from_coords(sx, sy);
+        assert!(validate_global_view_public_key(&shifted).is_err());
+    }
+
+    #[test]
+    fn validate_pub_gvk_rejects_identity() {
+        let identity = BabyJubJubPoint {
+            x: field(0),
+            y: field(1),
+        };
+        assert!(validate_global_view_public_key(&identity).is_err());
     }
 
     #[test]
