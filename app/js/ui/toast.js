@@ -23,7 +23,8 @@ export function openModal(dialog) {
     if (container) place();
 }
 
-// A countdown that holds while the pointer or focus is on the toast.
+// A countdown that holds while the pointer or focus is on the toast, so a toast
+// being read is neither dismissed nor evicted from under the reader.
 function timer(toast, duration, onExpire) {
     let remaining = duration;
     let startedAt = 0;
@@ -44,6 +45,8 @@ function timer(toast, duration, onExpire) {
     const release = (reason) => {
         held.delete(reason);
         run();
+        // A new toast may have waited for this one to leave before evicting it.
+        evictOverflow();
     };
     toast.addEventListener('mouseenter', () => hold('pointer'));
     toast.addEventListener('mouseleave', () => release('pointer'));
@@ -52,6 +55,9 @@ function timer(toast, duration, onExpire) {
         if (!toast.contains(event.relatedTarget)) release('focus');
     });
     return {
+        get held() {
+            return held.size > 0;
+        },
         restart() {
             clearTimeout(handle);
             handle = null;
@@ -83,6 +89,25 @@ function dismiss(toast) {
     toast.dataset.state = 'dismissing';
     toast.toastTimer?.stop();
     setTimeout(() => toast.remove(), 200);
+}
+
+function visibleToasts() {
+    return [...container.children].filter((toast) => toast.dataset.state === 'visible');
+}
+
+// Over the limit, the oldest toasts give way. One held by the pointer or focus
+// waits its turn instead: it is skipped rather than replaced by a newer toast,
+// so dropping a new toast in cannot take the details being copied with it.
+function evictOverflow() {
+    const visible = visibleToasts();
+    const surplus = visible.length - MAX_TOASTS;
+    if (surplus <= 0) return;
+    visible
+        .filter((toast) => !toast.dataset.keep)
+        .slice(0, surplus)
+        .forEach((toast) => {
+            if (!toast.toastTimer?.held) dismiss(toast);
+        });
 }
 
 // Options: `details` adds a Copy details button for the raw error text;
@@ -128,6 +153,5 @@ export function showToast(message, type = 'success', duration = 4000, { origin, 
     container.append(toast);
     toast.toastTimer.restart();
     // A submitted transaction's toast holds its only explorer link, so it stays.
-    const evictable = visible.filter((old) => !old.dataset.keep);
-    evictable.slice(0, Math.max(0, visible.length + 1 - MAX_TOASTS)).forEach(dismiss);
+    evictOverflow();
 }

@@ -85,6 +85,12 @@ test('insufficient funds do not assume the pool token is XLM', () => {
   assert.doesNotMatch(message, /enough XLM to cover/);
 });
 
+test('notes that cannot cover an amount are not reported as low account funds', () => {
+  const described = describeError(new Error('insufficient input amount: have 1, need 2'), 'Withdraw');
+  assert.equal(described.kind, 'unknown');
+  assert.doesNotMatch(described.message, /pool's token|XLM/);
+});
+
 test('ASP membership problems name the Association Set Provider', () => {
   assert.match(getFriendlyErrorMessage(new Error('membership leaf not found'), 'Transfer'), /Association Set Provider/);
 });

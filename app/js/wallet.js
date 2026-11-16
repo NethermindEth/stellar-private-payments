@@ -30,13 +30,6 @@ import {
 
 import { verifySignerAddress } from './wallet-signer-guard.js';
 
-/**
- * Request wallet access and return the active public key.
- *
- * Throws when the extension is missing or unavailable.
- *
- * @returns {Promise<void>}
- */
 export const FREIGHTER_INSTALL_URL = 'https://www.freighter.app/';
 
 /** Toast options that turn a missing-Freighter error into an install link. */
@@ -46,6 +39,13 @@ export function walletErrorToastOptions(error) {
         : {};
 }
 
+/**
+ * Request wallet access and return the active public key.
+ *
+ * Throws when the extension is missing or unavailable.
+ *
+ * @returns {Promise<void>}
+ */
 async function assertFreighterInstalled() {
     const conn = await isConnected();
     if (conn?.error) {

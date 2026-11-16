@@ -144,9 +144,11 @@ const KNOWN_MESSAGES = [
         message: 'Your ASP membership could not be verified. Ensure you are registered with the Association Set Provider.',
     },
     {
-        // Stellar's txINSUFFICIENT_BALANCE and the like. The pool's token may
-        // not be XLM, but the network fee always is.
-        test: /insufficient/i,
+        // Stellar's txINSUFFICIENT_BALANCE and the like. Not every
+        // "insufficient" is about the account's funds: the SDK's "insufficient
+        // input amount" means the private notes cannot cover the amount.
+        // The pool's token may not be XLM, but the network fee always is.
+        test: /insufficient[\s_]*balance/i,
         message: 'Not enough funds. The account that signs and pays needs enough of the pool\'s token for the amount, and XLM for the network fee.',
     },
     {
