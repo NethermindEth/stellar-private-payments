@@ -112,7 +112,6 @@ function setActiveView(view) {
         panel.hidden = !active;
         panel.dataset.state = active ? 'active' : 'inactive';
     });
-    App.events.dispatchEvent(new CustomEvent('view:changed', { detail: { view } }));
 
     App.events.dispatchEvent(new CustomEvent('view:changed', { detail: { view } }));
 
