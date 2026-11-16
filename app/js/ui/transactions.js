@@ -15,7 +15,8 @@ import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
 import { Dashboard } from './dashboard.js';
-import { getTransactionErrorMessage } from './errors.js';
+import { describeError, UserFacingError } from './errors.js';
+import { parseAmountInput } from '../amount-input.js';
 import { poolErrorMessage } from '../pool-errors.js';
 import { disclosedCopy } from '../disclosure-notes.js';
 import { confirmAction } from './confirm.js';
@@ -32,13 +33,14 @@ function selectedPool() {
 }
 
 function parseAmount(value, decimals) {
-    const raw = String(value ?? '').trim();
-    if (!raw) return { ok: true, value: 0n };
-    try {
-        return { ok: true, value: parseTokenAmount(raw, decimals) };
-    } catch (error) {
-        return { ok: false, error: error.message };
-    }
+    return parseAmountInput(value, decimals, parseTokenAmount);
+}
+
+// An operation's error toast. A refusal the pool explains (`refusal`) wins over
+// the generic description; anything else offers its raw text to copy.
+function showErrorToast(error, label, origin, refusal = null) {
+    const { message, details } = refusal ? { message: refusal, details: '' } : describeError(error, label);
+    Toast.show(message, 'error', 7000, { origin, details });
 }
 
 async function amountContext() {
@@ -55,10 +57,10 @@ function requireSamePool(pool) {
 
 function requireWallet() {
     if (!App.state.wallet.address || !App.state.wallet.networkPassphrase) {
-        throw new Error('Connect your wallet first');
+        throw new UserFacingError('Connect your wallet first');
     }
     if (!isRuntimeReady()) {
-        throw new Error('Still connecting to your wallet. Please wait a moment and try again.');
+        throw new UserFacingError('Still connecting to your wallet. Please wait a moment and try again.');
     }
 }
 
@@ -138,7 +140,7 @@ function showSpendFailure(error, terms, label, origin) {
     if (SPEND_REFUSALS.includes(error?.code)) {
         Dashboard.refresh().catch((refreshError) => console.warn('[Transactions] balances refresh failed:', refreshError));
     }
-    Toast.show((terms && poolErrorMessage(error, terms)) ?? getTransactionErrorMessage(error, label), 'error', 7000, { origin });
+    showErrorToast(error, label, origin, terms && poolErrorMessage(error, terms));
 }
 
 // Throws when the notes cannot pay the spend. Any other failure, such as an RPC
@@ -339,7 +341,7 @@ function collectAdvancedOutputs(decimals) {
     const encKeys = [];
     for (const row of rows) {
         const amount = parseAmount(row.querySelector('.output-amount')?.value, decimals);
-        if (!amount.ok) throw new Error(amount.error);
+        if (!amount.ok) throw new UserFacingError(amount.error);
         amounts.push(amount.value);
         noteKeys.push(row.querySelector('.output-note-key')?.value?.trim() || null);
         encKeys.push(row.querySelector('.output-enc-key')?.value?.trim() || null);
@@ -462,7 +464,7 @@ export const Transactions = {
                 const { pool, decimals } = await amountContext();
                 setLoading(button, true, 'Reviewing transaction…');
                 const amount = parseAmount(depositAmountInput?.value, decimals);
-                if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
+                if (!amount.ok || amount.value <= 0n) throw new UserFacingError(amount.error || 'Enter a deposit amount');
                 const signer = await SigningAccount.forTransaction('move', { ownerOnly: true });
                 terms = await refusalTerms(pool, decimals);
                 await (await ensureAppPool()).checkDeposit(amount.value);
@@ -482,7 +484,7 @@ export const Transactions = {
                 SigningAccount.keep(signer);
                 await submitDeposit(button, amount.value, pool);
             } catch (error) {
-                Toast.show((terms && poolErrorMessage(error, terms)) ?? getTransactionErrorMessage(error, 'Deposit'), 'error', 7000, { origin: 'deposit' });
+                showErrorToast(error, 'Deposit', 'deposit', terms && poolErrorMessage(error, terms));
             } finally {
                 setLoading(button, false);
             }
@@ -525,10 +527,10 @@ export const Transactions = {
                 const { pool, decimals } = await amountContext();
                 setLoading(button, true, 'Reviewing transaction…');
                 const amount = parseAmount(transferAmountInput?.value, decimals);
-                if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a transfer amount');
+                if (!amount.ok || amount.value <= 0n) throw new UserFacingError(amount.error || 'Enter a transfer amount');
                 const noteKey = transferRefs.noteKey.value.trim();
                 const encKey = transferRefs.encKey.value.trim();
-                if (!noteKey || !encKey) throw new Error('Recipient note key and encryption key are required');
+                if (!noteKey || !encKey) throw new UserFacingError('Recipient note key and encryption key are required');
                 const signer = await SigningAccount.forTransaction('move');
                 terms = await refusalTerms(pool, decimals);
                 const estimate = await spendEstimate(amount.value);
@@ -597,11 +599,11 @@ export const Transactions = {
                 const { pool, decimals } = await amountContext();
                 setLoading(button, true, 'Reviewing transaction…');
                 const amount = parseAmount(withdrawAmountInput?.value, decimals);
-                if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a withdrawal amount');
+                if (!amount.ok || amount.value <= 0n) throw new UserFacingError(amount.error || 'Enter a withdrawal amount');
                 const recipient = RecipientAccount.value('withdraw');
-                if (!recipient) throw new Error('Choose a withdrawal recipient or enter another address.');
+                if (!recipient) throw new UserFacingError('Choose a withdrawal recipient or enter another address.');
                 if (!StrKey.isValidEd25519PublicKey(recipient)) {
-                    throw new Error('Invalid Stellar address');
+                    throw new UserFacingError('Invalid Stellar address');
                 }
                 const signer = await SigningAccount.forTransaction('move');
                 terms = await refusalTerms(pool, decimals);
@@ -676,12 +678,12 @@ export const Transactions = {
                     document.getElementById('advanced-public-deposit')?.value,
                     decimals,
                 );
-                if (!deposit.ok) throw new Error(`Public deposit: ${deposit.error}`);
+                if (!deposit.ok) throw new UserFacingError(`Public deposit: ${deposit.error}`);
                 const withdraw = parseAmount(
                     document.getElementById('advanced-public-withdraw')?.value,
                     decimals,
                 );
-                if (!withdraw.ok) throw new Error(`Public withdraw: ${withdraw.error}`);
+                if (!withdraw.ok) throw new UserFacingError(`Public withdraw: ${withdraw.error}`);
                 // Public deposit is value entering the transaction (input, positive);
                 // public withdraw is value leaving it (output, negative). The contract
                 // takes a single signed ext amount.
@@ -690,8 +692,8 @@ export const Transactions = {
                 const inputNoteIds = collectInputNotes('advanced-inputs');
                 const { amounts, noteKeys, encKeys } = collectAdvancedOutputs(decimals);
                 const enteredRecipient = RecipientAccount.value('advanced');
-                if (publicAmount < 0n && !enteredRecipient) throw new Error('Choose a withdrawal recipient or enter another address.');
-                if (enteredRecipient && !StrKey.isValidEd25519PublicKey(enteredRecipient)) throw new Error('Invalid Stellar address');
+                if (publicAmount < 0n && !enteredRecipient) throw new UserFacingError('Choose a withdrawal recipient or enter another address.');
+                if (enteredRecipient && !StrKey.isValidEd25519PublicKey(enteredRecipient)) throw new UserFacingError('Invalid Stellar address');
                 // The recipient is unused when no public funds leave the pool.
                 const recipient = enteredRecipient || App.state.wallet.address;
                 let session = await ensureAppPool();
@@ -770,11 +772,8 @@ export const Transactions = {
                     updateSignerVisibility();
                 }
             } catch (error) {
-                Toast.show(
-                    (terms && poolErrorMessage(error, { ...terms, feeIncluded: true, amounts: sums }))
-                        ?? getTransactionErrorMessage(error, 'Advanced transaction'),
-                    'error', 7000, { origin: 'advanced' },
-                );
+                showErrorToast(error, 'Advanced transaction', 'advanced',
+                    terms && poolErrorMessage(error, { ...terms, feeIncluded: true, amounts: sums }));
             } finally {
                 setLoading(button, false);
             }
@@ -797,7 +796,7 @@ export const Transactions = {
             if (Array.isArray(result.hashes) && result.hashes.length) {
                 this.showSubmittedToasts(result.hashes, label, origin);
             }
-            Toast.show(getTransactionErrorMessage({ message: result.message, code: result.code }, label) || `${label} failed`, 'error', 7000, { origin });
+            showErrorToast({ message: result.message, code: result.code }, label, origin);
             return false;
         }
         if (result?.status === 'ok') {

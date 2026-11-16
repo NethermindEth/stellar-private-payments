@@ -33,6 +33,7 @@ import {
 import { App, Toast, Utils } from './core.js';
 import { onEnter } from './keys.js';
 import { el } from './dom.js';
+import { UserFacingError } from './errors.js';
 
 const OTHER = '__other__';
 const REQUEST_ACTIVE = '__request_active__';
@@ -196,7 +197,7 @@ async function ensureFunded(address) {
         await new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') }).getAccount(address);
     } catch (error) {
         if (/not found/i.test(error?.message ?? '')) {
-            throw new Error(`${Utils.shortAddress(address)} isn't funded on this network. Fund it or pick another account to sign and pay with.`);
+            throw new UserFacingError(`${Utils.shortAddress(address)} isn't funded on this network. Fund it or pick another account to sign and pay with.`);
         }
     }
 }
@@ -240,11 +241,11 @@ export const SigningAccount = {
         // Falling back to the owner here would sign as the account the user
         // just moved away from, without the confirmation naming it.
         if (select?.value === OTHER || select?.value === REQUEST_ACTIVE) {
-            throw new Error('Enter the account to sign and pay with, or pick one from the list.');
+            throw new UserFacingError('Enter the account to sign and pay with, or pick one from the list.');
         }
         const { address: owner, signers, activeAddress: active } = App.state.wallet;
         const signer = chosenSigner({ selected: select?.value ?? null, owner, signers, active });
-        if (!signer) throw new Error('Choose an account to sign and pay with.');
+        if (!signer) throw new UserFacingError('Choose an account to sign and pay with.');
         if (signer !== owner) await ensureFunded(signer);
         App.state.wallet.signingAddress = signer;
         return signer;

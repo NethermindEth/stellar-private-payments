@@ -1,7 +1,7 @@
 import { refreshTokenDecimals } from '../token-metadata.js';
 import { deploymentDefaults } from '../network-config.js';
 import { poolSelectLabel } from '../pool-policy.js';
-import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
+import { connectWallet, getWalletNetwork, startWalletWatcher, walletErrorToastOptions } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, isStorageUnlocked, storageWasLocked } from '../wasm-facade.js';
@@ -11,7 +11,7 @@ import { runOnboardingWizard } from './onboarding-wizard.js';
 import { confirmAction } from './confirm.js';
 import { el } from './dom.js';
 import { openModal } from './toast.js';
-import { getRegistrationErrorMessage } from './errors.js';
+import { describeRegistrationError } from './errors.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { loadPrivateSigners } from '../private-signers.js';
 import { explorerPreference, saveExplorerPreference } from '../public-settings.js';
@@ -553,7 +553,9 @@ export const Wallet = {
                     // Surface it even on auto-connect (the common multi-tab trigger).
                     showDbLockedModal(message);
                 } else if (!auto) {
-                    Toast.show(message || 'Failed to connect wallet', 'error');
+                    const options = walletErrorToastOptions(error);
+                    // An install link needs time to be read and clicked.
+                    Toast.show(message || 'Failed to connect wallet', 'error', options.linkUrl ? 10_000 : 4000, options);
                 }
                 throw error;
             } finally {
@@ -713,7 +715,8 @@ export const Wallet = {
             Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, { linkUrl: Utils.explorerTxUrl(hash) });
             App.events.dispatchEvent(new CustomEvent('profile:updated'));
         } catch (error) {
-            Toast.show(getRegistrationErrorMessage(error), 'error');
+            const { message, details } = describeRegistrationError(error);
+            Toast.show(message, 'error', 4000, { details });
             if (btn) btn.disabled = false; // re-enable so the user can retry
         }
     },
