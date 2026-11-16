@@ -44,11 +44,6 @@ deployments/*/.e2e-accounts.env
 app/node_modules
 /dist/
 
-# Playwright E2E
-app/e2e/.freighter-extension/
-app/e2e/test-results/
-app/e2e/playwright-report/
-
 # integration-tests-app: vendored third-party extension, not for committing
 integration-tests-app/vendor/
 integration-tests-app/node_modules/
