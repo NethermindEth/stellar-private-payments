@@ -137,10 +137,10 @@ result instead, so the confirmed transaction's hash is not lost.
 Bound at `client.account()`. Must implement `signMessage`, `signTransaction`,
 and `signAuthEntry` (see [`js/types/signer.d.ts`](./js/types/signer.d.ts)).
 Optional Varial adapter: `stellar-private-payments/varial` (requires
-peer `@stellar/varial-sdk@^7.0.0`). The previous
-`stellar-private-payments/freighter` entrypoint and `FreighterSigner` name remain
-available as compatibility aliases. Upstream repository URLs and SDK internals
-may still use the Freighter name.
+peer `@stellar/varial-sdk@^7.0.0`). Use `VarialSigner` from this entrypoint;
+the previous `stellar-private-payments/freighter` entrypoint and
+`FreighterSigner` alias have been removed. Upstream repository URLs and SDK
+internals may still use the Freighter name.
 
 ## Logging & Diagnostics
 
