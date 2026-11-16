@@ -341,22 +341,17 @@ impl PoolGvkContract {
     /// Checked once here rather than in `verify_proof`, since `AdminViewKey`
     /// is written only by the constructor and has no setter.
     ///
-    /// Two cheap checks:
-    /// - canonical range
-    /// - `x != 0`: the only on-curve points with `x == 0` are `(0, 1)` and `(0,
-    ///   -1)`, both low-order and both already rejected in-circuit, so this
-    ///   excludes nothing legitimate. It does catch the likely mistake of
-    ///   deploying with an all-zero point.
-    ///
-    /// Full on-curve/subgroup validation is deliberately *not* done here: `D`
-    /// is a circuit public input, so `BabyCheck` and the low-order guard
-    /// already run on every proof.
+    /// Requires canonical coordinates and a point on the curve, then rejects
+    /// `x == 0` (the identity and the order-2 point) and `y == 0` (the two
+    /// order-4 points). Points of order 8 still pass and are rejected
+    /// in-circuit; the full subgroup check runs off-chain before deployment.
     fn validate_admin_view_key(env: &Env, key: &BabyJubJubPoint) -> Result<(), Error> {
         let modulus = bn256_modulus(env);
         if key.x >= modulus || key.y >= modulus {
             return Err(Error::InvalidAdminViewKey);
         }
-        if key.x == U256::from_u32(env, 0) {
+        let zero = U256::from_u32(env, 0);
+        if key.x == zero || key.y == zero || !key.is_on_curve() {
             return Err(Error::InvalidAdminViewKey);
         }
         Ok(())
