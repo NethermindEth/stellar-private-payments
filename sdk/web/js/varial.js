@@ -22,7 +22,7 @@ export class VarialSigner {
         const conn = await isConnected();
         if (conn?.error || !conn?.isConnected) {
             throw new Error(
-                "Varial not detected. Install from https://www.varial.app/",
+                "Varial not detected. Install from https://varialwallet.com/",
             );
         }
         const allowed = await isAllowed();

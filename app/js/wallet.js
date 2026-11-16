@@ -30,7 +30,7 @@ import {
 
 import { verifySignerAddress } from './wallet-signer-guard.js';
 
-export const VARIAL_INSTALL_URL = 'https://www.varial.app/';
+export const VARIAL_INSTALL_URL = 'https://varialwallet.com/';
 
 /** Toast options that turn a missing-Varial error into an install link. */
 export function walletErrorToastOptions(error) {
