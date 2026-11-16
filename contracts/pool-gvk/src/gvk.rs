@@ -1,9 +1,9 @@
 //! Global View Key (GVK) mode and ciphertext types.
 //!
-//! Mirrors `pool::policy`'s style: a small discrete mode plus pure
+//! Same style as `pool_core::policy`: a small discrete mode plus pure
 //! validation functions. Unlike `PolicyFlags`, view-only and traceable are
-//! mutually exclusive: a pool that wants GVK off is simply deployed from
-//! `contracts/pool`
+//! mutually exclusive: a pool that wants GVK off is deployed from
+//! `contracts/pool`.
 
 use soroban_sdk::{U256, contracttype};
 
@@ -22,12 +22,10 @@ pub fn requires_input_encryption(mode: u32) -> bool {
     mode == TRACEABLE
 }
 
-/// A Baby JubJub curve point, stored as raw, unvalidated coordinates.
+/// A Baby JubJub curve point.
 ///
-/// The GVK circuits already run `BabyCheck` plus a low-order/cofactor guard
-/// on every proof's public `D` input, so no redundant on-chain validation is
-/// needed here — the same precedent `public-key-registry` sets by storing
-/// raw, unvalidated key bytes.
+/// The constructor only range-checks the admin view key. The GVK circuits run
+/// `BabyCheck` plus a low-order guard on `D` in every proof.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BabyJubJubPoint {
@@ -38,8 +36,7 @@ pub struct BabyJubJubPoint {
 /// A single note's Global View Key ciphertext: ephemeral key `R` and the
 /// three masked field elements. Field names mirror
 /// `stellar_private_payments::types::GlobalViewKeyCiphertext` (no code sharing
-/// is possible since this crate is `#![no_std]`), keeping future
-/// `contract_state.rs`/indexer mapping mechanical.
+/// is possible since this crate is `#![no_std]`).
 #[contracttype]
 #[derive(Clone)]
 pub struct GvkCiphertext {
