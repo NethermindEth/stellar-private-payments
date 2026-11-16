@@ -55,25 +55,27 @@ modes never changes what an output memo looks like.
 | `policy_tx_2_2*_gvk_*` | The 8 entry points listed above. |
 | `test/circuits/globalViewKey_{2,4}_test.circom` | Standalone encryption-only circuits for the known-answer/roundtrip tests (built with `--tests`). |
 
-`D` and `nonce` are public inputs; the note plaintexts stay private and
-`R, c1, c2, c3` are public outputs.
+`D` and `nonce` are public inputs. The note plaintexts and a per-note `salt`
+stay private. `R, c1, c2, c3` are public outputs.
 
 ---
 
 ## Cryptographic scheme
 
-For a note `(pk, amount, blinding)`, public key `D`, `nonce`, and per-note index
-`idx`:
+For a note `(pk, amount, blinding)`, a random per-note `salt`, public key `D`,
+`nonce`, and per-note index `idx`:
 
 1. **Validate `D`.** `BabyCheck(D)` enforces that the untrusted public input `D`
    is on the curve.
 2. **Derive the ephemeral scalar `r`** by a chained Poseidon2 absorb (Poseidon2
    supports at most `t = 4`, so a single wide hash is not possible):
    - `h1 = Poseidon2(pk, amount, blinding)`
-   - `h2 = Poseidon2(h1, D.x, D.y)`
-   - `r  = Poseidon2(h2, nonce, idx)`
+   - `h2 = Poseidon2(h1, salt, D.x)`
+   - `h3 = Poseidon2(h2, D.y, nonce)`
+   - `r  = Poseidon2(h3, idx, 0)`
 
-   Binding every field plus `idx` prevents keystream reuse.
+   The salt makes `r` independent of the note fields. `r` is decomposed
+   canonically, so `r < p`.
 3. **Ephemeral key** `R = r · BASE8`.
 4. **Shared secret** `S = r · (8·D)`. The cofactor `8` is cleared on the possibly
    untrusted `D` (three doublings) so `S` lands in the prime-order subgroup.
@@ -82,6 +84,8 @@ For a note `(pk, amount, blinding)`, public key `D`, `nonce`, and per-note index
      has order dividing 8. Without this guard circomlib's `EscalarMulAny` would
      silently return `S = (0, 1)` and the keystream would be publicly
      computable. `BabyCheck` does not catch this — low-order points are on-curve.
+   - **Degenerate secret guard:** `S.x ≠ 0` is enforced. This rules out
+     `r ≡ 0 (mod l)`, which would also give `S = (0, 1)`.
 5. **Keystream (KDF):** a single width-4 Poseidon2 permutation over
    `(S.x, S.y, 0, 0x06)`. The three rate lanes are the pads `k1, k2, k3`; the
    fourth (capacity) lane is never exposed.
@@ -118,33 +122,26 @@ by the round-trip tests.
 
 ## Security notes
 
-- **The verifier must bind `D` to the registered authority key.** `D` is a
-  public *input*: the circuit proves the memos are encrypted under whatever `D`
-  the prover supplied. A prover could otherwise use their own key and produce a
-  valid proof whose memos the administrator cannot decrypt, silently evading
-  the audit. The contract must compare the public `D` signals against the
-  registered global view key.
-- **`nonce` must be unique per transaction.** A reused nonce makes identical
-  notes produce identical `(R, c)` and therefore publicly linkable. This cannot
-  be enforced in-circuit and must be guaranteed by the contract (e.g. by
-  deriving the nonce from an already-unique value such as an input nullifier).
+- **The contract binds `D` to the pool's key.** `D` is a public *input*: the
+  circuit proves the memos are encrypted under whatever `D` the prover
+  supplied. `pool-gvk` always passes its stored key, and `Proof` has no `D`
+  field, so a prover cannot swap in their own key to evade the audit.
+- **`nonce` is the transaction's `extDataHash`.** The contract passes it, which
+  binds the ciphertexts to the transaction. It is not unique: two transactions
+  with the same `ExtData` share it. The per-note `salt` keeps `r` distinct.
 - **Every encryptor sharing a nonce must get a distinct `idx`.** In the combined
   circuit, inputs use `idx = 0..nIns-1` and outputs use `idx = nIns..nIns+nOuts-1`
   so keystreams never collide (in particular, never two encryptors at `idx = 0`).
-- **Determinism.** Because `r` is derived deterministically from the note and
-  context, confidentiality also rests on the entropy of `blinding`. This applies
-  to **dummy notes too**: padding notes with predictable contents (known key,
-  constant blinding) make their ciphertexts publicly recomputable, letting an
-  observer identify which slots are dummies and fingerprint the transaction's
-  real arity. Every note fed to an encryptor must carry fresh random blinding.
+- **`salt` must be fresh and secret.** `r` is deterministic given the note,
+  `salt` and context. The SDK draws a fresh random salt for every note, dummies included.
 - **Keystream lanes.** The KDF uses one width-4 Poseidon2 permutation as a
   sponge with rate 3 and capacity 1: it absorbs `(S.x, S.y)` under the `0x06`
   tag and squeezes `out[0..2]` as the pads, keeping `out[3]` hidden. Other call
   sites read one lane because they hash, this one generates a stream. Getting
   `S` back from known pads means inverting the permutation with one lane
   unknown, and the generic bound for a one-element (254-bit) capacity is about
-  2^127. Each note has its own `S`, since `r` binds the note, `nonce`, and
-  `idx`, so known pads for one note reveal nothing about another.
+  2^127. Each note has its own `S`, since `r` binds the note, `salt`, `nonce`,
+  and `idx`, so known pads for one note reveal nothing about another.
 
 ---
 
@@ -234,8 +231,9 @@ audit yet.
 
 ## Key material provenance
 
-The proving/verifying keys for the GVK circuits are locally generated (see
-`make circuits TESTS=1 REGEN_KEYS=1`) and land in the gitignored `testdata/`.
-As with the other circuits, a trusted ceremony would be required before any
-mainnet deployment. See `deployments/testnet/circuit_keys/README.md` for the
-committed testnet artifacts and full provenance note.
+The proving/verifying keys for the GVK circuits are locally generated with
+`make circuits REGEN_KEYS=1` and land in the gitignored `testdata/`. The
+testnet copies are committed under `deployments/testnet/circuit_keys/`. As with
+the other circuits, a trusted ceremony would be required before any mainnet
+deployment. See `deployments/testnet/circuit_keys/README.md` for the full
+provenance note.
