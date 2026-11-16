@@ -38,7 +38,9 @@ The `spp` command-line client covers the user side of the app: `onboard`, `regis
 `transfer`, `withdraw`, `transact`, `overview`, `notes`, `feed`, `keys`, `asp-secret`, and
 `disclosure generate` and `disclosure verify`. `transact` chooses the notes to spend and the
 outputs, as [Advanced transactions](../transact.md) describes. The CLI signs with Stellar CLI
-identities. It has no admin commands; admin calls go through the admin page or the Stellar CLI.
+identities. For operators it has `allowlist`, `blocklist`, `pool-admin`, `envelope`, and
+`gvk audit`, as the [Operator manual](./README.md) lists. Claiming fees goes through the admin
+page.
 
 ## SDKs
 

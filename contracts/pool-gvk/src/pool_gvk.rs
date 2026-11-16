@@ -1054,9 +1054,9 @@ impl PoolGvkContract {
         }
         // 4. External data hash check. The same hash is the circuit's `nonce`
         // (see `verify_proof`), which binds the GVK ciphertexts to this
-        // transaction. It is not unique: identical `ExtData` on the same pool
-        // gives the same nonce. The per-note salt keeps the ephemeral scalar
-        // distinct.
+        // transaction. It is not unique: two transactions with identical
+        // `ExtData` on the same pool share a nonce. The per-note salt keeps the
+        // ephemeral scalar distinct.
         let token = Self::get_token(env)?;
         let ext_hash = hash_ext_data(env, &ext_data, &token);
         if ext_hash != proof.ext_data_hash {

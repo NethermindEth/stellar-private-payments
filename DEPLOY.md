@@ -80,7 +80,7 @@ the user belongs to an approved set or avoids a blocked one.
 ## Global View Key (GVK)
 
 A Global View Key lets the pool admin decrypt and view notes — see [Global
-View Key](docs/src/global_view_key.md) for the full scheme.
+View Key](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/global_view_key.md) for the full scheme.
 
 | `<gvk-mode>` | Meaning |
 |---|---|
