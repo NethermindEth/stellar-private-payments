@@ -126,6 +126,15 @@ function setActiveView(view) {
     }
 }
 
+// Selects the pool in state and every token picker; callers dispatch
+// pool:selected at the point their flow expects it.
+function selectPool(poolId) {
+    App.state.selectedPoolId = poolId;
+    document.querySelectorAll('[data-pool-select]').forEach(select => {
+        select.value = poolId;
+    });
+}
+
 function setMoveFlow(flow) {
     App.state.views.moveFlow = flow;
     document.querySelector('[data-signing-account="move"]').hidden = flow === 'deposit';
@@ -397,25 +406,24 @@ export const Shell = {
 
         App.events.addEventListener('dashboard:quick-flow', (event) => {
             const { flow, poolId } = event.detail;
-            if (poolId) {
-                App.state.selectedPoolId = poolId;
-                document.querySelectorAll('[data-pool-select]').forEach(select => {
-                    select.value = poolId;
-                });
-            }
+            if (poolId) selectPool(poolId);
             setActiveView('move-funds');
             setMoveFlow(flow);
             App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
         });
 
+        App.events.addEventListener('dashboard:view-pool-controls', (event) => {
+            const poolId = event.detail?.poolId;
+            if (!App.state.pools.some(pool => pool.poolContractId === poolId)) return;
+            selectPool(poolId);
+            App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
+            setActiveView('move-funds');
+            document.getElementById('move-pool-controls-heading')?.focus();
+        });
+
         App.events.addEventListener('dashboard:view-notes', (event) => {
             const { poolId } = event.detail;
-            if (poolId) {
-                App.state.selectedPoolId = poolId;
-                document.querySelectorAll('[data-pool-select]').forEach(select => {
-                    select.value = poolId;
-                });
-            }
+            if (poolId) selectPool(poolId);
             setActiveView('advanced');
             App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
         });
