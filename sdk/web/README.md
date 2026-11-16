@@ -139,8 +139,7 @@ and `signAuthEntry` (see [`js/types/signer.d.ts`](./js/types/signer.d.ts)).
 Optional Varial adapter: `stellar-private-payments/varial` (requires
 peer `@stellar/varial-sdk@^7.0.0`). Use `VarialSigner` from this entrypoint;
 the previous `stellar-private-payments/freighter` entrypoint and
-`FreighterSigner` alias have been removed. Upstream repository URLs and SDK
-internals may still use the Freighter name.
+`FreighterSigner` alias have been removed.
 
 ## Logging & Diagnostics
 
