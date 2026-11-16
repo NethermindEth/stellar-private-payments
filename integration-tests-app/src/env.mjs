@@ -3,10 +3,7 @@
 // account is created fresh per run (see testAccount.mjs) — just a fixed
 // Varial unlock password, since nothing sensitive rides on it (the wallet
 // only ever holds ephemeral localnet keys).
-if (!process.env.E2E_VARIAL_PASSWORD) {
-  // Keep existing profiles usable and accept the previous environment name.
-  process.env.E2E_VARIAL_PASSWORD = process.env.E2E_FREIGHTER_PASSWORD || 'SppE2eFreighter1!';
-}
+process.env.E2E_VARIAL_PASSWORD ||= 'SppE2eVarial1!';
 
 export const CHROMIUM_PATH = process.env.E2E_CHROMIUM_PATH || '/usr/bin/chromium';
 

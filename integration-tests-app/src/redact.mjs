@@ -9,8 +9,7 @@
 // need no redaction here.
 
 function secrets() {
-  return [process.env.E2E_VARIAL_PASSWORD, process.env.E2E_FREIGHTER_PASSWORD]
-    .filter(value => value);
+  return [process.env.E2E_VARIAL_PASSWORD].filter(value => value);
 }
 
 // Replace every known secret in `text` with [REDACTED]. Non-strings pass

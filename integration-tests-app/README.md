@@ -322,7 +322,5 @@ afterward.
 
 Unlocking browser storage requires Varial message approval (two matching signatures when enrolling a new database, and one on later opens), which the runner handles automatically before onboarding.
 
-`E2E_VARIAL_PASSWORD` takes precedence over the legacy `E2E_FREIGHTER_PASSWORD`
-variable. The default password is unchanged so existing browser profiles remain usable.
 The pinned extension is still downloaded from `stellar/freighter`; its extension ID,
 routes, and selectors are upstream identifiers and do not change with the branding.
