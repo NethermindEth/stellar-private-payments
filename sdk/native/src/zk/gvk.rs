@@ -295,7 +295,7 @@ impl GlobalViewKeyMemo {
 pub fn validate_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Result<()> {
     let point = babyjub::point_from_coords(
         field_to_scalar(&admin_pub_key.x),
-        field_kto_scalar(&admin_pub_key.y),
+        field_to_scalar(&admin_pub_key.y),
     );
     if !point.is_on_curve() {
         bail!("admin public key is not on the Baby JubJub curve");

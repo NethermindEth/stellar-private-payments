@@ -25,7 +25,7 @@ struct Cli {
 enum Commands {
     /// Generate a fresh GVK admin authority keypair.
     Generate(GenerateArgs),
-    /// Validate a GVK public key: on-curve and not low-order.
+    /// Validate a GVK public key: on-curve and in the prime-order subgroup.
     Validate(ValidateArgs),
     /// Print the public key of a keypair saved in a wallet database.
     Show(ShowArgs),
