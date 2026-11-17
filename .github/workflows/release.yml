@@ -26,7 +26,6 @@ on:
       - "circuit-keys/**"
       - "contracts/**"
       - "tools/circuit-compiler/**"
-      - "vendor/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"

@@ -5,11 +5,10 @@
 
 use crate::{
     CommandRunner, ExportDeploymentArgs, assert_dir_exists, assert_output_allowed,
-    assert_readable_file,
+    assert_readable_file, zkey::read_zkey,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::Bn254;
-use ark_circom::read_zkey;
 use ark_groth16::ProvingKey;
 use ark_serialize::CanonicalDeserialize;
 use std::{fs, io::BufReader, path::Path};

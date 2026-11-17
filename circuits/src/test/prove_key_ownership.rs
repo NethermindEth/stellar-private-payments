@@ -1,15 +1,17 @@
 #[cfg(test)]
 mod tests {
-    use crate::test::utils::{
-        circom_tester::{
-            Inputs, build_circuit, generate_keys, prove_and_verify_with_keys, r1cs_satisfied,
+    use crate::{
+        circom_compat::CircomReduction,
+        test::utils::{
+            circom_tester::{
+                Inputs, build_circuit, generate_keys, prove_and_verify_with_keys, r1cs_satisfied,
+            },
+            general::load_artifacts,
+            keypair::derive_public_key,
         },
-        general::load_artifacts,
-        keypair::derive_public_key,
     };
     use anyhow::{Result, anyhow};
     use ark_bn254::{Bn254, Fr as Scalar};
-    use ark_circom::CircomReduction;
     use ark_groth16::Groth16;
     use ark_snark::SNARK;
 
@@ -32,7 +34,7 @@ mod tests {
     #[ignore]
     fn test_key_ownership_valid() -> Result<()> {
         let (wasm, r1cs) = load_artifacts(CIRCUIT)?;
-        let keys = generate_keys(&wasm, &r1cs)?;
+        let keys = generate_keys(&r1cs)?;
 
         for (sk, hash) in [(1u64, 0u64), (7, 0xC0FFEE), (123_456_789, u64::MAX)] {
             let sk = Scalar::from(sk);
@@ -110,7 +112,7 @@ mod tests {
     #[ignore]
     fn test_key_ownership_proof_fails_under_other_public_inputs() -> Result<()> {
         let (wasm, r1cs) = load_artifacts(CIRCUIT)?;
-        let keys = generate_keys(&wasm, &r1cs)?;
+        let keys = generate_keys(&r1cs)?;
 
         let sk = Scalar::from(7u64);
         let pk = derive_public_key(sk);

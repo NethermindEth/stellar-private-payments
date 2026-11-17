@@ -76,7 +76,6 @@ stellar-private-payments/
 ├── deployments/                # Deployment scripts, testnet config, legal notices
 ├── docs/                       # Project documentation (mdBook source)
 ├── scripts/                    # Helper scripts
-├── vendor/                     # Vendored/patched dependencies (cranelift-control)
 ├── dist/                       # Built static site output (generated)
 └── Makefile                    # Build automation
 ```
@@ -132,12 +131,8 @@ declare the same version explicitly. `bash scripts/msrv.sh` uses stable Cargo an
 uses the canonical `rust-version = "X.Y.Z"` layout in `[workspace.package]`.
 Independent packages are listed explicitly in the checker; add new independent
 first-party packages there. Untracked scratch projects are not part of the policy.
-Vendored dependencies retain their own requirements and are checked by the actual
-MSRV builds; do not raise their requirements merely to match the development pin.
-
 The baseline is Rust 1.95.0, matching the requirement declared by
-`rusqlite_migration` (`spp-rusqlite-migration`) in the locked SDK dependency graph. The vendored
-`cranelift-control` retains upstream 0.133.0's Rust 1.94.0 requirement.
+`rusqlite_migration` (`spp-rusqlite-migration`) in the locked SDK dependency graph.
 
 The development/release compiler in `rust-toolchain.toml` may be newer. Updating
 that pin does not raise the MSRV. Keep the minimum until a language feature,
@@ -187,16 +182,16 @@ use the pinned development toolchain for that operation.
 
 ### Patches
 
-`ark-circom` is [patched](https://github.com/NethermindEth/circom-compat/commits/wasm-no-parallel/) 
-(`Cargo.toml` is cleaned up from hardcoded `parallel` features) to allow running 
-in a single-threaded WASM - we don't want for now to enable multithreaded wasm support as the proving time is acceptable
-while wasm multithreading requires COOP/COEP headers and is much stricter to deploy.
-Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
-`vendor/cranelift-control` is patched - the single dependency `arbitrary` is fixed at the same version as in
-the `soroban-sdk` - see https://github.com/NethermindEth/stellar-private-payments/issues/192.
-This patch remains for **circuits / ceremony** builds that still use ark-circom → Wasmer + Cranelift.
-The native SDK (`stellar-private-payments`) no longer depends on Wasmer; witness generation uses
-committed `circom-witness-rs` graphs (see `make circuits GRAPHS=1`).
+`circuits::circom_compat` (`circuits/src/circom_compat/`) and `tools/ceremony-cli/src/zkey.rs` vendor the
+parts of [`arkworks-rs/circom-compat`](https://github.com/arkworks-rs/circom-compat) the circuit tools and
+tests use: the R1CS reader, the Circom circuit and QAP reduction, and the zkey reader. Each file's header names
+its upstream file, at commit `09e92d4` of the upstream repository (not a fork). The upstream crate is not a dependency, 
+because it would pull in the Wasmer WASM runtime.
+
+The native SDK (`stellar-private-payments`) does not depend on Wasmer either; witness generation uses
+committed `circom-witness-rs` graphs (see `make circuits GRAPHS=1`). The per-circuit tests of the `circuits`
+crate (`make circuits TESTS=1`, then `cargo test -p circuits -- --ignored`) calculate witnesses with the
+`generate_witness.js` that the Circom compiler writes next to each compiled circuit, so they need Node.js.
 
 The SDK aliases `rusqlite_migration` to the published
 [`spp-rusqlite-migration`](https://crates.io/crates/spp-rusqlite-migration) (`2.7.0`) crate.

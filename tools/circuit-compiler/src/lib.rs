@@ -6,10 +6,10 @@
 
 use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::Bn254;
-use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
 use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
+use circuits::circom_compat::{CircomReduction, read_r1cs, setup_circuit};
 use compiler::{
     compiler_interface::{Config, VCP, run_compiler, write_wasm},
     num_bigint::BigInt,
@@ -273,12 +273,9 @@ pub fn run(opts: CompileOptions) -> Result<()> {
 
                 // Still check if we need to generate keys for circuits that
                 // ship PK/VK under testdata/
-                if circuit_needs_groth16_keys(circuit_name.as_str(), &groth16_key_circuits)
-                    && wasm_path.exists()
-                {
+                if circuit_needs_groth16_keys(circuit_name.as_str(), &groth16_key_circuits) {
                     match generate_keys_if_needed(
                         &testdata_dir,
-                        &out_dir,
                         &circuit_name,
                         &r1cs_file,
                         opts.regen_keys,
@@ -367,15 +364,9 @@ pub fn run(opts: CompileOptions) -> Result<()> {
 
         // === GROTH16 Proving/Verifying key generation ===
         if circuit_needs_groth16_keys(circuit_name.as_str(), &groth16_key_circuits) {
-            if !wasm_success {
-                bail!(
-                    "Skipping key generation for {} - WASM compilation failed",
-                    circuit_name
-                );
-            } else {
+            {
                 match generate_keys_if_needed(
                     &testdata_dir,
-                    &out_dir,
                     &circuit_name,
                     &r1cs_file,
                     opts.regen_keys,
@@ -958,21 +949,14 @@ fn wat_to_wasm(wat_file: &Path, wasm_file: &Path) -> Result<()> {
 ///
 /// # Arguments
 ///
-/// * `wasm_path` - Path to the compiled WASM file for witness generation
 /// * `r1cs_path` - Path to the R1CS constraint system file
 ///
 /// # Returns
 ///
 /// Returns `Ok((ProvingKey, VerifyingKey))` on success.
-fn generate_groth16_keys(
-    wasm_path: &Path,
-    r1cs_path: &Path,
-) -> Result<(ProvingKey<Bn254>, VerifyingKey<Bn254>)> {
-    let cfg =
-        CircomConfig::new(wasm_path, r1cs_path).map_err(|e| anyhow!("CircomConfig error: {e}"))?;
-
-    let builder = CircomBuilder::new(cfg);
-    let empty = builder.setup();
+fn generate_groth16_keys(r1cs_path: &Path) -> Result<(ProvingKey<Bn254>, VerifyingKey<Bn254>)> {
+    // The setup needs only the constraints, not a witness calculator.
+    let empty = setup_circuit(read_r1cs(r1cs_path)?);
     let mut rng = thread_rng();
 
     let (pk, vk) = Groth16::<Bn254, CircomReduction>::circuit_specific_setup(empty, &mut rng)
@@ -1077,7 +1061,6 @@ fn check_keys_need_generation(
 /// # Arguments
 ///
 /// * `testdata_dir` - Directory for generated Groth16 keys
-/// * `out_dir` - Scratch dir containing WASM files
 /// * `circuit_name` - Name of the circuit (e.g., `policy_tx_2_2_AB`,
 ///   `selectiveDisclosure_1`)
 /// * `r1cs_file` - Path to the R1CS file for freshness comparison
@@ -1089,7 +1072,6 @@ fn check_keys_need_generation(
 /// or an error if generation failed critically.
 fn generate_keys_if_needed(
     testdata_dir: &Path,
-    out_dir: &Path,
     circuit_name: &str,
     r1cs_file: &Path,
     force_regen: bool,
@@ -1123,31 +1105,8 @@ fn generate_keys_if_needed(
 
     println!("Key generation needed for {}: {}", circuit_name, reason);
 
-    // Check for WASM file
-    let wasm_path = out_dir
-        .join("wasm")
-        .join(format!("{circuit_name}_js"))
-        .join(format!("{circuit_name}.wasm"));
-
-    if !wasm_path.exists() {
-        // WASM is required for key generation - this is an error condition
-        eprintln!(
-            "ERROR: Cannot generate keys for {} - WASM file not found at {}",
-            circuit_name,
-            wasm_path.display()
-        );
-        eprintln!("This usually happens when:");
-        eprintln!("  1. --tests was not set (run: make circuits TESTS=1)");
-        eprintln!("  2. WASM compilation failed earlier in the build");
-        eprintln!("  3. circuit artifacts were cleaned (try: make circuits TESTS=1)");
-        return Err(anyhow!(
-            "WASM file not found for key generation: {}",
-            wasm_path.display()
-        ));
-    }
-
     eprintln!("Generating Groth16 keys for {circuit_name}...");
-    match generate_groth16_keys(&wasm_path, r1cs_file) {
+    match generate_groth16_keys(r1cs_file) {
         Ok((pk, vk)) => {
             // Write proving key (binary)
             if let Err(e) = write_proving_key(&pk, &pk_path) {

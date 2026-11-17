@@ -1869,7 +1869,7 @@ mod tests {
     fn prove_policy_gvk_case(circuit: PolicyGvkCircuit) -> Result<PolicyGvkProof> {
         let (wasm, r1cs) = load_artifacts(circuit.stem)
             .with_context(|| format!("load policy+gvk circuit {}", circuit.stem))?;
-        let keys = generate_keys(&wasm, &r1cs)?;
+        let keys = generate_keys(&r1cs)?;
 
         let d_priv = Scalar::from(0x5EEDu64);
         let d = admin_public_key(d_priv);

@@ -147,7 +147,7 @@ mod tests {
     fn run_gvk_roundtrip(n: usize) -> Result<()> {
         let circuit = format!("globalViewKey_{n}_test");
         let (wasm, r1cs) = load_artifacts(&circuit)?;
-        let keys = generate_keys(&wasm, &r1cs)?;
+        let keys = generate_keys(&r1cs)?;
 
         let d_priv = Scalar::from(0x5EEDu64);
         let d = admin_public_key(d_priv);
@@ -197,7 +197,7 @@ mod tests {
     fn gvk_2_off_curve_d_rejected() {
         let (wasm, r1cs) =
             load_artifacts("globalViewKey_2_test").expect("globalViewKey_2 artifacts");
-        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+        let keys = generate_keys(&r1cs).expect("Groth16 key generation failed");
 
         // (1, 1) does not satisfy the Baby JubJub curve equation, so BabyCheck
         // fails.
@@ -215,7 +215,7 @@ mod tests {
     fn gvk_2_low_order_d_rejected() {
         let (wasm, r1cs) =
             load_artifacts("globalViewKey_2_test").expect("globalViewKey_2 artifacts");
-        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+        let keys = generate_keys(&r1cs).expect("Groth16 key generation failed");
 
         // (0, -1) is on-curve but has order 2, so 8*D is the identity and the
         // low-order guard (x(8*D) != 0) rejects it.
