@@ -26,8 +26,8 @@ pub fn init(verbose: u8, json: bool) {
 
     let color = !json && std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none();
 
-    // 3. Build the subscriber. CorrelationIdLayer lets nested SDK calls inherit an
-    //    ambient correlation_id via correlation_id_or_new() rather than each
+    // 3. Build the subscriber. CorrelationIdLayer lets nested SDK calls inherit
+    //    an ambient correlation_id via correlation_id_or_new() rather than each
     //    minting an unrelated one.
     let subscriber = tracing_subscriber::registry()
         .with(filter)

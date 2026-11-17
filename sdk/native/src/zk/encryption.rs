@@ -206,8 +206,8 @@ fn derive_keypair_from_signature(signature: &KeyDerivationSignature) -> Result<E
         return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
     }
 
-    // HPKE `DeriveKeyPair(ikm)`: the SHA-256 output carries 256 bits of entropy,
-    // as many as the 32-byte secret key, as RFC 9180 asks of `ikm`.
+    // HPKE `DeriveKeyPair(ikm)`: the SHA-256 output carries 256 bits of
+    // entropy, as many as the 32-byte secret key, as RFC 9180 asks of `ikm`.
     let ikm = hash_signature_with_domain(signature, ENCRYPTION_KEY_DOMAIN);
     let (secret, public) = XWing::derive_keypair(&*ikm);
 
