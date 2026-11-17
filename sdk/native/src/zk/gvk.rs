@@ -146,8 +146,12 @@ impl GvkRecoveredNote {
 impl GlobalViewKeyCiphertext {
     /// Admin-side decryption using the authority private scalar `d`.
     pub fn decrypt(&self, d_priv: &Field) -> Result<GvkRecoveredNote> {
+        let (rx, ry) = self.r.to_coords();
+        if !babyjub::point_from_coords(rx, ry).is_on_curve() {
+            bail!("ephemeral public key in global view key ciphertext is not on the curve");
+        }
         let k = keystream(
-            shared_secret(field_to_scalar(d_priv), self.r.to_coords()).ok_or_else(|| {
+            shared_secret(field_to_scalar(d_priv), (rx, ry)).ok_or_else(|| {
                 anyhow!("invalid ephemeral public key in global view key ciphertext")
             })?,
         );
@@ -485,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn off_curve_ephemeral_key_not_recovered() -> Result<()> {
+    fn decrypt_rejects_off_curve_ephemeral_key() -> Result<()> {
         let d_priv = field(7);
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = sample_note();
@@ -494,8 +498,7 @@ mod tests {
             x: field(1),
             y: field(1),
         };
-        let recovered = ct.decrypt(&d_priv)?;
-        assert_ne!(recovered.pk, note.pk);
+        assert!(ct.decrypt(&d_priv).is_err());
         Ok(())
     }
 
