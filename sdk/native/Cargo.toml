@@ -11,7 +11,7 @@ build = "build.rs"
 
 # sqlite-wasm-rs enables the WASM host adapter for rusqlite, and SQLite3MC with `encrypted-storage`.
 [package.metadata.cargo-shear]
-ignored = ["sqlite-wasm-rs"]
+ignored = ["sqlite-wasm-rs", "rustls"]
 
 [lib]
 name = "stellar_private_payments"
