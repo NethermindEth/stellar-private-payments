@@ -60,20 +60,21 @@ circuits-verify: circuits
 integration-tests:
 	bash $(CURDIR)/integration-tests/run.sh
 
-# Both targets record the built profile in sdk/web/.trunk-wasm-profile so a
+# Both targets record the built profiles in sdk/web/.trunk-wasm-profile so a
 # subsequent `trunk serve`/`trunk build` (which `serve`/`build` invoke) sees a
-# matching marker and skips its own redundant rebuild.
+# matching marker and skips its own redundant rebuild. The prover worker uses
+# the hot profile; the main module and storage worker stay size-optimised.
 .PHONY: sdk-web-build
 sdk-web-build:
 	@echo "Building browser SDK (npm: stellar-private-payments → sdk/web/dist)..."
 	@npm run build --prefix sdk/web
-	@echo "release" > sdk/web/.trunk-wasm-profile
+	@sh sdk/web/scripts/profile-key.sh > sdk/web/.trunk-wasm-profile
 
 .PHONY: sdk-web-build-debug
 sdk-web-build-debug:
 	@echo "Building stellar-private-payments-web with debug logs (release-with-logs)..."
 	@WASM_PROFILE=release-with-logs npm run build --prefix sdk/web
-	@echo "release-with-logs" > sdk/web/.trunk-wasm-profile
+	@WASM_PROFILE=release-with-logs sh sdk/web/scripts/profile-key.sh > sdk/web/.trunk-wasm-profile
 
 .PHONY: install
 install:

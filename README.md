@@ -135,6 +135,10 @@ can serve different networks without rebuilding:
 cargo build --release -p stellar-private-payments-cli
 ./target/release/spp --deployment deployments/testnet config show
 
+# For faster proving, build the CLI's proving stack at opt-level 3
+# (binary in target/prover-hot/spp).
+cargo build --profile prover-hot -p stellar-private-payments-cli
+
 cargo build --release --manifest-path tools/bootnode/Cargo.toml
 # Required when starting the bootnode, alongside database and HTTP/TLS settings:
 export BOOTNODE_DEPLOYMENT=/absolute/path/to/deployments.json
