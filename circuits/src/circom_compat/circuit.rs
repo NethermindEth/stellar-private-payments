@@ -1,8 +1,8 @@
-//! Vendored from `arkworks-rs/circom-compat` (MIT OR Apache-2.0), commit `09e92d4`:
-//! <https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/circom/circuit.rs>
+//! Vendored from `arkworks-rs/circom-compat` (MIT OR Apache-2.0), commit
+//! `09e92d4`: <https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/circom/circuit.rs>
 //!
-//! Local changes: the test module (needs the wasmer witness calculator) is dropped, and
-//! `Result` is core's (upstream imports `color_eyre::Result`).
+//! Local changes: the test module (needs the wasmer witness calculator) is
+//! dropped, and `Result` is core's (upstream imports `color_eyre::Result`).
 
 use ark_ff::PrimeField;
 use ark_relations::gr1cs::{

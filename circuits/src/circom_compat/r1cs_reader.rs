@@ -1,10 +1,10 @@
-//! Vendored from `arkworks-rs/circom-compat` (MIT OR Apache-2.0), commit `09e92d4`:
-//! <https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/circom/r1cs_reader.rs>
+//! Vendored from `arkworks-rs/circom-compat` (MIT OR Apache-2.0), commit
+//! `09e92d4`: <https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/circom/r1cs_reader.rs>
 //! R1CS circom file reader, copied upstream from <https://github.com/poma/zkutil>.
 //! Spec: <https://github.com/iden3/r1csfile/blob/master/doc/r1cs_bin_format.md>
 //!
-//! Local changes: the test module (needs upstream test vectors) is dropped and the
-//! `Constraints` aliases (from upstream `src/circom/mod.rs`) live here.
+//! Local changes: the test module (needs upstream test vectors) is dropped and
+//! the `Constraints` aliases (from upstream `src/circom/mod.rs`) live here.
 
 use ark_ff::PrimeField;
 use byteorder::{LittleEndian, ReadBytesExt};

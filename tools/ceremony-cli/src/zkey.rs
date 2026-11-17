@@ -2,8 +2,8 @@
 //   https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/zkey.rs
 //   https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/index.rs (`NPIndex`)
 //
-// Local changes: `NPIndex` is inlined below, and the test module (which needs the
-// upstream test vectors and the wasmer witness calculator) is dropped.
+// Local changes: `NPIndex` is inlined below, and the test module (which needs
+// the upstream test vectors and the wasmer witness calculator) is dropped.
 #![allow(
     clippy::arithmetic_side_effects,
     clippy::indexing_slicing,
@@ -168,7 +168,7 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
         self.reader.seek(SeekFrom::Start(section.position))?;
         let num_coeffs: u32 = self.reader.read_u32::<LittleEndian>()?;
 
-        // insantiate AB
+        // instantiate AB
         let mut matrices = vec![vec![vec![]; header.domain_size as usize]; 2];
         let mut max_constraint_index = 0;
         for _ in 0..num_coeffs {
@@ -337,7 +337,8 @@ fn deserialize_field_fr<R: Read>(reader: &mut R) -> IoResult<Fr> {
     Ok(Fr::new_unchecked(Fr::new_unchecked(bigint).into_bigint()))
 }
 
-// skips the multiplication by R because Circom points are already in Montgomery form
+// skips the multiplication by R because Circom points are already in Montgomery
+// form
 fn deserialize_field<R: Read>(reader: &mut R) -> IoResult<Fq> {
     let bigint = BigInteger256::deserialize_uncompressed(reader)?;
     // if you use Fq::new it multiplies by R
@@ -382,7 +383,6 @@ fn deserialize_g2_vec<R: Read>(reader: &mut R, n_vars: u32) -> IoResult<Vec<G2Af
 
 use ark_ff::Field;
 use ark_relations::utils::matrix::Matrix;
-
 
 /// The A, B and C matrices of a Rank-One `ConstraintSystem`.
 /// Also contains metadata on the structure of the constraint system
