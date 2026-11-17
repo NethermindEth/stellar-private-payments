@@ -16,6 +16,9 @@ cargo build --release -p stellar-private-payments-cli
 ./target/release/spp --deployment /path/to/another-deployment config show
 ```
 
+For faster native proving, build with `--profile prover-hot`; its binary is
+`target/prover-hot/spp`.
+
 Save `deployment = "/path/to/deployment"` under `[defaults]` in
 `~/.config/spp/config.toml` to avoid repeating the flag. `spp config init` creates
 a template without requiring a deployment first. A deployment provisioned as

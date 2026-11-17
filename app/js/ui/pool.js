@@ -6,6 +6,7 @@
 import { client, isRuntimeReady } from '../wasm-facade.js';
 import { accountSession } from '../account-session.js';
 import { App } from './core.js';
+import { UserFacingError } from './errors.js';
 
 App.events.addEventListener('pool:selected', () => {
     if (App.state.wallet.connected) {
@@ -47,7 +48,7 @@ export async function createAppPool() {
     }
     // wallet.connected flips true before the runtime finishes initializing
     if (!isRuntimeReady()) {
-        throw new Error('Still connecting to your wallet. Please wait a moment and try again.');
+        throw new UserFacingError('Still connecting to your wallet. Please wait a moment and try again.');
     }
 
     closeAppPool();

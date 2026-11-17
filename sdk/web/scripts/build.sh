@@ -6,18 +6,28 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 WEB="$ROOT/sdk/web"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 PROFILE="${WASM_PROFILE:-release}"
+# The prover worker is compute-bound; the main module and storage worker stay
+# on the size-optimised profile. See sdk/web/scripts/profile-key.sh.
+case "$PROFILE" in
+  release-with-logs) default_prover_profile="prover-hot-with-logs" ;;
+  *) default_prover_profile="prover-hot" ;;
+esac
+PROVER_PROFILE="${PROVER_PROFILE:-$default_prover_profile}"
 TARGET="wasm32-unknown-unknown"
 ARTIFACTS="$CARGO_TARGET_DIR/$TARGET/$PROFILE"
+PROVER_ARTIFACTS="$CARGO_TARGET_DIR/$TARGET/$PROVER_PROFILE"
 
 # Cargo uses `--release` for the release profile and `--profile <name>` for custom profiles.
-case "$PROFILE" in
-  release)
-    CARGO_PROFILE_FLAG="--release"
-    ;;
-  *)
-    CARGO_PROFILE_FLAG="--profile $PROFILE"
-    ;;
-esac
+cargo_profile_flag() {
+  if [ "$1" = "release" ]; then
+    printf '%s' "--release"
+  else
+    printf '%s' "--profile $1"
+  fi
+}
+
+CARGO_PROFILE_FLAG="$(cargo_profile_flag "$PROFILE")"
+PROVER_PROFILE_FLAG="$(cargo_profile_flag "$PROVER_PROFILE")"
 
 # Extra cargo feature flags, e.g. `--features unencrypted-storage` or
 # `--no-default-features --features unencrypted-storage`.
@@ -56,7 +66,8 @@ fi
 echo "==> Building stellar-private-payments-web ($PROFILE)..."
 cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" $CARGO_FEATURE_FLAGS
 cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker $CARGO_FEATURE_FLAGS
-cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker $CARGO_FEATURE_FLAGS
+echo "==> Building prover-worker ($PROVER_PROFILE)..."
+cargo build --locked -p stellar-private-payments-web $PROVER_PROFILE_FLAG --target "$TARGET" --bin prover-worker $CARGO_FEATURE_FLAGS
 
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
   echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2
@@ -137,7 +148,7 @@ installed_opt="$("$WASM_OPT" --version | awk '{print $3}')"
 
 MAIN_WASM="$ARTIFACTS/${WASM_OUT_NAME}.wasm"
 STORAGE_WASM="$ARTIFACTS/storage-worker.wasm"
-PROVER_WASM="$ARTIFACTS/prover-worker.wasm"
+PROVER_WASM="$PROVER_ARTIFACTS/prover-worker.wasm"
 
 for f in "$MAIN_WASM" "$STORAGE_WASM" "$PROVER_WASM"; do
   [[ -f "$f" ]] || { echo "error: missing $f" >&2; exit 1; }
@@ -150,20 +161,25 @@ wasm-bindgen --target web --out-dir "$WEB/dist" --out-name "$WASM_OUT_NAME" "$MA
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name storage-worker-module "$STORAGE_WASM"
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name prover-worker-module "$PROVER_WASM"
 
-echo "==> Running wasm-opt -Os on shipped wasm modules..."
-for wasm in \
-  "$WEB/dist/${WASM_OUT_NAME}_bg.wasm" \
-  "$WEB/dist/workers/storage-worker-module_bg.wasm" \
-  "$WEB/dist/workers/prover-worker-module_bg.wasm"; do
-  "$WASM_OPT" -Os \
+echo "==> Running wasm-opt (-Os main/storage, -O3 prover)..."
+optimize_wasm() {
+  local level="$1"
+  local file="$2"
+  "$WASM_OPT" "$level" \
     --enable-bulk-memory \
     --enable-reference-types \
     --enable-multivalue \
     --enable-sign-ext \
     --enable-nontrapping-float-to-int \
     --enable-mutable-globals \
-    "$wasm" -o "$wasm"
-done
+    "$file" -o "$file"
+}
+
+optimize_wasm -Os "$WEB/dist/${WASM_OUT_NAME}_bg.wasm"
+optimize_wasm -Os "$WEB/dist/workers/storage-worker-module_bg.wasm"
+# The prover worker is the only compute-bound module; -O3 costs ~nothing in
+# size and is the only module where it is worth applying.
+optimize_wasm -O3 "$WEB/dist/workers/prover-worker-module_bg.wasm"
 
 write_worker_loader() {
   local name="$1"
@@ -190,7 +206,7 @@ bash "$WEB/scripts/stage-circuits-dist.sh"
 echo "==> Staging wasm-bindgen TypeScript declarations..."
 bash "$WEB/scripts/stage-wasm-types.sh"
 
-# Keep in sync with WASM_PROFILE_KEY in Trunk.toml.
-printf '%s:%s%s\n' "$PROFILE" "${SPP_NETWORK:-testnet}" "${SPP_WEB_CARGO_FEATURES:+:$SPP_WEB_CARGO_FEATURES}" > "$WEB/.trunk-wasm-profile"
+# Shared with Trunk.toml and the Makefile; includes both wasm profiles.
+sh "$WEB/scripts/profile-key.sh" > "$WEB/.trunk-wasm-profile"
 
 echo "==> Built sdk/web/dist/"

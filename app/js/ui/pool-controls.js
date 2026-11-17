@@ -22,7 +22,7 @@ const IMPACT = 'mt-2 text-xs text-slate-300 data-[tone=info]:text-cyan-200 data-
 
 // Open is the absence of ASP checks, so it stays neutral; ASP lists are cyan
 // and the admin view key is violet. Amber is reserved for warnings.
-const TONES = { allowlist: 'info', blocklist: 'info', viewOnly: 'key', traceable: 'key' };
+export const TONES = { allowlist: 'info', blocklist: 'info', viewOnly: 'key', traceable: 'key' };
 
 function helpIcon() {
     return svgEl('svg', { class: 'h-3.5 w-3.5 shrink-0', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'aria-hidden': 'true' }, [

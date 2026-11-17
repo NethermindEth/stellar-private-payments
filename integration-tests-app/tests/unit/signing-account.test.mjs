@@ -9,7 +9,7 @@ import {
   signingPrivacyWarning,
   withdrawalLinksAccounts,
 } from '../../../app/js/signing-account.js';
-import { getTransactionErrorMessage } from '../../../app/js/ui/errors.js';
+import { getTransactionErrorMessage, UserFacingError } from '../../../app/js/ui/errors.js';
 
 const OWNER = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 const SIGNER = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H';
@@ -76,7 +76,7 @@ test('a signature from another account says the chosen account is not in Freight
 
 test('an unfunded signer is named, not reported as a connection failure', () => {
   const unfunded = "GABC…WXYZ isn't funded on this network. Fund it or pick another account to sign and pay with.";
-  assert.equal(getTransactionErrorMessage(new Error(unfunded), 'Withdraw'), `Withdraw failed: ${unfunded}`);
+  assert.equal(getTransactionErrorMessage(new UserFacingError(unfunded), 'Withdraw'), unfunded);
   for (const message of ['network error: connection reset', 'Failed to fetch', 'NetworkError when attempting to fetch resource.']) {
     assert.match(getTransactionErrorMessage(new Error(message), 'Withdraw'), /^Network error\./);
   }

@@ -171,3 +171,9 @@
     background-color: --alpha(var(--color-slate-400) / 55%);
   }
 }
+
+/* An explorer link with no explorer configured is plain text (Utils.setExplorerLink). */
+a:not([href]):hover {
+  text-decoration: none;
+  cursor: default;
+}

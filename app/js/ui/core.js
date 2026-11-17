@@ -107,29 +107,44 @@ export const Utils = {
         }
     },
 
+    // Each explorer URL is null when no explorer is configured or the id is
+    // invalid; callers then render plain text instead of a link.
     explorerTxUrl(hash) {
-        if (!this.explorerBaseUrl() || !/^[0-9a-f]{64}$/i.test(hash)) return '#';
+        if (!this.explorerBaseUrl() || !/^[0-9a-f]{64}$/i.test(hash)) return null;
         return `${this.explorerBaseUrl()}/tx/${hash}`;
     },
 
     explorerLedgerUrl(ledger) {
-        if (!this.explorerBaseUrl() || !/^\d+$/.test(String(ledger))) return '#';
+        if (!this.explorerBaseUrl() || !/^\d+$/.test(String(ledger))) return null;
         return `${this.explorerBaseUrl()}/ledger/${ledger}`;
     },
 
     explorerAddressUrl(address) {
-        if (!this.explorerBaseUrl() || !StrKey.isValidEd25519PublicKey(address)) return '#';
+        if (!this.explorerBaseUrl() || !StrKey.isValidEd25519PublicKey(address)) return null;
         return `${this.explorerBaseUrl()}/account/${address}`;
     },
 
     explorerContractUrl(contractId) {
-        if (!this.explorerBaseUrl() || !StrKey.isValidContract(contractId)) return '#';
+        if (!this.explorerBaseUrl() || !StrKey.isValidContract(contractId)) return null;
         return `${this.explorerBaseUrl()}/contract/${encodeURIComponent(contractId)}`;
     },
 
     explorerContractStorageUrl(contractId) {
         const base = this.explorerContractUrl(contractId);
-        return base === '#' ? '#' : `${base}/storage`;
+        return base && `${base}/storage`;
+    },
+
+    /** Point `link` at `url`, or turn it into plain text when there is none. */
+    setExplorerLink(link, url) {
+        if (!link) return;
+        if (url) {
+            link.href = url;
+            link.target = '_blank';
+            link.rel = 'noreferrer noopener';
+        } else {
+            link.removeAttribute('href');
+            link.removeAttribute('target');
+        }
     },
 
     async copyToClipboard(text) {
