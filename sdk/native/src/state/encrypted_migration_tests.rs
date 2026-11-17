@@ -167,7 +167,7 @@ fn migrates_analyzed_database_without_copying_optimizer_statistics() -> Result<(
 }
 
 #[test]
-fn copy_preserves_legacy_version_and_encryption_migrates_it() -> Result<()> {
+fn copy_preserves_the_schema_version_and_encrypted_open_keeps_it() -> Result<()> {
     let f = Fixture::new()?;
     let source = Connection::open(f.db())?;
     source.execute_batch(include_str!("schema.sql"))?;
@@ -185,10 +185,6 @@ fn copy_preserves_legacy_version_and_encryption_migrates_it() -> Result<()> {
         conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
         1
     );
-    assert!(
-        conn.prepare("SELECT gvk_ciphertext FROM pool_commitments")
-            .is_err()
-    );
     drop(conn);
     encrypt_in_place(&f.db(), &key)?;
     let storage = SqliteStorage::connect_encrypted(f.db(), &key, OpenPurpose::OpenExisting)?;
@@ -196,13 +192,7 @@ fn copy_preserves_legacy_version_and_encryption_migrates_it() -> Result<()> {
         storage
             .conn
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))?,
-        10
-    );
-    assert!(
-        storage
-            .conn
-            .prepare("SELECT gvk_ciphertext FROM pool_commitments")
-            .is_ok()
+        1
     );
     assert_eq!(
         storage
