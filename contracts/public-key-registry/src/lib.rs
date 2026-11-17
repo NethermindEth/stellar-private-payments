@@ -18,24 +18,22 @@ use soroban_utils::{EventChain, constants::bn256_modulus, event_chain, publish_e
 pub struct Account {
     /// Owner address of the account
     pub owner: Address,
-    /// Edwards encoding of the X25519 encryption public key (32 bytes)
+    /// Public key notes are encrypted to, [`ENCRYPTION_KEY_LEN`] bytes
     pub encryption_key: Bytes,
     /// BN254 note public key for creating commitments (32 bytes)
     pub note_key: Bytes,
 }
 
-/// Proof that the registrant holds the owner's master key and the private keys
-/// of both registered keys (note key + encryption/note_discovery keys).
+/// Proof that the registrant holds the owner's master key and the private key
+/// of the note key.
 ///
-/// All three are made over the registration digest `D`
+/// Both are made over the registration digest `D`. The encryption key is
+/// covered by the owner's signature but has no proof of its own.
 #[contracttype]
 #[derive(Clone)]
 pub struct KeyOwnershipProof {
     /// `keyOwnership` proof with public inputs `[note_key, D mod r]`
     pub note_key_proof: Groth16Proof,
-    /// Ed25519 signature by the encryption key over
-    /// `sha256(ENCRYPTION_KEY_TAG || D)`
-    pub encryption_key_signature: BytesN<64>,
     /// Ed25519 signature by the owner's master key over `D` (SEP-53)
     pub owner_signature: BytesN<64>,
 }
@@ -44,8 +42,7 @@ pub struct KeyOwnershipProof {
 ///
 /// This event allows other users to discover keys for sending private
 /// transfers. Two key types are required:
-/// - encryption_key: Edwards encoding of the X25519 key for encrypting note
-///   data (amount, blinding)
+/// - encryption_key: key for encrypting note data (amount, blinding)
 /// - note_key: BN254 key for creating commitments in the ZK circuit
 #[contractevent]
 #[derive(Clone)]
@@ -53,7 +50,7 @@ pub struct PublicKeyEvent {
     /// Address of the account owner
     #[topic]
     pub owner: Address,
-    /// Edwards encoding of the X25519 encryption public key
+    /// Public key notes are encrypted to
     pub encryption_key: Bytes,
     /// BN254 note public key
     pub note_key: Bytes,
@@ -67,14 +64,13 @@ pub struct PublicKeyEvent {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum Error {
-    /// A key is not 32 bytes long
+    /// The note key is not 32 bytes, or the encryption key is not
+    /// [`ENCRYPTION_KEY_LEN`] bytes
     InvalidKeyLength = 1,
     /// The owner is a contract address, which has no master key
     OwnerNotAccount = 2,
     /// The note key is not a canonical BN254 scalar field element
     NonCanonicalNoteKey = 3,
-    /// The encryption key's y coordinate is not canonical
-    NonCanonicalEncryptionKey = 4,
     /// The owner already registered different keys
     AlreadyRegistered = 5,
     /// The verifier refused the note key ownership proof
@@ -98,18 +94,14 @@ struct Registration {
     note_key: Bytes,
 }
 
-/// Domain tag of the challenge the encryption key signs.
-pub const ENCRYPTION_KEY_TAG: &[u8] = b"privacy-pool/registry/encryption-key/v1";
+/// Required length of the encryption key, which the SDK defines as
+/// `EncryptionPublicKey::LEN`. The registry checks only the length, it does not
+/// interpret the key.
+pub const ENCRYPTION_KEY_LEN: u32 = 1216;
 
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 const SEP53_PREFIX: &[u8] = b"Stellar Signed Message:\n";
-
-/// `2^255 - 19`, big-endian.
-const ED25519_FIELD_MODULUS: [u8; 32] = [
-    0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xed,
-];
 
 /// Text the owner signs to register `account` with the registry at `registry`:
 ///
@@ -118,7 +110,7 @@ const ED25519_FIELD_MODULUS: [u8; 32] = [
 /// Registry: <registry strkey>
 /// Account: <owner strkey>
 /// Note key: 0x<hex of the 32 note_key bytes>
-/// Encryption key (Ed25519): 0x<hex of the 32 encryption_key bytes>
+/// Encryption key: 0x<hex of the encryption_key bytes>
 /// ```
 pub fn registration_message(env: &Env, registry: &Address, account: &Account) -> Bytes {
     let mut message = Bytes::from_slice(env, b"Privacy Pool Key Registration [v1]\nRegistry: ");
@@ -127,7 +119,7 @@ pub fn registration_message(env: &Env, registry: &Address, account: &Account) ->
     message.append(&account.owner.to_string().to_bytes());
     message.extend_from_slice(b"\nNote key: ");
     append_hex(&mut message, &account.note_key);
-    message.extend_from_slice(b"\nEncryption key (Ed25519): ");
+    message.extend_from_slice(b"\nEncryption key: ");
     append_hex(&mut message, &account.encryption_key);
     message
 }
@@ -139,29 +131,31 @@ pub fn registration_digest(env: &Env, message: &Bytes) -> BytesN<32> {
     env.crypto().sha256(&payload).to_bytes()
 }
 
-/// Appends `0x` and the lowercase hex of a 32-byte key, encoded locally so the
-/// host copies each key once.
+/// Appends `0x` and the lowercase hex of a key, encoded locally in 32-byte
+/// chunks so the host copies each key once.
 fn append_hex(out: &mut Bytes, key: &Bytes) {
-    let mut raw = [0u8; 32];
-    key.copy_into_slice(&mut raw);
-    let mut hex = [0u8; 66];
-    let (prefix, digits) = hex.split_at_mut(2);
-    prefix.copy_from_slice(b"0x");
-    for (pair, byte) in digits.chunks_exact_mut(2).zip(raw) {
-        pair[0] = HEX_DIGITS[usize::from(byte >> 4)];
-        pair[1] = HEX_DIGITS[usize::from(byte & 0x0f)];
+    out.extend_from_slice(b"0x");
+    let len = key.len();
+    let mut offset = 0u32;
+    while offset < len {
+        let end = offset.saturating_add(32).min(len);
+        let n = end.saturating_sub(offset) as usize;
+        let mut raw = [0u8; 32];
+        key.slice(offset..end).copy_into_slice(&mut raw[..n]);
+        let mut hex = [0u8; 64];
+        for (pair, byte) in hex.chunks_exact_mut(2).zip(&raw[..n]) {
+            pair[0] = HEX_DIGITS[usize::from(byte >> 4)];
+            pair[1] = HEX_DIGITS[usize::from(byte & 0x0f)];
+        }
+        out.extend_from_slice(&hex[..n.saturating_mul(2)]);
+        offset = end;
     }
-    out.extend_from_slice(&hex);
 }
 
-/// Reads a little-endian 32-byte value as a big-endian `U256`, with the top
-/// bit cleared when `clear_top_bit` is set.
-fn le_bytes_to_u256(env: &Env, bytes: &BytesN<32>, clear_top_bit: bool) -> U256 {
+/// Reads a little-endian 32-byte value as a big-endian `U256`.
+fn le_bytes_to_u256(env: &Env, bytes: &BytesN<32>) -> U256 {
     let mut be = bytes.to_array();
     be.reverse();
-    if clear_top_bit {
-        be[0] &= 0x7f;
-    }
     U256::from_be_bytes(env, &Bytes::from_array(env, &be))
 }
 
@@ -206,7 +200,7 @@ impl PublicKeyRegistry {
     ///
     /// Registration is write-once: registering the same keys again changes
     /// nothing, and different keys are refused. `proof` must show that the
-    /// registrant holds the owner's master key and both private keys.
+    /// registrant holds the owner's master key and the note private key.
     ///
     /// Renews the registry by at most a day.
     pub fn register(env: Env, account: Account, proof: KeyOwnershipProof) -> Result<(), Error> {
@@ -215,22 +209,18 @@ impl PublicKeyRegistry {
 
         let note_key =
             BytesN::<32>::try_from(&account.note_key).map_err(|_| Error::InvalidKeyLength)?;
-        let encryption_key =
-            BytesN::<32>::try_from(&account.encryption_key).map_err(|_| Error::InvalidKeyLength)?;
+        if account.encryption_key.len() != ENCRYPTION_KEY_LEN {
+            return Err(Error::InvalidKeyLength);
+        }
         let Some(AddressPayload::AccountIdPublicKeyEd25519(owner_key)) = account.owner.to_payload()
         else {
             return Err(Error::OwnerNotAccount);
         };
 
-        // One single canonical encoding per key to prevent re-writes
-        let note_key_value = le_bytes_to_u256(&env, &note_key, false);
+        // One single canonical encoding per note key to prevent re-writes
+        let note_key_value = le_bytes_to_u256(&env, &note_key);
         if note_key_value >= bn256_modulus(&env) {
             return Err(Error::NonCanonicalNoteKey);
-        }
-        let ed25519_modulus =
-            U256::from_be_bytes(&env, &Bytes::from_array(&env, &ED25519_FIELD_MODULUS));
-        if le_bytes_to_u256(&env, &encryption_key, true) >= ed25519_modulus {
-            return Err(Error::NonCanonicalEncryptionKey);
         }
 
         let key = DataKey::Registration(account.owner.clone());
@@ -257,12 +247,6 @@ impl PublicKeyRegistry {
         let digest = registration_digest(&env, &message);
         env.crypto()
             .ed25519_verify(&owner_key, &digest.clone().into(), &proof.owner_signature);
-
-        let mut challenge = Bytes::from_slice(&env, ENCRYPTION_KEY_TAG);
-        challenge.append(&digest.clone().into());
-        let challenge: Bytes = env.crypto().sha256(&challenge).to_bytes().into();
-        env.crypto()
-            .ed25519_verify(&encryption_key, &challenge, &proof.encryption_key_signature);
 
         Self::verify_note_key_proof(
             &env,

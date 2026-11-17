@@ -175,7 +175,7 @@ enum Commands {
         /// Recipient BN254 note public key (hex)
         #[arg(long)]
         note_key: Option<String>,
-        /// Recipient X25519 encryption public key (hex)
+        /// Recipient encryption public key (hex)
         #[arg(long)]
         encryption_key: Option<String>,
     },

@@ -77,12 +77,13 @@ ed25519-dalek = { workspace = true, features = ["digest", "hazmat", "zeroize"] }
 futures = { workspace = true, features = ["executor"] }
 getrandom = { workspace = true }
 hex = { workspace = true }
+hpke = { workspace = true }
 http = "1.5.0"
 rusqlite_migration = { package = "spp-rusqlite-migration", version = "2.7.0", default-features = false }
 serde = { workspace = true }
 serde-aux = "4.7.0"
 serde_json = { workspace = true, features = ["alloc"] }
-sha2 = { workspace = true }
+sha2 = { workspace = true, features = ["zeroize"] }
 sha3 = { version = "0.12", default-features = false }
 stellar-strkey = "0.0.18"
 stellar-xdr = { workspace = true }
@@ -106,7 +107,6 @@ ark-std = { workspace = true }
 crypto_secretbox.workspace = true
 ruint = { workspace = true }
 taceo-poseidon2 = { workspace = true }
-x25519-dalek = { version = "3.0", default-features = false, features = ["static_secrets"] }
 
 [build-dependencies]
 cc = { version = "1", optional = true }

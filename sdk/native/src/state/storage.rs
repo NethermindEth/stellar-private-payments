@@ -39,6 +39,7 @@ static MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
             fold_saved_event_chains,
         ),
         M::up(include_str!("schema_v9_registry_lookup_indexes.sql")),
+        M::up(include_str!("schema_v10_encryption_key_format.sql")),
     ])
 });
 /// Raw events one pass of [`Storage::fold_event_chain`] loads at a time.
@@ -4637,7 +4638,9 @@ mod tests {
         storage.save_public_key_events_batch(&vec![PublicKeyEvent {
             id: id.to_string(),
             owner: owner.to_string(),
-            encryption_key: EncryptionPublicKey([9u8; 32]),
+            encryption_key: EncryptionPublicKey(
+                vec![9u8; EncryptionPublicKey::LEN].into_boxed_slice(),
+            ),
             // The registry stores a note key as its little-endian field bytes.
             note_key: NotePublicKey(note_key.to_le_bytes()),
         }])

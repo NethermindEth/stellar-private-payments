@@ -112,7 +112,7 @@ impl Setup {
 /// key.
 struct Registrant {
     owner: SigningKey,
-    encryption: SigningKey,
+    encryption_key: std::vec::Vec<u8>,
     note_key: [u8; 32],
 }
 
@@ -121,7 +121,7 @@ impl Registrant {
     fn new(seed: u8) -> Self {
         Self {
             owner: SigningKey::from_bytes(&[seed; 32]),
-            encryption: SigningKey::from_bytes(&[seed ^ 0xff; 32]),
+            encryption_key: std::vec![seed ^ 0xff; ENCRYPTION_KEY_LEN as usize],
             note_key: [seed; 32],
         }
     }
@@ -134,7 +134,7 @@ impl Registrant {
     fn account(&self, env: &Env) -> Account {
         Account {
             owner: self.address(env),
-            encryption_key: Bytes::from_array(env, &self.encryption.verifying_key().to_bytes()),
+            encryption_key: Bytes::from_slice(env, &self.encryption_key),
             note_key: Bytes::from_array(env, &self.note_key),
         }
     }
@@ -144,13 +144,6 @@ impl Registrant {
         let digest = expected_digest(registry, account);
         KeyOwnershipProof {
             note_key_proof: placeholder_proof(env),
-            encryption_key_signature: BytesN::from_array(
-                env,
-                &self
-                    .encryption
-                    .sign(&encryption_challenge(&digest))
-                    .to_bytes(),
-            ),
             owner_signature: BytesN::from_array(env, &self.owner.sign(&digest).to_bytes()),
         }
     }
@@ -179,7 +172,7 @@ fn hex(bytes: &Bytes) -> StdString {
 
 fn expected_message(registry: &Address, account: &Account) -> StdString {
     format!(
-        "Privacy Pool Key Registration [v1]\nRegistry: {}\nAccount: {}\nNote key: 0x{}\nEncryption key (Ed25519): 0x{}",
+        "Privacy Pool Key Registration [v1]\nRegistry: {}\nAccount: {}\nNote key: 0x{}\nEncryption key: 0x{}",
         strkey(registry),
         strkey(&account.owner),
         hex(&account.note_key),
@@ -190,12 +183,6 @@ fn expected_message(registry: &Address, account: &Account) -> StdString {
 fn expected_digest(registry: &Address, account: &Account) -> [u8; 32] {
     let mut payload = b"Stellar Signed Message:\n".to_vec();
     payload.extend_from_slice(expected_message(registry, account).as_bytes());
-    Sha256::digest(payload).into()
-}
-
-fn encryption_challenge(digest: &[u8; 32]) -> [u8; 32] {
-    let mut payload = b"privacy-pool/registry/encryption-key/v1".to_vec();
-    payload.extend_from_slice(digest);
     Sha256::digest(payload).into()
 }
 
@@ -272,7 +259,6 @@ fn duplicate_registration_is_noop() {
     // The same keys again need no valid proof: nothing changes.
     let unsigned = KeyOwnershipProof {
         note_key_proof: placeholder_proof(env),
-        encryption_key_signature: BytesN::from_array(env, &[0u8; 64]),
         owner_signature: BytesN::from_array(env, &[0u8; 64]),
     };
     setup.client().register(&account, &unsigned);
@@ -328,15 +314,31 @@ fn register_requires_owner_auth() {
 }
 
 #[test]
-fn keys_that_are_not_32_bytes_are_refused() {
+fn note_keys_that_are_not_32_bytes_are_refused() {
     let setup = Setup::new();
     let env = &setup.env;
     let registrant = Registrant::new(0x11);
 
-    for (encryption_len, note_len) in [(31, 32), (33, 32), (32, 31), (32, 33)] {
+    for note_len in [0usize, 31, 33] {
         let mut account = registrant.account(env);
-        account.encryption_key = Bytes::from_slice(env, &[0x11; 33][..encryption_len]);
-        account.note_key = Bytes::from_slice(env, &[0x11; 33][..note_len]);
+        account.note_key = Bytes::from_slice(env, &std::vec![0x11; note_len]);
+        let proof = registrant.prove(env, &setup.registry, &account);
+
+        let result = setup.client().try_register(&account, &proof);
+
+        assert_eq!(result, Err(Ok(Error::InvalidKeyLength)));
+    }
+}
+
+#[test]
+fn encryption_keys_of_another_length_are_refused() {
+    let setup = Setup::new();
+    let env = &setup.env;
+    let registrant = Registrant::new(0x11);
+
+    for len in [0, 32, ENCRYPTION_KEY_LEN - 1, ENCRYPTION_KEY_LEN + 1] {
+        let mut account = registrant.account(env);
+        account.encryption_key = Bytes::from_slice(env, &std::vec![0x22; len as usize]);
         let proof = registrant.prove(env, &setup.registry, &account);
 
         let result = setup.client().try_register(&account, &proof);
@@ -384,28 +386,6 @@ fn note_key_must_be_below_the_field_modulus() {
     let account = below_modulus.account(env);
     let proof = below_modulus.prove(env, &setup.registry, &account);
     setup.client().register(&account, &proof);
-}
-
-#[test]
-fn encryption_key_y_must_be_below_the_field_modulus() {
-    let setup = Setup::new();
-    let env = &setup.env;
-    let registrant = Registrant::new(0x11);
-    let mut p = [0xff; 32];
-    p[0] = 0x7f;
-    p[31] = 0xed;
-
-    for sign_bit in [0x00, 0x80] {
-        let mut key = le(p);
-        key[31] |= sign_bit;
-        let mut account = registrant.account(env);
-        account.encryption_key = Bytes::from_array(env, &key);
-        let proof = registrant.prove(env, &setup.registry, &account);
-
-        let result = setup.client().try_register(&account, &proof);
-
-        assert_eq!(result, Err(Ok(Error::NonCanonicalEncryptionKey)));
-    }
 }
 
 /// Registers `account` with `proof`, which must trap in a signature check.
@@ -474,81 +454,6 @@ fn signatures_for_another_account_are_refused() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Crypto, InvalidInput)")]
-fn encryption_signature_by_another_key_is_refused() {
-    let setup = Setup::new();
-    let env = &setup.env;
-    let registrant = Registrant::new(0x11);
-    let account = registrant.account(env);
-    let mut proof = registrant.prove(env, &setup.registry, &account);
-    let challenge = encryption_challenge(&expected_digest(&setup.registry, &account));
-    let other = SigningKey::from_bytes(&[0x99; 32]);
-    proof.encryption_key_signature = BytesN::from_array(env, &other.sign(&challenge).to_bytes());
-
-    register_with_bad_signature(&setup, &account, &proof);
-}
-
-/// Without the tag, the encryption key would sign a plain SEP-53 digest.
-#[test]
-#[should_panic(expected = "Error(Crypto, InvalidInput)")]
-fn encryption_signature_must_cover_the_tag() {
-    let setup = Setup::new();
-    let env = &setup.env;
-    let registrant = Registrant::new(0x11);
-    let account = registrant.account(env);
-    let mut proof = registrant.prove(env, &setup.registry, &account);
-    let digest = expected_digest(&setup.registry, &account);
-    proof.encryption_key_signature =
-        BytesN::from_array(env, &registrant.encryption.sign(&digest).to_bytes());
-
-    register_with_bad_signature(&setup, &account, &proof);
-}
-
-/// Each key's signature is checked against the field it is registered in.
-#[test]
-#[should_panic(expected = "Error(Crypto, InvalidInput)")]
-fn swapped_keys_are_refused() {
-    let setup = Setup::new();
-    let env = &setup.env;
-    let registrant = Registrant::new(0x11);
-    let account = registrant.account(env);
-    let swapped = Account {
-        owner: account.owner.clone(),
-        encryption_key: account.note_key.clone(),
-        note_key: account.encryption_key.clone(),
-    };
-    // The encryption key's bytes must pass as a canonical note key, or the
-    // registry refuses them before any signature check.
-    assert!(
-        registrant.encryption.verifying_key().to_bytes()[31] < 0x30,
-        "pick another seed"
-    );
-    let proof = registrant.prove(env, &setup.registry, &swapped);
-
-    register_with_bad_signature(&setup, &swapped, &proof);
-}
-
-/// The identity point accepts `(R, s) = (identity, 0)` under a cofactorless
-/// check. The host's strict verification refuses small-order keys.
-#[test]
-#[should_panic(expected = "Error(Crypto, InvalidInput)")]
-fn small_order_encryption_key_is_refused() {
-    let setup = Setup::new();
-    let env = &setup.env;
-    let registrant = Registrant::new(0x11);
-    let mut identity = [0u8; 32];
-    identity[0] = 1;
-    let mut account = registrant.account(env);
-    account.encryption_key = Bytes::from_array(env, &identity);
-    let mut proof = registrant.prove(env, &setup.registry, &account);
-    let mut forged = [0u8; 64];
-    forged[0] = 1;
-    proof.encryption_key_signature = BytesN::from_array(env, &forged);
-
-    register_with_bad_signature(&setup, &account, &proof);
-}
-
-#[test]
 fn verifier_rejection_is_reported_as_invalid_proof() {
     let env = test_env();
     let verifier = env.register(RejectingVerifier, ());
@@ -570,7 +475,6 @@ fn error_codes_are_stable() {
     assert_eq!(Error::InvalidKeyLength as u32, 1);
     assert_eq!(Error::OwnerNotAccount as u32, 2);
     assert_eq!(Error::NonCanonicalNoteKey as u32, 3);
-    assert_eq!(Error::NonCanonicalEncryptionKey as u32, 4);
     assert_eq!(Error::AlreadyRegistered as u32, 5);
     assert_eq!(Error::InvalidProof as u32, 6);
 }

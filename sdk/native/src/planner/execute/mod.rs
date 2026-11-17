@@ -296,10 +296,8 @@ mod tests {
                 "0x0000000000000000000000000000000000000000000000000000000000000001",
             )
             .expect("test note key"),
-            EncryptionPublicKey::parse(
-                "0x0000000000000000000000000000000000000000000000000000000000000002",
-            )
-            .expect("test enc key"),
+            EncryptionPublicKey::parse(&"02".repeat(EncryptionPublicKey::LEN))
+                .expect("test enc key"),
         )
     }
 

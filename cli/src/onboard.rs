@@ -153,6 +153,10 @@ fn derive_and_save_keys(
     account: &Account,
     storage: &mut SqliteStorage,
 ) -> Result<()> {
+    eprintln!(
+        "warning: {}",
+        stellar_private_payments::zk::encryption::MEMORY_PROTECTION_WARNING
+    );
     let message = key_derivation_message(&config.deployment.kdf_domain);
     let signature = stellar_cli::sign_message(
         &account.alias,

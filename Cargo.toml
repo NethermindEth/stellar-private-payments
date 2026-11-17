@@ -67,6 +67,9 @@ crypto_secretbox = { version = "0.1.1", default-features = false, features = ["a
 ed25519-dalek = { version = "3.0", default-features = false }
 futures = { version = "0.3.34", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
+# Note encryption (see `zk/encryption.rs`). Pure Rust, builds for wasm32. Pinned exactly: the scheme draft is version-specific.
+# aws-lc-rs won't compile for wasm and moreover doesn't expose key derivation.
+hpke = { version = "=0.15.1", default-features = false, features = ["alloc", "mlkem", "chacha", "hkdfsha2", "x25519"] }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
 gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
