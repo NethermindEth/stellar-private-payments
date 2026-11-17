@@ -6166,6 +6166,7 @@ dependencies = [
  "reqwest",
  "ruint",
  "rusqlite",
+ "rustls",
  "same-file",
  "serde",
  "serde-aux",

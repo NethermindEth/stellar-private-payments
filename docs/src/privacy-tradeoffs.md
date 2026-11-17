@@ -19,6 +19,7 @@ The registry does **not** check that the registrant holds the encryption secret 
 * **Purpose**: Allows senders to resolve a recipient's keys on-chain without out-of-band communication.
 * **Opt-In Nature**: Key registration is strictly voluntary. Users who prefer to keep their public address decoupled from their shielded payment keys should skip registry registration and exchange keys directly out-of-band. Registration is permanent: the keys registered for an address can't be changed or removed.
 * **Blocklist Lookups**: Before each transaction in a blocklist pool, the client asks the RPC for its note key's blocklist path. The request doesn't carry the user's address, but an RPC that also relays the transaction can link the two by timing or IP.
+* **Transport Confidentiality**: Requests to the RPC and bootnode reveal which keys, notes and blocklist paths a client asks for, together with its IP and timing. The key exchange of that connection is hybrid post-quantum (X25519MLKEM768) only if the server supports it, otherwise it falls back to classical X25519 and recorded traffic could be decrypted later by a quantum attacker. Note contents are not exposed this way, since they are encrypted separately. See [PQ readiness](pq-readiness.md).
 
 ## 3. Event Privacy Classification Summary
 

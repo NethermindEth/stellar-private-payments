@@ -15,9 +15,14 @@ This part is the most important one as it protects against Harvest Now Decrypt L
 Secrets in memory are zeroed at Rust SDK level. SDK users must pay attention to any secrets exposed in their app and apply respective protection practices accordingly.
 Note: client storage (SQLite as a default) symmetric encryption will be resolved soon (https://github.com/NethermindEth/stellar-private-payments/issues/71).
 
-### 🚧 Transport
+### ✅ Transport
 
-It will be solved with an upgade of the networking libs soon.
+Key exchange of the connection to the RPC (and bootnode) can be hybrid post-quantum (X25519MLKEM768), but only if the server supports it.
+
+* **Native (CLI, Rust SDK)**: the TLS client (`rustls` with `aws-lc-rs`) offers X25519MLKEM768 as its preferred key exchange group. A server without hybrid support silently falls back to classical X25519, and nothing in the SDK reports or blocks that downgrade.
+* **Browser**: requests go through the browser's own TLS stack, which the app cannot configure. Current Chrome, Edge and Firefox offer X25519MLKEM768 by default.
+* Server certificates and handshake signatures stay classical. That does not matter for HNDL, which concerns the confidentiality of recorded traffic, but it does not protect against an active attacker with a CRQC.
+* The RPC traffic carries only public chain data, and note plaintext is protected by the note encryption itself, so the transport mainly affects the privacy of who queries what (see [privacy tradeoffs](privacy-tradeoffs.md)). Use an RPC provider that supports hybrid key exchange.
 
 ### 🚨 Proof system
 

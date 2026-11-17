@@ -49,6 +49,9 @@ getrandom = { workspace = true, features = ["std"] }
 hkdf = { version = "0.13", optional = true }
 rayon = { version = "1.12", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }
+# Not referenced directly: turns on the hybrid post-quantum TLS key exchange (X25519MLKEM768) as the
+# preferred group of reqwest's rustls backend, which `reqwest` leaves off.
+rustls = { version = "0.23", default-features = false, features = ["prefer-post-quantum"] }
 # The storage features pick the SQLite build: `in_gecko` (`encrypted-storage`) tells
 # `libsqlite3-sys` to use the `sqlite3mc` C symbols compiled by `build.rs`, and `bundled`
 # (`unencrypted-storage`) compiles plain SQLite.
