@@ -654,4 +654,23 @@ mod tests {
         assert!(note.encrypt(&admin, &field(5), 0).is_err());
         Ok(())
     }
+
+    fn order_eight_admin() -> BabyJubJubPoint {
+        let (x, y) = babyjub::point_to_coords(babyjub::order_eight_point());
+        BabyJubJubPoint::from_coords(x, y)
+    }
+
+    #[test]
+    fn validate_pub_gvk_rejects_order_eight() {
+        assert!(validate_global_view_public_key(&order_eight_admin()).is_err());
+    }
+
+    #[test]
+    fn encrypt_rejects_order_eight_pub_gvk() {
+        assert!(
+            sample_note()
+                .encrypt(&order_eight_admin(), &field(5), 0)
+                .is_err()
+        );
+    }
 }

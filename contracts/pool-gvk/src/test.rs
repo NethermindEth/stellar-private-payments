@@ -373,6 +373,18 @@ fn order_four_x() -> ArkFr {
         .expect("a is a nonzero square")
 }
 
+/// An order-8 point
+const ORDER_EIGHT_X: ArkFr =
+    MontFp!("4342719913949491028786768530115087822524712248835451589697801404893164183326");
+const ORDER_EIGHT_Y: ArkFr =
+    MontFp!("4826523245007015323400664741523384119579596407052839571721035538011798951543");
+
+fn order_eight_point(env: &Env, neg_x: bool, neg_y: bool) -> BabyJubJubPoint {
+    let x = if neg_x { -ORDER_EIGHT_X } else { ORDER_EIGHT_X };
+    let y = if neg_y { -ORDER_EIGHT_Y } else { ORDER_EIGHT_Y };
+    ark_point(env, x, y)
+}
+
 /// `AdminViewKey` is immutable and has no setter, so a key that can never
 /// satisfy the circuit permanently bricks the pool: every `transact` would
 /// fail at proof verification with no way to fix it.
@@ -445,11 +457,53 @@ fn pool_gvk_constructor_rejects_negated_order_four_admin_view_key() {
 }
 
 #[test]
-fn the_order_four_points_are_on_the_curve() {
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_order_eight_admin_view_key() {
     let env = test_env();
-    for x in [order_four_x(), -order_four_x()] {
-        assert!(ark_point(&env, x, ArkFr::from(0u64)).is_on_curve());
+    register_with_admin_view_key(&env, order_eight_point(&env, false, false));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_order_eight_admin_view_key_neg_x() {
+    let env = test_env();
+    register_with_admin_view_key(&env, order_eight_point(&env, true, false));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_order_eight_admin_view_key_neg_y() {
+    let env = test_env();
+    register_with_admin_view_key(&env, order_eight_point(&env, false, true));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_order_eight_admin_view_key_neg_xy() {
+    let env = test_env();
+    register_with_admin_view_key(&env, order_eight_point(&env, true, true));
+}
+
+#[test]
+fn has_small_order_matches_the_eight_torsion() {
+    let env = test_env();
+    let zero = ArkFr::from(0u64);
+    let one = ArkFr::from(1u64);
+    let torsion = [
+        ark_point(&env, zero, one),
+        ark_point(&env, zero, -one),
+        ark_point(&env, order_four_x(), zero),
+        ark_point(&env, -order_four_x(), zero),
+        order_eight_point(&env, false, false),
+        order_eight_point(&env, true, false),
+        order_eight_point(&env, false, true),
+        order_eight_point(&env, true, true),
+    ];
+    for p in &torsion {
+        assert!(p.is_on_curve() && p.has_small_order());
     }
+    assert!(!base8_key(&env).has_small_order());
+    assert!(!neg_base8_key(&env).has_small_order());
 }
 
 #[test]

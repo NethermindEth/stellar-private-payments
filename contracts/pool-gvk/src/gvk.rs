@@ -57,6 +57,24 @@ impl BabyJubJubPoint {
         let rhs = bn254.fr_add(&fr(1), &dx2y2);
         lhs.as_u256() == rhs.as_u256()
     }
+
+    /// Whether `8·P` is the identity, for a point on the curve.
+    ///
+    /// These are the eight points with `x = 0` (orders 1 and 2), `y = 0`
+    /// (order 4) or `y² = a·x²` (order 8: their double has `y = 0`).
+    pub fn has_small_order(&self) -> bool {
+        let env = self.x.env();
+        let zero = U256::from_u32(env, 0);
+        if self.x == zero || self.y == zero {
+            return true;
+        }
+        let bn254 = env.crypto().bn254();
+        let a = Bn254Fr::from_u256(U256::from_u32(env, CURVE_A));
+        let x = Bn254Fr::from_u256(self.x.clone());
+        let y = Bn254Fr::from_u256(self.y.clone());
+        let ax2 = bn254.fr_mul(&a, &bn254.fr_mul(&x, &x));
+        bn254.fr_mul(&y, &y).as_u256() == ax2.as_u256()
+    }
 }
 
 /// A single note's Global View Key ciphertext: ephemeral key `R` and the

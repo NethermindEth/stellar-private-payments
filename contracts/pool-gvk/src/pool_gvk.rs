@@ -341,17 +341,14 @@ impl PoolGvkContract {
     /// Checked once here rather than in `verify_proof`, since `AdminViewKey`
     /// is written only by the constructor and has no setter.
     ///
-    /// Requires canonical coordinates and a point on the curve, then rejects
-    /// `x == 0` (the identity and the order-2 point) and `y == 0` (the two
-    /// order-4 points). Points of order 8 still pass and are rejected
-    /// in-circuit; the full subgroup check runs off-chain before deployment.
+    /// Requires canonical coordinates, a point on the curve, and `8·D` not the
+    /// identity: the same conditions the circuit enforces on every proof.
     fn validate_admin_view_key(env: &Env, key: &BabyJubJubPoint) -> Result<(), Error> {
         let modulus = bn256_modulus(env);
         if key.x >= modulus || key.y >= modulus {
             return Err(Error::InvalidAdminViewKey);
         }
-        let zero = U256::from_u32(env, 0);
-        if key.x == zero || key.y == zero || !key.is_on_curve() {
+        if !key.is_on_curve() || key.has_small_order() {
             return Err(Error::InvalidAdminViewKey);
         }
         Ok(())

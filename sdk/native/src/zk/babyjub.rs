@@ -219,6 +219,15 @@ impl BabyJubJubPoint {
     }
 }
 
+/// A point of order 8.
+#[cfg(test)]
+pub(crate) fn order_eight_point() -> Point {
+    point_from_coords(
+        MontFp!("4342719913949491028786768530115087822524712248835451589697801404893164183326"),
+        MontFp!("4826523245007015323400664741523384119579596407052839571721035538011798951543"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,6 +258,14 @@ mod tests {
                 .expect("valid addition")
                 .is_in_prime_subgroup()
         );
+    }
+
+    #[test]
+    fn order_eight_point_has_order_eight() {
+        let p = order_eight_point();
+        assert!(p.is_on_curve());
+        assert_ne!(scalar_mul(p, Scalar::from(4u64)), Some(identity()));
+        assert_eq!(mul8(p), Some(identity()));
     }
 
     #[test]
