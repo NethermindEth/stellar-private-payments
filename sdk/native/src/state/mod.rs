@@ -12,8 +12,6 @@ mod test_events;
 #[cfg(feature = "encrypted-storage")]
 pub mod database_key;
 #[cfg(all(not(target_arch = "wasm32"), feature = "encrypted-storage"))]
-mod encrypted_migration;
-#[cfg(all(not(target_arch = "wasm32"), feature = "encrypted-storage"))]
 pub mod native_wallet;
 #[cfg(all(not(target_arch = "wasm32"), feature = "encrypted-storage"))]
 mod wallet_vault;
@@ -71,12 +69,4 @@ pub(crate) fn test_local_storage(path: &str) -> Result<crate::LocalStorage, crat
 ))]
 pub(crate) fn test_local_storage(path: &str) -> Result<crate::LocalStorage, crate::Error> {
     crate::LocalStorage::open(path)
-}
-
-/// Legacy plaintext fixture used only by migration tests.
-#[cfg(all(test, feature = "encrypted-storage"))]
-pub(crate) fn test_plaintext_storage(
-    path: impl AsRef<std::path::Path>,
-) -> anyhow::Result<SqliteStorage> {
-    storage::Storage::connect_with_connection(rusqlite::Connection::open(path)?)
 }

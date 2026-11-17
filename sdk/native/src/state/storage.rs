@@ -23,8 +23,6 @@ pub const APP_SETTING_GVK_AUTHORITY: &str = "gvk_authority";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
-/// The whole schema is one migration. Databases created by the earlier multi-step migrations
-/// (`user_version` above 1) are not supported and must be deleted.
 static MIGRATIONS: LazyLock<Migrations<'static>> =
     LazyLock::new(|| Migrations::new(vec![M::up(include_str!("schema.sql"))]));
 /// Raw events one pass of [`Storage::fold_event_chain`] loads at a time.
@@ -1599,10 +1597,8 @@ impl Storage {
         // Get the last stored root for the ASP membership tree and the ledger
         // that produced it. The ledger is derived by joining with the raw event
         // log so we can distinguish:
-        // - "no new ASP events" (root matches, even if last leaf ledger < tip),
-        //   vs
-        // - "partial processing" (raw events ingested to tip but leaves table
-        //   lags).
+        // - "no new ASP events" (root matches, even if last leaf ledger < tip), vs
+        // - "partial processing" (raw events ingested to tip but leaves table lags).
         let mut stmt = self.conn.prepare(
             "SELECT l.root, r.ledger
              FROM asp_membership_leaves l

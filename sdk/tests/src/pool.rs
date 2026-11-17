@@ -109,10 +109,8 @@ pub fn test_recipient() -> TransferRecipient {
     TransferRecipient::keys(
         NotePublicKey::parse("0x0000000000000000000000000000000000000000000000000000000000000001")
             .expect("note public key"),
-        EncryptionPublicKey::parse(
-            "0x0000000000000000000000000000000000000000000000000000000000000002",
-        )
-        .expect("encryption public key"),
+        EncryptionPublicKey::parse(&format!("0x{}", "02".repeat(EncryptionPublicKey::LEN)))
+            .expect("encryption public key"),
     )
 }
 
