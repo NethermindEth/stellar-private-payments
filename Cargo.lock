@@ -2485,7 +2485,6 @@ dependencies = [
  "curve25519-dalek 5.0.0",
  "ed25519 3.0.0",
  "sha2 0.11.0",
- "signature 3.0.0",
  "subtle",
  "zeroize",
 ]
@@ -5789,9 +5788,6 @@ name = "signature"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28d567dcbaf0049cb8ac2608a76cd95ff9e4412e1899d389ee400918ca7537f5"
-dependencies = [
- "digest 0.11.3",
-]
 
 [[package]]
 name = "simd-adler32"
