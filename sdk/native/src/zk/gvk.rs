@@ -290,9 +290,21 @@ impl GlobalViewKeyMemo {
     }
 }
 
-/// Validates admin key `D`: on-curve, not low-order (`x(8·D) ≠ 0`) and in the
-/// prime-order subgroup.
+/// Validates admin key `D` as the circuit does: on-curve and not low-order
 pub fn validate_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Result<()> {
+    global_view_public_key_point(admin_pub_key).map(|_| ())
+}
+
+/// Validates admin key `D` for deployment: [`validate_global_view_public_key`]
+/// plus prime-order subgroup membership, which every `d·BASE8` key satisfies.
+pub fn validate_deployable_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Result<()> {
+    if !global_view_public_key_point(admin_pub_key)?.is_in_prime_subgroup() {
+        bail!("admin public key is not in the prime-order subgroup");
+    }
+    Ok(())
+}
+
+fn global_view_public_key_point(admin_pub_key: &BabyJubJubPoint) -> Result<Point> {
     let point = babyjub::point_from_coords(
         field_to_scalar(&admin_pub_key.x),
         field_to_scalar(&admin_pub_key.y),
@@ -305,10 +317,7 @@ pub fn validate_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Resul
     if eight_d.x.is_zero() {
         bail!("admin public key has low order");
     }
-    if !point.is_in_prime_subgroup() {
-        bail!("admin public key is not in the prime-order subgroup");
-    }
-    Ok(())
+    Ok(point)
 }
 
 /// Generate a fresh per-note salt for GVK encryption.
@@ -578,21 +587,31 @@ mod tests {
         let d_priv = field(987_654_321);
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         validate_global_view_public_key(&admin).expect("valid for gvk");
+        validate_deployable_global_view_public_key(&admin).expect("deployable");
     }
 
-    /// A subgroup point shifted by the order-2 point is accepted by the circuit
-    /// but not here.
-    #[test]
-    fn validate_pub_gvk_rejects_torsion_component() {
-        let admin =
-            BabyJubJubPoint::from_priv_scalar(&field(987_654_321)).expect("valid admin key");
+    /// `D + (0, -1)` is `(-x, -y)`.
+    fn torsion_shifted(admin: &BabyJubJubPoint) -> BabyJubJubPoint {
         let (x, y) = admin.to_coords();
-        let order_two = babyjub::point_from_coords(Scalar::zero(), -Scalar::from(1u64));
-        let shifted =
-            babyjub::add(babyjub::point_from_coords(x, y), order_two).expect("valid addition");
-        let (sx, sy) = babyjub::point_to_coords(shifted);
-        let shifted = BabyJubJubPoint::from_coords(sx, sy);
-        assert!(validate_global_view_public_key(&shifted).is_err());
+        BabyJubJubPoint::from_coords(-x, -y)
+    }
+
+    /// The circuit clears the torsion (`S = r·8·D`), so the admin still
+    /// decrypts with `d`. Only deployment refuses the key.
+    #[test]
+    fn torsion_shifted_key_encrypts_but_is_not_deployable() -> Result<()> {
+        let d_priv = field(987_654_321);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
+        let shifted = torsion_shifted(&admin);
+        validate_global_view_public_key(&shifted)?;
+        assert!(validate_deployable_global_view_public_key(&shifted).is_err());
+
+        let note = sample_note();
+        let recovered = note.encrypt(&shifted, &field(42), 0)?.decrypt(&d_priv)?;
+        assert_eq!(recovered.pk, note.pk);
+        assert_eq!(recovered.amount, note.amount);
+        assert_eq!(recovered.blinding, note.blinding);
+        Ok(())
     }
 
     #[test]

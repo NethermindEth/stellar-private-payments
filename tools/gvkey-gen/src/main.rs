@@ -8,7 +8,7 @@ use stellar_private_payments::{
     LocalStorage,
     state::{database_key::DatabaseKey, native_wallet},
     types::{BabyJubJubPoint, GvkAuthoritySetting},
-    zk::gvk::validate_global_view_public_key,
+    zk::gvk::validate_deployable_global_view_public_key,
 };
 
 #[derive(Parser)]
@@ -156,10 +156,14 @@ fn validate(args: ValidateArgs) -> Result<()> {
         }
         None => std::io::read_to_string(std::io::stdin()).context("read stdin")?,
     };
-    let key: BabyJubJubPoint = serde_json::from_str(&raw).context("parse public key JSON")?;
-    validate_global_view_public_key(&key)?;
+    validate_json(&raw)?;
     println!("valid");
     Ok(())
+}
+
+fn validate_json(raw: &str) -> Result<()> {
+    let key: BabyJubJubPoint = serde_json::from_str(raw).context("parse public key JSON")?;
+    validate_deployable_global_view_public_key(&key)
 }
 
 fn show(args: ShowArgs) -> Result<()> {
@@ -259,7 +263,10 @@ fn open_storage_with(
 mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use stellar_private_payments::state::database_key::OpenPurpose;
+    use stellar_private_payments::{
+        state::database_key::OpenPurpose,
+        zk::serialization::{field_to_scalar, scalar_to_field},
+    };
 
     use super::*;
 
@@ -381,5 +388,28 @@ mod tests {
         );
         assert!(!second_out.exists());
         Ok(())
+    }
+
+    #[test]
+    fn validate_accepts_a_generated_key() -> Result<()> {
+        let setting = GvkAuthoritySetting::generate()?;
+        validate_json(&serde_json::to_string(&setting.public_key)?)
+    }
+
+    /// `D + (0, -1)` is `(-x, -y)`: accepted by the circuit, not deployable.
+    #[test]
+    fn validate_rejects_a_torsion_shifted_key() -> Result<()> {
+        let key = GvkAuthoritySetting::generate()?.public_key;
+        let shifted = BabyJubJubPoint {
+            x: scalar_to_field(&-field_to_scalar(&key.x)),
+            y: scalar_to_field(&-field_to_scalar(&key.y)),
+        };
+        assert!(validate_json(&serde_json::to_string(&shifted)?).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn validate_rejects_malformed_json() {
+        assert!(validate_json(r#"{"x":"0x1"}"#).is_err());
     }
 }
