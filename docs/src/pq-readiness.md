@@ -13,7 +13,7 @@ Notes encryption implements HPKE (X-Wing, HKDF-SHA256, ChaCha20-Poly1305) in bas
 This part is the most important one as it protects against Harvest Now Decrypt Later (HNDL) risk (except GVK-enabled pools, see [GVK pools](#-gvk-pools) below).
 
 Secrets in memory are zeroed at Rust SDK level. SDK users must pay attention to any secrets exposed in their app and apply respective protection practices accordingly.
-Data snd secrets at rest (SQLite as a default) are optionally (configurable at SDK level) protected with symmetric encryption (PQ ready).
+Data and secrets at rest (SQLite as a default) are optionally (configurable at SDK level) protected with symmetric encryption (PQ ready).
 
 ### ✅ Transport
 
