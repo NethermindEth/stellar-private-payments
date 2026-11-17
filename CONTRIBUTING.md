@@ -135,9 +135,8 @@ first-party packages there. Untracked scratch projects are not part of the polic
 Vendored dependencies retain their own requirements and are checked by the actual
 MSRV builds; do not raise their requirements merely to match the development pin.
 
-The baseline is Rust 1.95.0, matching the requirement declared by
-`rusqlite_migration` (`spp-rusqlite-migration`) in the locked SDK dependency graph. The vendored
-`cranelift-control` retains upstream 0.133.0's Rust 1.94.0 requirement.
+The baseline is Rust 1.95.0. The vendored `cranelift-control` retains upstream
+0.133.0's Rust 1.94.0 requirement.
 
 The development/release compiler in `rust-toolchain.toml` may be newer. Updating
 that pin does not raise the MSRV. Keep the minimum until a language feature,
@@ -197,16 +196,6 @@ the `soroban-sdk` - see https://github.com/NethermindEth/stellar-private-payment
 This patch remains for **circuits / ceremony** builds that still use ark-circom → Wasmer + Cranelift.
 The native SDK (`stellar-private-payments`) no longer depends on Wasmer; witness generation uses
 committed `circom-witness-rs` graphs (see `make circuits GRAPHS=1`).
-
-The SDK aliases `rusqlite_migration` to the published
-[`spp-rusqlite-migration`](https://crates.io/crates/spp-rusqlite-migration) (`2.7.0`) crate.
-It is published from upstream `rusqlite_migration` `master` at commit `d92f64e1` with the
-`rusqlite` dependency raised to `0.41`
-([`rusqlite_migration` PR #370](https://github.com/cljoly/rusqlite_migration/pull/370)), because
-upstream `2.6.0` requires `rusqlite ^0.40`, which links the `libsqlite3-sys` versions affected by
-RUSTSEC-2026-0459. Because `cargo audit` and `cargo deny` match RustSec advisories by crate name,
-check `rusqlite_migration` advisories manually until an upstream release supports `rusqlite 0.41`
-and the alias is dropped.
 
 ### Running WASM tests
 

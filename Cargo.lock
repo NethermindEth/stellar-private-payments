@@ -5159,6 +5159,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusqlite_migration"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb11df4f58eb4c6d5506643d678899d7258b40ba85ac5eee2ec9b4a7868b9787"
+dependencies = [
+ "log",
+ "rusqlite",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5939,16 +5949,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a0219bd7d979d58245a4f41f695e1ac9f8befdffadd7f61f1bae9e39abc6620"
 
 [[package]]
-name = "spp-rusqlite-migration"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc1c0a590ea239bc2497cb834a82789b1c8ed3d8a2924aa85a22d4512a916517"
-dependencies = [
- "log",
- "rusqlite",
-]
-
-[[package]]
 name = "sqlite-wasm-rs"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6031,6 +6031,7 @@ dependencies = [
  "reqwest",
  "ruint",
  "rusqlite",
+ "rusqlite_migration",
  "same-file",
  "serde",
  "serde-aux",
@@ -6038,7 +6039,6 @@ dependencies = [
  "sha2 0.11.0",
  "sha3 0.12.0",
  "soroban-sdk",
- "spp-rusqlite-migration",
  "sqlite-wasm-rs",
  "sqlite3mc-src",
  "stellar-strkey 0.0.18",
