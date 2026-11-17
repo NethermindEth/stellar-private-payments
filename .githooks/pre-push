@@ -13,11 +13,11 @@ if ! cargo sort --workspace -g --check; then
     exit 1
 fi
 
-# # Unused dependencies
-# if ! cargo shear; then
-#     echo "❌ Unused dependencies detected (run 'cargo shear --fix')"
-#     exit 7
-# fi
+# Unused dependencies
+if ! cargo shear; then
+    echo "❌ Unused dependencies detected (run 'cargo shear --fix')"
+    exit 7
+fi
 
 # Dependency audit
 if ! cargo deny check; then
