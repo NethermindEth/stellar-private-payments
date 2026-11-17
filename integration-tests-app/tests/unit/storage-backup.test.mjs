@@ -107,18 +107,16 @@ test('missing envelope never enrolls over surviving encrypted data', async () =>
   }), { code: 'storage-recovery-required' });
 });
 
-test('reset deletes encrypted generations, legacy plaintext OPFS storage, and legacy signer lists, preserving unrelated origin data', async () => {
+test('reset deletes encrypted generations, and legacy plaintext OPFS storage, preserving unrelated origin data', async () => {
   const { root, store } = await fixture();
   await root.getDirectoryHandle(`${DEFAULT_DIRECTORY}-${webcrypto.randomUUID()}`, { create: true });
   const legacyDir = await root.getDirectoryHandle(LEGACY_DIRECTORY, { create: true });
   await legacyDir.getFileHandle('spp.db', { create: true });
   await root.getDirectoryHandle('unrelated', { create: true });
-  store.setItem('poolstellar_signers:owner', '[]');
   store.setItem('explorer', 'keep');
   assert.equal(await hasLegacyPlaintextStorage(root), true);
   await resetStorage({ root, records: store });
   assert.equal(store.getItem(STORAGE_RECORD_KEY), null);
-  assert.equal(store.getItem('poolstellar_signers:owner'), null);
   assert.equal(store.getItem('explorer'), 'keep');
   assert.deepEqual([...root.children.keys()], ['unrelated']);
   assert.equal(await hasEncryptedStorage(root), false);

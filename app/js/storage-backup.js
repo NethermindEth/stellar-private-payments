@@ -146,11 +146,4 @@ export async function resetStorage({ root, records = localStorage }) {
     }
     for (const name of directories) await root.removeEntry(name, { recursive: true });
     records.removeItem(STORAGE_RECORD_KEY);
-    // Remove any associations awaiting migration as part of the confirmed reset.
-    const legacy = [];
-    for (let i = 0; i < records.length; i++) {
-        const name = records.key(i);
-        if (name?.startsWith('poolstellar_signers:')) legacy.push(name);
-    }
-    for (const name of legacy) records.removeItem(name);
 }

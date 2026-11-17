@@ -7,7 +7,6 @@ import { Toast } from './core.js';
 import { confirmAction } from './confirm.js';
 import { el } from './dom.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
-import { SIGNER_MIGRATION_WARNING_EVENT } from '../private-signers.js';
 
 // Set across the reload that follows an import, so the restored storage unlocks next.
 const UNLOCK_AFTER_IMPORT_KEY = 'spp.unlockAfterImport';
@@ -35,12 +34,6 @@ export const LocalData = {
     },
 
     init() {
-        let warnedAboutSigners = false;
-        window.addEventListener(SIGNER_MIGRATION_WARNING_EVENT, event => {
-            if (warnedAboutSigners) return;
-            warnedAboutSigners = true;
-            Toast.show(event.detail, 'info', 10000);
-        });
         const button = document.getElementById('storage-lock-btn');
         const select = document.getElementById('settings-auto-lock');
         let savingTimeout = false;
