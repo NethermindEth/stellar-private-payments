@@ -46,7 +46,10 @@ use hpke::{
     Deserializable, Kem as KemTrait, OpModeR, OpModeS, Serializable, aead::ChaCha20Poly1305,
     kdf::HkdfSha256, kem::XWing,
 };
-use sha2::{Digest, Sha256};
+use sha2::{
+    Digest, Sha256,
+    digest::{Output, array::Array},
+};
 use zeroize::Zeroizing;
 
 // Key derivation constants.
@@ -262,12 +265,21 @@ fn derive_note_private_key(signature: &KeyDerivationSignature) -> Result<NotePri
     Ok(private)
 }
 
+/// Finishes `hasher` straight into a buffer that is wiped on drop. `finalize()`
+/// would return the digest by value, leaving an unwiped temporary behind.
+fn finalize_wiped(hasher: Sha256) -> Zeroizing<[u8; 32]> {
+    let mut out = Zeroizing::new([0u8; 32]);
+    let view: &mut Output<Sha256> = Array::cast_from_core_mut(&mut out);
+    hasher.finalize_into(view);
+    out
+}
+
 /// The hash is secret key material, so it is wiped on drop.
 fn hash_signature_with_domain(signature: &[u8], domain: &[u8]) -> Zeroizing<[u8; 32]> {
     let mut hasher = Sha256::new();
     hasher.update(domain);
     hasher.update(signature);
-    Zeroizing::new(hasher.finalize().into())
+    finalize_wiped(hasher)
 }
 
 fn hash_signature_with_domain_and_context(
@@ -281,7 +293,7 @@ fn hash_signature_with_domain_and_context(
     hasher.update(context);
     hasher.update([0u8]);
     hasher.update(signature);
-    Zeroizing::new(hasher.finalize().into())
+    finalize_wiped(hasher)
 }
 
 /// Message the owner signs (SEP-53) to register keys with `registry`.
