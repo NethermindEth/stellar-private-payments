@@ -228,4 +228,30 @@ mod tests {
             "low-order D unexpectedly verified; expected rejection",
         );
     }
+
+    /// A point of order 8.
+    const ORDER_EIGHT_X: &str =
+        "4342719913949491028786768530115087822524712248835451589697801404893164183326";
+    const ORDER_EIGHT_Y: &str =
+        "4826523245007015323400664741523384119579596407052839571721035538011798951543";
+
+    #[test]
+    #[ignore]
+    fn gvk_2_order_eight_d_rejected() {
+        let (wasm, r1cs) =
+            load_artifacts("globalViewKey_2_test").expect("globalViewKey_2 artifacts");
+        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+
+        // x != 0, so only the x(8*D) != 0 guard catches it.
+        let bad_d = (
+            Scalar::from_str(ORDER_EIGHT_X).expect("valid constant"),
+            Scalar::from_str(ORDER_EIGHT_Y).expect("valid constant"),
+        );
+        let inputs = gvk_inputs(&sample_notes(2), bad_d, Scalar::from(3u64));
+
+        assert!(
+            !proof_verifies(&wasm, &r1cs, &inputs, &keys),
+            "order-8 D unexpectedly verified; expected rejection",
+        );
+    }
 }

@@ -97,6 +97,14 @@ JubJub public key via `--gvk-authority-pubkey-file`.
 cargo run -p gvkey-gen -- generate --out-file admin-d.json > admin-pub.json
 ```
 
+`deploy.sh` runs `gvkey-gen validate` on the key before deploying anything: it
+must be on the Baby JubJub curve and in the prime-order subgroup, as every
+generated key is. To check a key from elsewhere:
+
+```sh
+cargo run -p gvkey-gen -- validate --file admin-pub.json
+```
+
 **Back up `admin-d.json` — the private key cannot be recovered.** `gvkey-gen
 generate` can also save the key into an encrypted client SDK wallet database via
 `--db PATH --storage-account <identity>`.

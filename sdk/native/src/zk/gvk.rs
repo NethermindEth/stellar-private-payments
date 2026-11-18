@@ -146,8 +146,12 @@ impl GvkRecoveredNote {
 impl GlobalViewKeyCiphertext {
     /// Admin-side decryption using the authority private scalar `d`.
     pub fn decrypt(&self, d_priv: &Field) -> Result<GvkRecoveredNote> {
+        let (rx, ry) = self.r.to_coords();
+        if !babyjub::point_from_coords(rx, ry).is_on_curve() {
+            bail!("ephemeral public key in global view key ciphertext is not on the curve");
+        }
         let k = keystream(
-            shared_secret(field_to_scalar(d_priv), self.r.to_coords()).ok_or_else(|| {
+            shared_secret(field_to_scalar(d_priv), (rx, ry)).ok_or_else(|| {
                 anyhow!("invalid ephemeral public key in global view key ciphertext")
             })?,
         );
@@ -290,9 +294,21 @@ impl GlobalViewKeyMemo {
     }
 }
 
-/// Validates admin key `D` per `GlobalViewKeyEncryption`: on-curve and not
-/// low-order (`x(8·D) ≠ 0`).
+/// Validates admin key `D` as the circuit does: on-curve and not low-order
 pub fn validate_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Result<()> {
+    global_view_public_key_point(admin_pub_key).map(|_| ())
+}
+
+/// Validates admin key `D` for deployment: [`validate_global_view_public_key`]
+/// plus prime-order subgroup membership, which every `d·BASE8` key satisfies.
+pub fn validate_deployable_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Result<()> {
+    if !global_view_public_key_point(admin_pub_key)?.is_in_prime_subgroup() {
+        bail!("admin public key is not in the prime-order subgroup");
+    }
+    Ok(())
+}
+
+fn global_view_public_key_point(admin_pub_key: &BabyJubJubPoint) -> Result<Point> {
     let point = babyjub::point_from_coords(
         field_to_scalar(&admin_pub_key.x),
         field_to_scalar(&admin_pub_key.y),
@@ -305,7 +321,7 @@ pub fn validate_global_view_public_key(admin_pub_key: &BabyJubJubPoint) -> Resul
     if eight_d.x.is_zero() {
         bail!("admin public key has low order");
     }
-    Ok(())
+    Ok(point)
 }
 
 /// Generate a fresh per-note salt for GVK encryption.
@@ -473,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn off_curve_ephemeral_key_not_recovered() -> Result<()> {
+    fn decrypt_rejects_off_curve_ephemeral_key() -> Result<()> {
         let d_priv = field(7);
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         let note = sample_note();
@@ -482,8 +498,7 @@ mod tests {
             x: field(1),
             y: field(1),
         };
-        let recovered = ct.decrypt(&d_priv)?;
-        assert_ne!(recovered.pk, note.pk);
+        assert!(ct.decrypt(&d_priv).is_err());
         Ok(())
     }
 
@@ -575,6 +590,40 @@ mod tests {
         let d_priv = field(987_654_321);
         let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
         validate_global_view_public_key(&admin).expect("valid for gvk");
+        validate_deployable_global_view_public_key(&admin).expect("deployable");
+    }
+
+    /// `D + (0, -1)` is `(-x, -y)`.
+    fn torsion_shifted(admin: &BabyJubJubPoint) -> BabyJubJubPoint {
+        let (x, y) = admin.to_coords();
+        BabyJubJubPoint::from_coords(-x, -y)
+    }
+
+    /// The circuit clears the torsion (`S = r·8·D`), so the admin still
+    /// decrypts with `d`. Only deployment refuses the key.
+    #[test]
+    fn torsion_shifted_key_encrypts_but_is_not_deployable() -> Result<()> {
+        let d_priv = field(987_654_321);
+        let admin = BabyJubJubPoint::from_priv_scalar(&d_priv).expect("valid admin key");
+        let shifted = torsion_shifted(&admin);
+        validate_global_view_public_key(&shifted)?;
+        assert!(validate_deployable_global_view_public_key(&shifted).is_err());
+
+        let note = sample_note();
+        let recovered = note.encrypt(&shifted, &field(42), 0)?.decrypt(&d_priv)?;
+        assert_eq!(recovered.pk, note.pk);
+        assert_eq!(recovered.amount, note.amount);
+        assert_eq!(recovered.blinding, note.blinding);
+        Ok(())
+    }
+
+    #[test]
+    fn validate_pub_gvk_rejects_identity() {
+        let identity = BabyJubJubPoint {
+            x: field(0),
+            y: field(1),
+        };
+        assert!(validate_global_view_public_key(&identity).is_err());
     }
 
     #[test]
@@ -626,5 +675,24 @@ mod tests {
         };
         assert!(note.encrypt(&admin, &field(5), 0).is_err());
         Ok(())
+    }
+
+    fn order_eight_admin() -> BabyJubJubPoint {
+        let (x, y) = babyjub::point_to_coords(babyjub::order_eight_point());
+        BabyJubJubPoint::from_coords(x, y)
+    }
+
+    #[test]
+    fn validate_pub_gvk_rejects_order_eight() {
+        assert!(validate_global_view_public_key(&order_eight_admin()).is_err());
+    }
+
+    #[test]
+    fn encrypt_rejects_order_eight_pub_gvk() {
+        assert!(
+            sample_note()
+                .encrypt(&order_eight_admin(), &field(5), 0)
+                .is_err()
+        );
     }
 }
