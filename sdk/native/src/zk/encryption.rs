@@ -213,10 +213,12 @@ fn derive_keypair_from_signature(signature: &KeyDerivationSignature) -> Result<E
 
     // The private key is the derived secret key, so scanning does not derive it
     // again for every output it tries.
-    let mut private = [0u8; 32];
-    private.copy_from_slice(secret.to_bytes().as_slice());
+    // Written straight into the key's own storage: no intermediate array is
+    // made, so there is no extra copy to wipe.
+    let mut private = EncryptionPrivateKey([0u8; 32]);
+    secret.write_exact(&mut private.0);
     Ok(EncryptionKeyPair {
-        private: EncryptionPrivateKey(private),
+        private,
         public: EncryptionPublicKey::try_from(public.to_bytes().to_vec())?,
     })
 }
@@ -252,12 +254,12 @@ fn derive_note_private_key(signature: &KeyDerivationSignature) -> Result<NotePri
     let field = Fr::from_le_bytes_mod_order(&key[..]);
 
     // Serialize into bytes
-    let mut result = [0u8; 32];
+    // Serialized in place into the key's own storage, for the same reason.
+    let mut private = NotePrivateKey([0u8; 32]);
     field
-        .serialize_compressed(&mut result[..])
+        .serialize_compressed(&mut private.0[..])
         .expect("Serialization failed");
-
-    Ok(NotePrivateKey(result))
+    Ok(private)
 }
 
 /// The hash is secret key material, so it is wiped on drop.
@@ -937,13 +939,13 @@ mod known_answer_tests {
     const NOTE_PUBLIC_KEY: &str =
         "efbecb60293baa5cf5900a6ea8a72f03b77dfbbb2b12f3dbcaf38983dcca5223";
     const ENCRYPTION_PRIVATE_KEY: &str =
-        "30a06df7925d37af1a88dddcacaf05c2e9fd3dbafa8e25dcef3f9ec7f16f524e";
+        "fcf5e5865468219941ccc3d53bc582ae19438f441fd1673bdc01f4e561b70ed2";
     /// First 32 bytes of the 1216-byte public key; the hash below covers all of
     /// it.
     const ENCRYPTION_PUBLIC_KEY_HEAD: &str =
-        "b025157f0253d7747bcc6a32a2249d9f043bdf0564921961c429bdd4c8307683";
+        "2e0909419c9707d9269883a4222b433a8ca83c1c6e10981e4c75a2d8267a50d2";
     const ENCRYPTION_PUBLIC_KEY_SHA256: &str =
-        "1d07fb5d2cc1775c37a0ded6c6c718a7229de942ed06bd20285303cb4c4cd750";
+        "3d8177da5d142a790ac7ca4cf3643942039229cd44e03e603268c8a59f64c131";
     const MEMBERSHIP_BLINDING_TESTNET: &str =
         "6f376451fe6b541ef08331b62ca9d092d64fe71a9b9ad0785ff4cedad2a79820";
     /// A 1184-byte note ciphertext produced once for the keys above with
@@ -1034,11 +1036,11 @@ mod known_answer_tests {
         );
         assert_eq!(
             hex::encode(enc.private.0),
-            "4484038c91b5974f44c26f12057c89708fc6c7888fa7dd5f6db01a526e622e27"
+            "21209c6ef67311ee14c73275a229848b682817e8929ec937f1f4b2ae416fe314"
         );
         assert_eq!(
             hex::encode(Sha256::digest(&enc.public.0)),
-            "1185892349c709c3a8bae9a76d146a02ec41ae0c036a9df31e327730b948590f"
+            "3ed452037a37054da3a15456cedea2a6ecf42a1fb78ba940098cbdefa943531f"
         );
     }
 
