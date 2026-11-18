@@ -922,7 +922,8 @@ mod known_answer_tests {
         "efbecb60293baa5cf5900a6ea8a72f03b77dfbbb2b12f3dbcaf38983dcca5223";
     const ENCRYPTION_PRIVATE_KEY: &str =
         "30a06df7925d37af1a88dddcacaf05c2e9fd3dbafa8e25dcef3f9ec7f16f524e";
-    /// First 32 bytes of the 1216-byte public key; the hash below covers all of it.
+    /// First 32 bytes of the 1216-byte public key; the hash below covers all of
+    /// it.
     const ENCRYPTION_PUBLIC_KEY_HEAD: &str =
         "b025157f0253d7747bcc6a32a2249d9f043bdf0564921961c429bdd4c8307683";
     const ENCRYPTION_PUBLIC_KEY_SHA256: &str =

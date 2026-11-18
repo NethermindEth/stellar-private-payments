@@ -401,7 +401,8 @@ const FIXTURE_KEY: [u8; 32] = [0x42; 32];
 
 /// Writes the committed fixture once. Run by hand when the format is changed
 /// on purpose (and then a migration is needed for existing wallets):
-/// `SPP_WRITE_DB_FIXTURE=1 cargo test -p stellar-private-payments --lib write_the_encrypted_fixture`
+/// `SPP_WRITE_DB_FIXTURE=1 cargo test -p stellar-private-payments --lib
+/// write_the_encrypted_fixture`
 #[test]
 fn write_the_encrypted_fixture() -> Result<()> {
     if std::env::var_os("SPP_WRITE_DB_FIXTURE").is_none() {
