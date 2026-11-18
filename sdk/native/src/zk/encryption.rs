@@ -477,9 +477,10 @@ fn encrypt_note_data(recipient_pubkey: &EncryptionPublicKey, plaintext: &[u8]) -
 /// - Success: the decrypted plaintext
 /// - `None`: the data has the wrong length or was not addressed to us
 fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Option<Vec<u8>>> {
-    let secret = <XWing as KemTrait>::PrivateKey::from_bytes(private_key_bytes)
-        .map_err(|_| anyhow!("Private key must be 32 bytes"))?;
-
+    // Reject by shape first: building the X-Wing key expands the seed (SHAKE,
+    // ML-KEM keygen, X25519), which is far too costly to spend on an output
+    // that cannot be ours. A bad key length is reported only for outputs of
+    // the right length; the key comes from the account, not from the chain.
     if encrypted_data.len() != ENCRYPTED_OUTPUT_LEN {
         return Ok(None);
     }
@@ -487,6 +488,9 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
     let Ok(enc) = <XWing as KemTrait>::EncappedKey::from_bytes(enc) else {
         return Ok(None);
     };
+
+    let secret = <XWing as KemTrait>::PrivateKey::from_bytes(private_key_bytes)
+        .map_err(|_| anyhow!("Private key must be 32 bytes"))?;
 
     Ok(
         hpke::single_shot_open::<ChaCha20Poly1305, HkdfSha256, XWing>(
@@ -907,6 +911,18 @@ mod registration_tests {
 #[cfg(test)]
 mod known_answer_tests {
     use super::*;
+
+    #[test]
+    fn wrong_length_outputs_are_skipped_before_the_key_is_built() {
+        // A 31-byte key would be an error if it were parsed, so `Ok(None)`
+        // shows the length was rejected first.
+        let short_key = [0u8; 31];
+        for len in [0, 1, ENCRYPTED_OUTPUT_LEN - 1, ENCRYPTED_OUTPUT_LEN + 1] {
+            let out = decrypt_note_data(&short_key, &vec![7u8; len]).expect("no error");
+            assert!(out.is_none(), "length {len}");
+        }
+        assert!(decrypt_note_data(&short_key, &vec![7u8; ENCRYPTED_OUTPUT_LEN]).is_err());
+    }
     use std::vec;
     #[cfg(target_arch = "wasm32")]
     use wasm_bindgen_test::wasm_bindgen_test;
