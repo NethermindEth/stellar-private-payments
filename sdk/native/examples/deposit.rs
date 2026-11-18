@@ -20,7 +20,7 @@
 //!
 //!   SPP_POOL_CONTRACT_ID      default: first enabled pool in deployment config
 //!
-//!   SPP_AMOUNT_STROOPS        default: 10000000 (1 XLM)
+//!   SPP_TOKEN_AMOUNT_BASE_UNITS        default: 10000000 (1 XLM)
 
 mod common;
 
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Pool:      {}", pool_config.pool_contract_id);
     println!("Asset:     {}", pool_config.token_label());
-    println!("Amount:    {} stroops", u128::from(amount));
+    println!("Amount:    {} base units", u128::from(amount));
     println!("Address:   {}", account.user_address());
     println!();
 

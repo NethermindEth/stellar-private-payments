@@ -36,8 +36,8 @@
 //!
 //!   SPP_POOL_CONTRACT_ID      default: first enabled pool in deployment config
 //!
-//!   SPP_AMOUNT_STROOPS        default: 10000000 (1 XLM); amount of each of
-//!                             the 4 deposited notes
+//!   SPP_TOKEN_AMOUNT_BASE_UNITS        default: 10000000 (1 XLM); amount of
+//! each of                             the 4 deposited notes
 
 mod common;
 
@@ -68,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     println!(
-        "Depositing {NOTE_COUNT} notes of {} stroops each...",
+        "Depositing {NOTE_COUNT} notes of {} base units each...",
         u128::from(note_amount)
     );
     for i in 1..=NOTE_COUNT {
@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|n| u128::from(n.amount))
         .fold(0u128, u128::saturating_add);
     println!(
-        "Wallet holds {} note(s) totaling {total} stroops",
+        "Wallet holds {} note(s) totaling {total} base units",
         notes.len()
     );
 
@@ -102,7 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let amount = pool.max_spend()?;
     println!();
-    println!("Preparing withdrawal plan for the most one spend can send ({amount} stroops)...");
+    println!("Preparing withdrawal plan for the most one spend can send ({amount} base units)...");
     let mut plan = pool.prepare_withdraw(&notes, amount, &recipient)?;
     print_plan_cursor(&plan);
 
