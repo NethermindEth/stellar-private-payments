@@ -117,7 +117,7 @@ pub fn verify_owner_signature(
 }
 
 const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v1";
-const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v3";
+const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v1";
 
 /// HPKE `info` of a note ciphertext.
 const NOTE_ENCRYPTION_INFO: &[u8] = b"privacy-pool/note/v1";
