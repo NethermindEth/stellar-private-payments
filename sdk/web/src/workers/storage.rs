@@ -324,8 +324,7 @@ const OPFS_LOCK_RETRY_DELAY_MS: u32 = 200;
 async fn init(opening: OpenRequest) -> Result<(), JsError> {
     let directory = match &opening {
         #[cfg(feature = "unencrypted-storage")]
-        // Not `.opfs-sahpool`: the app treats that directory as legacy
-        // plaintext storage and offers to delete it.
+        // Separate from the encrypted storage directories.
         OpenRequest::Plaintext => ".opfs-sahpool-plaintext",
         #[cfg(feature = "encrypted-storage")]
         OpenRequest::Encrypted { directory, .. } => {

@@ -32,7 +32,7 @@ import { AppStorage } from './app-storage.js';
 import { openWalletStorage } from './storage-key.js';
 import { confirmStorageAccount } from './storage-account-dialog.js';
 import { verifyStorageSignature } from './storage-signature.js';
-import { STORAGE_RECORD_KEY, exportStorageBackup, importStorageBackup, parseBackup, resetStorage, hasEncryptedStorage, hasLegacyPlaintextStorage, removeLegacyPlaintextStorage, acquireStorageLease } from './storage-backup.js';
+import { STORAGE_RECORD_KEY, exportStorageBackup, importStorageBackup, parseBackup, resetStorage, hasEncryptedStorage, acquireStorageLease } from './storage-backup.js';
 import { getWalletAddress, signWalletMessage, startWalletWatcher } from './wallet.js';
 import { StrKey } from '@stellar/stellar-sdk';
 // Trunk bundles the selected deployment's trusted fingerprints into the app.
@@ -274,7 +274,6 @@ export async function ensureStorage({ unlock = false } = {}) {
                 storageHandle = handle;
                 clearStorageLocked();
                 stopAutoLock = startAutoLock(() => void lockStorage({ idleMinutes: autoLockMinutes() }));
-                await checkLegacyPlaintextStorage().catch(() => {});
                 setStorageState('ready');
                 installStoragePauseOnUnload();
             }).catch(error => {
@@ -297,23 +296,6 @@ function walletStorageOptions() {
         verifySignature: (address, message, signature) =>
             verifyStorageSignature(StrKey.decodeEd25519PublicKey(address), message, signature),
     };
-}
-
-export async function checkLegacyPlaintextStorage() {
-    const root = await navigator.storage?.getDirectory?.();
-    if (!root) return false;
-    const present = await hasLegacyPlaintextStorage(root);
-    if (present) document.body.dataset.legacyStorage = 'present';
-    else delete document.body.dataset.legacyStorage;
-    window.dispatchEvent(new Event(STORAGE_STATE_EVENT));
-    return present;
-}
-
-export async function deleteLegacyStorage() {
-    const root = await navigator.storage.getDirectory();
-    await removeLegacyPlaintextStorage(root);
-    delete document.body.dataset.legacyStorage;
-    window.dispatchEvent(new Event(STORAGE_STATE_EVENT));
 }
 
 export async function manageStorageBackup(action, text) {
