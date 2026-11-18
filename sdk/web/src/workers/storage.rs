@@ -484,13 +484,19 @@ enum MainFile {
 
 /// Find the database file `name` in the OPFS pool, removing it when it is
 /// empty.
+///
+/// The pool's errors are turned into messages rather than converted with `?`:
+/// they hold a `JsValue`, which is not `Send + Sync` in builds with atomics
+/// (the threaded prover worker links this module too), so they cannot become
+/// `anyhow::Error` there.
 #[cfg(target_arch = "wasm32")]
 fn main_file(name: &str) -> anyhow::Result<MainFile> {
     SAH_POOL.with(|p| {
         use sqlite_wasm_rs::vfs::VfsFilesManager;
         let pool = p.borrow();
         let pool = pool.as_ref().ok_or_else(|| anyhow!("OPFS unavailable"))?;
-        if !pool.contains(name)? {
+        let contains = |file: &str| pool.contains(file).map_err(|e| anyhow!("{e}"));
+        if !contains(name)? {
             return Ok(MainFile::Missing);
         }
         if !database_is_empty(name)? {
@@ -500,11 +506,10 @@ fn main_file(name: &str) -> anyhow::Result<MainFile> {
         // open yet. Only a zero-byte main file without recovery sidecars is
         // safe to recreate.
         anyhow::ensure!(
-            !pool.contains(&format!("{name}-journal"))?
-                && !pool.contains(&format!("{name}-wal"))?,
+            !contains(&format!("{name}-journal"))? && !contains(&format!("{name}-wal"))?,
             "empty database has recovery files; existing data has been preserved"
         );
-        pool.remove(name)?;
+        pool.remove(name).map_err(|e| anyhow!("{e}"))?;
         Ok(MainFile::Removed)
     })
 }

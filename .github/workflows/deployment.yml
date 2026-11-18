@@ -49,9 +49,11 @@ jobs:
             target/tmp/witness-opt-cache
           key: binaryen-${{ runner.os }}-${{ runner.arch }}-version_131-bulk-memory-reference-types-multivalue-sign-ext-nontrapping-float-to-int-mutable-globals
 
+      # rust-src: the threaded prover worker rebuilds std from source.
       - name: Install wasm build prerequisites
         run: |
           rustup target add wasm32-unknown-unknown
+          rustup component add rust-src
           cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
       - name: Build circuit artifacts

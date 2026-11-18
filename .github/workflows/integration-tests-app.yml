@@ -38,6 +38,12 @@ jobs:
           targets: wasm32-unknown-unknown
           override: true
 
+      # The threaded prover worker rebuilds std from source. rustup takes the
+      # toolchain from rust-toolchain.toml, which lists rust-src; make sure.
+      - name: Install rust-src for the threaded prover worker
+        run: rustup component add rust-src
+
+      # Also keeps target/web-threads, the threaded worker's std and dependencies.
       - name: Cache
         uses: ./.github/actions/rust-cache
         with:

@@ -20,6 +20,12 @@ case "${1:-}" in
   browser)
     rustup target add --toolchain "$RUSTUP_TOOLCHAIN" wasm32-unknown-unknown
     cargo build --locked --release --target wasm32-unknown-unknown -p stellar-private-payments-web --lib --bins
+    # The shipped threaded prover worker is built with atomics, which takes
+    # RUSTC_BOOTSTRAP and a std rebuilt from the pinned toolchain's sources;
+    # neither is part of the MSRV promise, so build.sh's threaded build is not
+    # repeated here. The `threads` feature without atomics, which carries the
+    # SDK's `parallel-chunked-msm`, must still compile on the minimum compiler.
+    cargo check --locked --target wasm32-unknown-unknown -p stellar-private-payments-web --bins --features threads
     cargo check --locked --target wasm32-unknown-unknown -p stellar-private-payments --tests
     # The e2e suite embeds this file at compile time. These checks never run
     # against a network; use a committed fixture only if no local deployment exists.

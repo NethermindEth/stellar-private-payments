@@ -18,7 +18,8 @@ jobs:
   wasm-build:
     env:
       SPP_NETWORK: testnet
-    timeout-minutes: 30
+    # The threaded prover worker and the prover test add a few minutes.
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,6 +33,12 @@ jobs:
           targets: wasm32-unknown-unknown
           override: true
 
+      # The threaded prover worker rebuilds std from source. rustup takes the
+      # toolchain from rust-toolchain.toml, which lists rust-src; make sure.
+      - name: Install rust-src for the threaded prover worker
+        run: rustup component add rust-src
+
+      # Also keeps target/web-threads, the threaded worker's std and dependencies.
       - name: Cache
         uses: ./.github/actions/rust-cache
         with:
@@ -73,6 +80,11 @@ jobs:
           npm run check:artifacts --prefix sdk/web
           npm run check:bindgen --prefix sdk/web
           npm run check:types --prefix sdk/web
+
+      # Proves on the threaded worker of an isolated page and on the serial
+      # worker of a page that is not isolated.
+      - name: Test the prover workers in Chromium
+        run: node sdk/web/scripts/test-prover-threads.js --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --artifacts "$RUNNER_TEMP/prover-checks/chromium"
 
       - name: Test SDK amount bindings
         run: npm run test:amounts --prefix sdk/web
@@ -129,8 +141,9 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
-      # No web build turns `parallel-chunked-msm` on yet; keep it compiling for
-      # wasm32. `parallel` is not checked here: its MSM cannot run on wasm32.
+      # The threaded prover worker builds `parallel-chunked-msm` with atomics
+      # (wasm-build job); keep it compiling, warning-free, without them too.
+      # `parallel` is not checked here: its MSM cannot run on wasm32.
       - name: Check the parallel-chunked-msm feature on wasm32
         env:
           RUSTFLAGS: "-Dwarnings"

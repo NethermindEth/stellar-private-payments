@@ -9,8 +9,10 @@ import { fileURLToPath } from 'node:url';
 const web = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const required = new Set([
   'package.json', 'js/index.js', 'js/types/api-types.d.ts',
-  'dist/stellar_private_payments_web.js', 'dist/stellar_private_payments_web_bg.wasm',
+  'dist/stellar_private_payments_web.js', 'dist/stellar_private_payments_web_bg.wasm', 'dist/prover-threads.js',
   'dist/workers/storage-worker-module.js', 'dist/workers/storage-worker-module_bg.wasm',
+  'dist/workers/prover-worker-threads.js', 'dist/workers/prover-worker-threads-module.js',
+  'dist/workers/prover-worker-threads-module_bg.wasm',
   'dist/circuits/NOTICE.txt', 'dist/circuits/source-bundle.tar.gz',
 ]);
 
@@ -27,6 +29,10 @@ function npmPack(...args) {
 
 function verifyNames(names) {
   for (const name of required) if (!names.has(name)) throw new Error(`package is missing ${name}`);
+  // wasm-bindgen-rayon starts the threaded prover worker's pool from this snippet.
+  if (![...names].some((name) => /^dist\/workers\/snippets\/wasm-bindgen-rayon-[^/]+\/src\/workerHelpers\.no-bundler\.js$/.test(name))) {
+    throw new Error('package is missing the wasm-bindgen-rayon worker snippet');
+  }
   for (const name of names) {
     if (isAbsolute(name) || name.split('/').includes('..') || name.includes('test-sqlite3mc') || name.startsWith('scripts/')) {
       throw new Error(`unexpected package entry: ${name}`);
@@ -34,13 +40,17 @@ function verifyNames(names) {
   }
 }
 
-function verify(read) {
+function verify(read, names) {
+  // The facade only uses the threaded prover worker if the marker names it.
+  if (read('dist/prover-threads.js').toString().includes('threadedProverWorkerUrl = null')) {
+    throw new Error('dist/prover-threads.js names no threaded prover worker');
+  }
   const bindings = read('dist/stellar_private_payments_web.js').toString();
   for (const method of ['static open(']) {
     if (!bindings.includes(method)) throw new Error(`WASM bindings lack ${method}`);
   }
   if (!read('js/index.js').toString().includes('keyProvider')) throw new Error('JavaScript facade lacks encrypted storage access');
-  for (const name of ['dist/stellar_private_payments_web_bg.wasm', 'dist/workers/storage-worker-module_bg.wasm']) {
+  for (const name of ['dist/stellar_private_payments_web_bg.wasm', 'dist/workers/storage-worker-module_bg.wasm', 'dist/workers/prover-worker-threads-module_bg.wasm']) {
     if (!read(name).subarray(0, 4).equals(Buffer.from([0, 97, 115, 109]))) throw new Error(`invalid WASM artifact: ${name}`);
   }
 }
@@ -49,7 +59,7 @@ const outputIndex = process.argv.indexOf('--output-directory');
 const dryRun = npmPack('--dry-run');
 const names = new Set(dryRun.files.map(({ path }) => path));
 verifyNames(names);
-verify((name) => readFileSync(join(web, name)));
+verify((name) => readFileSync(join(web, name)), names);
 const report = { passed: true, mode: 'dry-run', files: names.size };
 
 if (outputIndex !== -1) {
@@ -63,7 +73,7 @@ if (outputIndex !== -1) {
   if (entries.some((name) => !name.startsWith('package/') || name.endsWith('/'))) throw new Error('unexpected npm archive member');
   const archiveNames = new Set(entries.map((name) => name.slice('package/'.length)));
   verifyNames(archiveNames);
-  verify((name) => execFileSync('tar', ['-xOzf', archive, `package/${name}`], { maxBuffer: 16 * 1024 * 1024 }));
+  verify((name) => execFileSync('tar', ['-xOzf', archive, `package/${name}`], { maxBuffer: 16 * 1024 * 1024 }), archiveNames);
   Object.assign(report, {
     mode: 'archive', archive: packed.filename,
     sha256: createHash('sha256').update(readFileSync(archive)).digest('hex'),

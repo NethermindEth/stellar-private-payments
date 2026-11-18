@@ -2,9 +2,9 @@
 /**
  * Verify required SDK artifacts exist before `tsc` (CI / prepublish).
  */
-import { access } from 'node:fs/promises';
+import { access, readdir } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -14,6 +14,10 @@ const required = [
   'dist/stellar_private_payments_web.d.ts',
   'dist/workers/storage-worker.js',
   'dist/workers/prover-worker.js',
+  'dist/workers/prover-worker-threads.js',
+  'dist/workers/prover-worker-threads-module.js',
+  'dist/workers/prover-worker-threads-module_bg.wasm',
+  'dist/prover-threads.js',
   'dist/circuits/circuits.json',
   'dist/circuits/policy_tx_2_2.graph.bin',
   'dist/circuits/policy_tx_2_2.r1cs',
@@ -80,4 +84,27 @@ for (const rel of required) {
     console.error(`missing ${rel} — run npm run build`);
     process.exit(1);
   }
+}
+
+// The SDK ships the threaded prover worker, and the marker must name it.
+// SPP_WEB_THREADS=0 builds without it, for local use only.
+const marker = path.join(root, '..', 'dist/prover-threads.js');
+const { threadedProverWorkerUrl } = await import(pathToFileURL(marker).href);
+if (!threadedProverWorkerUrl) {
+  console.error('dist/prover-threads.js names no threaded prover worker — run npm run build without SPP_WEB_THREADS=0');
+  process.exit(1);
+}
+// wasm-bindgen-rayon starts the pool's threads from this snippet.
+const snippets = await readdir(path.join(root, '..', 'dist/workers/snippets')).catch(() => []);
+const rayonSnippet = snippets.find((name) => name.startsWith('wasm-bindgen-rayon-'));
+if (!rayonSnippet) {
+  console.error('missing dist/workers/snippets/wasm-bindgen-rayon-* — run npm run build');
+  process.exit(1);
+}
+const rayonHelpers = `dist/workers/snippets/${rayonSnippet}/src/workerHelpers.no-bundler.js`;
+try {
+  await access(path.join(root, '..', rayonHelpers), constants.R_OK);
+} catch {
+  console.error(`missing ${rayonHelpers} — run npm run build`);
+  process.exit(1);
 }

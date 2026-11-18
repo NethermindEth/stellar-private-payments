@@ -159,7 +159,8 @@ bash scripts/check-msrv.sh consumer
 
 The scripts explicitly select the minimum compiler, independently of the local
 toolchain pin. Locked checks cover native workspace targets, the SDK's optional
-native `parallel` feature, browser WASM and workers, all deployable contracts,
+native `parallel` feature, browser WASM and workers (the threaded prover worker
+without atomics), all deployable contracts,
 bootnode tests, and compilation of the excluded integration suites. Browser and
 contract checks install their Rust targets. The consumer check resolves fresh
 dependencies for the packaged SDK outside the workspace; it intentionally does
@@ -188,8 +189,9 @@ use the pinned development toolchain for that operation.
 
 `ark-circom` is [patched](https://github.com/NethermindEth/circom-compat/commits/wasm-no-parallel/) 
 (`Cargo.toml` is cleaned up from hardcoded `parallel` features) to allow running 
-in a single-threaded WASM - we don't want for now to enable multithreaded wasm support as the proving time is acceptable
-while wasm multithreading requires COOP/COEP headers and is much stricter to deploy.
+in a single-threaded WASM. The browser SDK does not use `ark-circom`: it proves multi-threaded with the
+SDK's `parallel-chunked-msm` feature in a separate prover worker, on cross-origin isolated (COOP/COEP)
+pages only (see [`sdk/web/README.md`](sdk/web/README.md#multi-threaded-proving)).
 Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
 `vendor/cranelift-control` is patched - the single dependency `arbitrary` is fixed at the same version as in
 the `soroban-sdk` - see https://github.com/NethermindEth/stellar-private-payments/issues/192.
@@ -322,6 +324,9 @@ make sdk-web-build
 npm run check:artifacts --prefix sdk/web
 npm run check:types --prefix sdk/web
 ```
+
+The build includes the threaded prover worker, which rebuilds std from the `rust-src` component of
+the toolchain in `rust-toolchain.toml`; `SPP_WEB_THREADS=0` skips it.
 
 CI runs these checks in `.github/workflows/wasm-build.yml`.
 

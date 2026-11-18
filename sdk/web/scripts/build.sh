@@ -69,6 +69,58 @@ cargo build --locked -p stellar-private-payments-web $CARGO_PROFILE_FLAG --targe
 echo "==> Building prover-worker ($PROVER_PROFILE)..."
 cargo build --locked -p stellar-private-payments-web $PROVER_PROFILE_FLAG --target "$TARGET" --bin prover-worker $CARGO_FEATURE_FLAGS
 
+# Also build a prover worker that proves on a rayon pool of Web Workers sharing
+# one wasm memory. Only cross-origin isolated pages can run it, so it ships
+# beside the serial worker, not instead of it. SPP_WEB_THREADS=0 leaves it out,
+# for a quicker build or a toolchain without the `rust-src` component.
+THREADS=1
+if [[ "${SPP_WEB_THREADS:-1}" == "0" ]]; then
+  THREADS=0
+fi
+THREADS_TARGET_DIR="$CARGO_TARGET_DIR/web-threads"
+THREADS_WASM="$THREADS_TARGET_DIR/$TARGET/$PROVER_PROFILE/prover-worker-threads.wasm"
+if [[ "$THREADS" == "1" ]]; then
+  # Appended to the rustflags in .cargo/config.toml, which already sets the
+  # `--max-memory` that a shared memory has to declare.
+  THREADS_RUSTFLAGS=(
+    # atomics: atomic instructions and real thread-local storage, so that std's
+    # locks and rayon's queues work across threads. bulk-memory is in the
+    # target's baseline already; it is spelled out because shared memory
+    # depends on it (data segments are copied in once, not by every thread).
+    "-Ctarget-feature=+atomics,+bulk-memory"
+    # Make the linear memory shared, i.e. backed by a SharedArrayBuffer.
+    "-Clink-arg=--shared-memory"
+    # Import the memory instead of defining it, so that every thread
+    # instantiates the module over the same one. wasm-bindgen insists on it.
+    "-Clink-arg=--import-memory"
+    # wasm-bindgen sets up each thread's thread-local storage through these.
+    "-Clink-arg=--export=__wasm_init_tls"
+    "-Clink-arg=--export=__tls_size"
+    "-Clink-arg=--export=__tls_align"
+    "-Clink-arg=--export=__tls_base"
+  )
+  # The linker rejects shared memory unless every object was compiled for it,
+  # and the crate's SQLite C objects are linked into this worker as well. cc-rs
+  # reads the hyphenated key first, so passing the flags there, after whatever
+  # CFLAGS it would have used, keeps an existing override.
+  THREADS_CFLAGS="$(printenv "CFLAGS_$TARGET" || true)"
+  THREADS_CFLAGS="${THREADS_CFLAGS:-${CFLAGS_wasm32_unknown_unknown:-${TARGET_CFLAGS:-${CFLAGS:-}}}}"
+
+  echo "==> Building the threaded prover worker ($PROVER_PROFILE)..."
+  # The prebuilt std assumes a single thread, so `-Z build-std` compiles std
+  # with the flags above from the `rust-src` component. RUSTC_BOOTSTRAP=1 makes
+  # the pinned stable toolchain accept that flag and the still unstable
+  # `atomics` feature. Nothing can be shared with the default build's
+  # artifacts, hence the separate target directory.
+  RUSTC_BOOTSTRAP=1 CARGO_TARGET_DIR="$THREADS_TARGET_DIR" \
+    env "CFLAGS_$TARGET=$THREADS_CFLAGS -matomics -mbulk-memory" \
+    cargo build --locked -p stellar-private-payments-web $PROVER_PROFILE_FLAG --target "$TARGET" \
+    --bin prover-worker-threads $CARGO_FEATURE_FLAGS --features threads \
+    -Z build-std=panic_abort,std \
+    --config "target.$TARGET.rustflags=[$(printf '"%s",' "${THREADS_RUSTFLAGS[@]}")]"
+  [[ -f "$THREADS_WASM" ]] || { echo "error: missing $THREADS_WASM" >&2; exit 1; }
+fi
+
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
   echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2
   exit 1
@@ -165,6 +217,7 @@ echo "==> Running wasm-opt (-Os main/storage, -O3 prover)..."
 optimize_wasm() {
   local level="$1"
   local file="$2"
+  shift 2
   "$WASM_OPT" "$level" \
     --enable-bulk-memory \
     --enable-reference-types \
@@ -172,6 +225,7 @@ optimize_wasm() {
     --enable-sign-ext \
     --enable-nontrapping-float-to-int \
     --enable-mutable-globals \
+    "$@" \
     "$file" -o "$file"
 }
 
@@ -186,7 +240,7 @@ write_worker_loader() {
   cat >"$WEB/dist/workers/${name}.js" <<EOF
 import init from './${name}-module.js';
 EOF
-  if [[ "$name" == "prover-worker" ]]; then
+  if [[ "$name" == prover-worker* ]]; then
     cat >>"$WEB/dist/workers/${name}.js" <<'EOF'
 globalThis.__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__ =
   new URL('../circuits/', import.meta.url).href;
@@ -200,13 +254,44 @@ EOF
 write_worker_loader storage-worker
 write_worker_loader prover-worker
 
+if [[ "$THREADS" == "1" ]]; then
+  wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name prover-worker-threads-module "$THREADS_WASM"
+  # The pool's threads are started by this wasm-bindgen-rayon snippet, which is
+  # only there if the worker really was compiled with atomics. RUSTFLAGS in the
+  # environment, for one, replaces the flags passed above.
+  THREADS_SNIPPET=("$WEB/dist/workers/snippets"/wasm-bindgen-rayon-*/src/workerHelpers.no-bundler.js)
+  if [[ ! -f "${THREADS_SNIPPET[0]}" ]]; then
+    echo "error: prover-worker-threads was built without atomics (is RUSTFLAGS set?)" >&2
+    exit 1
+  fi
+  # Atomic instructions do not validate without --enable-threads.
+  optimize_wasm -O3 "$WEB/dist/workers/prover-worker-threads-module_bg.wasm" --enable-threads
+  write_worker_loader prover-worker-threads
+fi
+
+# js/index.js reads this to know whether a threaded worker is part of the
+# build, without probing for it over the network. It is a module so that it
+# works unbundled and bundled alike; the URL sits here, not in index.js, so a
+# bundler only ever sees a `new URL` for a file that exists.
+if [[ "$THREADS" == "1" ]]; then
+  cat >"$WEB/dist/prover-threads.js" <<'EOF'
+export const threadedProverWorkerUrl =
+  new URL('./workers/prover-worker-threads.js', import.meta.url).href;
+EOF
+else
+  cat >"$WEB/dist/prover-threads.js" <<'EOF'
+export const threadedProverWorkerUrl = null;
+EOF
+fi
+
 echo "==> Staging bundled circuit artifacts..."
 bash "$WEB/scripts/stage-circuits-dist.sh"
 
 echo "==> Staging wasm-bindgen TypeScript declarations..."
 bash "$WEB/scripts/stage-wasm-types.sh"
 
-# Shared with Trunk.toml and the Makefile; includes both wasm profiles.
+# Shared with Trunk.toml and the Makefile; includes both wasm profiles and
+# whether the threaded prover worker was built.
 sh "$WEB/scripts/profile-key.sh" > "$WEB/.trunk-wasm-profile"
 
 echo "==> Built sdk/web/dist/"
