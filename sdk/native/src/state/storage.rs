@@ -73,11 +73,19 @@ pub(crate) struct AccountKeys {
     pub keys: StoredPrivateKeys,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct StoredPrivateKeys {
     pub note_keypair: NoteKeyPair,
     pub encryption_keypair: EncryptionKeyPair,
     pub membership_blinding: Field,
+}
+
+/// `membership_blinding` is secret and `Field` prints its value, so nothing
+/// here is printed.
+impl std::fmt::Debug for StoredPrivateKeys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("StoredPrivateKeys(<redacted>)")
+    }
 }
 
 #[derive(Debug, Clone)]

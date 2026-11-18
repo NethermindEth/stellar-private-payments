@@ -86,10 +86,17 @@ pub(crate) struct PrivacyKeys {
     encryption_keypair: PublicEncryptionKeyPair,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AspSecret {
     membership_blinding: Field,
+}
+
+/// The blinding is secret and `Field` prints its value.
+impl std::fmt::Debug for AspSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AspSecret(<redacted>)")
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
