@@ -106,8 +106,7 @@ declare the same version explicitly. `bash scripts/msrv.sh` uses stable Cargo an
 uses the canonical `rust-version = "X.Y.Z"` layout in `[workspace.package]`.
 Independent packages are listed explicitly in the checker; add new independent
 first-party packages there. Untracked scratch projects are not part of the policy.
-The baseline is Rust 1.95.0, matching the requirement declared by
-`rusqlite_migration` (`spp-rusqlite-migration`) in the locked SDK dependency graph.
+The baseline is Rust 1.95.0.
 
 The development/release compiler in `rust-toolchain.toml` may be newer. Updating
 that pin does not raise the MSRV. Keep the minimum until a language feature,
@@ -160,7 +159,7 @@ use the pinned development toolchain for that operation.
 `circuits::circom_compat` (`circuits/src/circom_compat/`) and `tools/ceremony-cli/src/zkey.rs` vendor the
 parts of [`arkworks-rs/circom-compat`](https://github.com/arkworks-rs/circom-compat) the circuit tools and
 tests use: the R1CS reader, the Circom circuit and QAP reduction, and the zkey reader. Each file's header names
-its upstream file, at commit `09e92d4` of the upstream repository (not a fork). The upstream crate is not a dependency, 
+its upstream file, at commit `09e92d4` of the upstream repository. The upstream crate is not a dependency,
 because it would pull in the Wasmer WASM runtime.
 
 The native SDK (`stellar-private-payments`) does not depend on Wasmer either; witness generation uses
