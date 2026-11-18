@@ -31,8 +31,7 @@ verifier contract, since the verifying key is baked into the WASM.
 | `<gvk-mode>` | Omit for `gvk-off`. See [Global View Key (GVK)](#global-view-key-gvk) below. |
 | `<asset-spec>` | `native:<TOKEN_CONTRACT_ID>` \| `classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>`. `<TOKEN_CONTRACT_ID>` must be the asset's own Stellar asset contract. `deploy.sh` warns about each flag that gives a classic issuer a power over the pool's balance. |
 
-If neither `--token` nor `--pool` is given, one native XLM pool deploys by
-default.
+If no `--pool` is given, one native XLM pool deploys by default.
 
 ## Required options
 
@@ -52,7 +51,6 @@ default.
 | Option | Meaning |
 |---|---|
 | `--admin <ADDRESS>` | Admin address (`G...` or `C...`); defaults to the deployer's. For the multisig admin account a shared deployment needs, see the [governance runbook](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/governance.md) |
-| `--token <ADDRESS>` | Legacy single-pool native XLM contract (cannot mix with `--pool`) |
 | `--gvk-authority-pubkey <JSON>` / `--gvk-authority-pubkey-file <PATH>` | Admin Baby JubJub public key (`{"x":"0x..","y":"0x.."}`), required by any pool using `gvk-viewonly` or `gvk-traceable` |
 | `--vk-json <JSON>` / `--vk-file <PATH>` | Verification key for allowlist-blocklist (AB) ceremony builds only — other VKs load automatically from `deployments/<network>/circuit_keys/` |
 | `--skip-init` | Deploy Wasm only, no constructors |
