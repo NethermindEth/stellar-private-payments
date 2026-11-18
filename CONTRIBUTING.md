@@ -23,60 +23,35 @@ Unified project documentation is available at https://nethermindeth.github.io/st
 ```
 stellar-private-payments/
 ├── app/                        # Web application (see app/README.md, app/ARCHITECTURE.md)
-│   ├── js/                     # JavaScript frontend code (web interface)
-│   │   ├── ui/                 # UI components
-│   │   ├── admin.js            # Admin UI entry
-│   │   ├── ui.js               # Main UI entry
-│   │   ├── disclosure.js       # Selective disclosure UI entry
-│   │   ├── app-storage.js      # App-only persistence (settings, op history)
-│   │   ├── db-locked.js        # DB-locked (storage in use by another tab) modal
-│   │   ├── wallet.js           # Varial connect/watch/sign UX
-│   │   ├── wasm-facade.js      # Runtime facade over stellar-private-payments
-│   │   └── sw.js               # Service worker
-│   ├── css/                    # Stylesheets
-│   ├── assets/                 # Static assets (logo, favicon)
-│   ├── index.html              # Main web application entry (includes the Disclosure view)
-│   └── admin.html              # Admin entry
-├── sdk/                        # Platform-agnostic Rust SDK crates
-│   ├── native/                 # Rust SDK (`stellar-private-payments`)
-│   ├── web/                    # Browser npm package (WASM, workers, bundled circuits)
+├── sdk/                        # Rust SDK crates
+│   ├── native/                 # Core SDK (`stellar-private-payments`): chain access, state, ZK flows, notes
+│   ├── web/                    # Browser npm package (WASM build of the SDK, workers, bundled circuits)
 │   └── tests/                  # SDK integration tests
-├── circuits/                   # Circom ZK circuits
-│   ├── src/
-│   │   ├── core/               # Rust circuit helpers (Merkle, ...)
-│   │   ├── poseidon2/          # Poseidon2 hash circuits
-│   │   ├── smt/                # Sparse Merkle tree circuits
-│   │   ├── test/               # Circuit test utilities
-│   │   ├── policyTransaction.circom      # Base transact circuit
-│   │   ├── aspMembership.circom          # ASP allowlist proof subcircuit
-│   │   ├── aspNonMembership.circom       # ASP blocklist proof subcircuit
-│   │   ├── policyTransactionOpen.circom  # Open-policy transaction circuit
-│   │   ├── policyTransactionAllowlist.circom  # Allowlist-only transaction circuit
-│   │   ├── policyTransactionBlocklist.circom  # Blocklist-only transaction circuit
-│   │   ├── policyTransactionBoth.circom  # Both-policy transaction circuit
-│   │   ├── policy_tx_2_2[_A|_B|_AB].circom  # Entry points
-│   │   └── *.circom            # Supporting circuits
-│   └── build.rs                # Circuit compilation build script
-├── circuit-keys/               # Helpers to convert snarkjs keys to Arkworks
+├── cli/                        # CLI binary (stellar-private-payments-cli; see CLI development)
+├── circuits/                   # Circom circuits, Rust circuit helpers and per-circuit tests
+├── circuit-keys/               # Shared Groth16 key serialization (Arkworks/Soroban formats)
 ├── contracts/                  # Soroban smart contracts
-│   ├── asp-membership/         # ASP membership Merkle tree
-│   ├── asp-non-membership/     # ASP non-membership sparse Merkle tree
-│   ├── circom-groth16-verifier/# On-chain Groth16 proof verifier
-│   ├── pool/                   # Main privacy pool contract
+│   ├── pool/, pool-gvk/        # Privacy pools (pool-gvk adds the Global View Key); pool-core is their shared logic
+│   ├── asp-membership/         # ASP allowlist Merkle tree
+│   ├── asp-non-membership/     # ASP blocklist sparse Merkle tree
 │   ├── public-key-registry/    # On-chain public key registry
-│   ├── soroban-utils/          # Shared utilities (Poseidon2, etc.)
+│   ├── circom-groth16-verifier/# On-chain Groth16 proof verifier
+│   ├── soroban-utils/          # Shared contract utilities
 │   └── types/                  # Shared contract types
 ├── tools/                      # Auxiliary tools
-│   ├── bootnode/               # HTTPS JSON-RPC getEvents service (excluded from workspace)
-│   └── ceremony-cli/           # Groth16 BN254 trusted-setup ceremony CLI (wraps snarkjs)
-├── cli/                        # CLI binary (stellar-private-payments-cli; see CLI development)
-├── integration-tests-app/      # Real-Varial browser e2e suite (see integration-tests-app/README.md)
-├── integration-tests-web/      # Pre-signing SDK browser e2e suite (see integration-tests-web/README.md)
-├── e2e-tests/                  # End-to-end integration tests
-├── deployments/                # Deployment scripts, testnet config, legal notices
+│   ├── circuit-compiler/       # Builds circuit artifacts (R1CS, WASM, keys, witness graphs)
+│   ├── ceremony-cli/           # Groth16 BN254 trusted-setup ceremony CLI (wraps snarkjs)
+│   ├── gvkey-gen/              # Generates and validates Global View Key authority keys
+│   └── bootnode/               # HTTPS JSON-RPC getEvents service (excluded from workspace)
+├── e2e-tests/                  # End-to-end tests: real proofs and SDK flows against the contracts in the Soroban test environment
+├── integration-tests/          # Tests against a local stellar/quickstart container (excluded from workspace)
+├── integration-tests-web/      # Pre-signing SDK browser e2e suite (excluded from workspace)
+├── integration-tests-app/      # Real-Varial browser e2e suite and app unit tests
+├── deployments/                # Deployment scripts, per-network config and circuit keys, legal notices
 ├── docs/                       # Project documentation (mdBook source)
-├── scripts/                    # Helper scripts
-├── dist/                       # Built static site output (generated)
+├── scripts/                    # Build, release, license and MSRV helper scripts
+├── testdata/                   # Generated circuit artifacts for tests (git-ignored)
+├── dist/                       # Built static site output (generated, git-ignored)
 └── Makefile                    # Build automation
 ```
 
@@ -85,7 +60,7 @@ stellar-private-payments/
 - [**Rust**](https://www.rust-lang.org/tools/install): the supported minimum is declared in `workspace.package.rust-version` in `Cargo.toml`; `rust-toolchain.toml` selects the development and release compiler.
 - [**Circom**](https://github.com/iden3/circom) **2.2.3** for circuit / graph builds (`circuits/circom.lock`; same tag as the Rust circom crates in `circuits/Cargo.toml`).
 - [**Stellar CLI**](https://github.com/stellar/stellar-cli) for contract deployment.
-- [**Node.js**](https://github.com/nodejs/node) for frontend dependencies.
+- [**Node.js**](https://github.com/nodejs/node) for frontend dependencies and circuits witness generation in soundness tests.
 - [**Trunk**](https://github.com/trunk-rs/trunk) for serving the web application.
 - [**Cargo Deny**](https://github.com/EmbarkStudios/cargo-deny)
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
