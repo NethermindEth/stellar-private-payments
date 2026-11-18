@@ -82,11 +82,14 @@ export const NotesTable = {
             }));
             this.render();
             this._refreshSequence += 1;
+            this._failing = false;
             this.publishReadiness('ready');
         } catch (error) {
             this.publishReadiness('error');
             console.warn('[NotesTable] refresh failed:', error);
-            Toast.show('Failed to refresh notes', 'info');
+            // Polling retries every few seconds; say so once per run of failures.
+            if (!this._failing) Toast.show('Couldn\'t refresh your notes. The app keeps retrying.', 'info');
+            this._failing = true;
         } finally {
             this._refreshing = false;
         }

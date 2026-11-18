@@ -30,6 +30,15 @@ import {
 
 import { verifySignerAddress } from './wallet-signer-guard.js';
 
+export const FREIGHTER_INSTALL_URL = 'https://www.freighter.app/';
+
+/** Toast options that turn a missing-Freighter error into an install link. */
+export function walletErrorToastOptions(error) {
+    return error?.code === 'freighter-missing'
+        ? { linkUrl: FREIGHTER_INSTALL_URL, linkText: 'Install Freighter' }
+        : {};
+}
+
 /**
  * Request wallet access and return the active public key.
  *
@@ -43,7 +52,7 @@ async function assertFreighterInstalled() {
         throw normalizeWalletError(conn.error, "Failed to check Freighter connection");
     }
     if (!conn?.isConnected) {
-        throw new Error("Freighter not detected. Install from https://www.freighter.app/");
+        throw Object.assign(new Error('Freighter not detected. Install it, then reload this page.'), { code: 'freighter-missing' });
     }
 }
 

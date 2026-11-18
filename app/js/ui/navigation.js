@@ -1,7 +1,7 @@
 import { refreshTokenDecimals } from '../token-metadata.js';
 import { deploymentDefaults } from '../network-config.js';
 import { poolSelectLabel } from '../pool-policy.js';
-import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
+import { connectWallet, getWalletNetwork, startWalletWatcher, walletErrorToastOptions } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, isStorageUnlocked, storageWasLocked } from '../wasm-facade.js';
@@ -11,7 +11,7 @@ import { runOnboardingWizard } from './onboarding-wizard.js';
 import { confirmAction } from './confirm.js';
 import { el } from './dom.js';
 import { openModal } from './toast.js';
-import { getRegistrationErrorMessage } from './errors.js';
+import { describeRegistrationError } from './errors.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 import { loadPrivateSigners } from '../private-signers.js';
 import { explorerPreference, saveExplorerPreference } from '../public-settings.js';
@@ -124,6 +124,15 @@ function setActiveView(view) {
             disclosureLoaded = false;
         });
     }
+}
+
+// Selects the pool in state and every token picker; callers dispatch
+// pool:selected at the point their flow expects it.
+function selectPool(poolId) {
+    App.state.selectedPoolId = poolId;
+    document.querySelectorAll('[data-pool-select]').forEach(select => {
+        select.value = poolId;
+    });
 }
 
 function setMoveFlow(flow) {
@@ -397,25 +406,24 @@ export const Shell = {
 
         App.events.addEventListener('dashboard:quick-flow', (event) => {
             const { flow, poolId } = event.detail;
-            if (poolId) {
-                App.state.selectedPoolId = poolId;
-                document.querySelectorAll('[data-pool-select]').forEach(select => {
-                    select.value = poolId;
-                });
-            }
+            if (poolId) selectPool(poolId);
             setActiveView('move-funds');
             setMoveFlow(flow);
             App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
         });
 
+        App.events.addEventListener('dashboard:view-pool-controls', (event) => {
+            const poolId = event.detail?.poolId;
+            if (!App.state.pools.some(pool => pool.poolContractId === poolId)) return;
+            selectPool(poolId);
+            App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
+            setActiveView('move-funds');
+            document.getElementById('move-pool-controls-heading')?.focus();
+        });
+
         App.events.addEventListener('dashboard:view-notes', (event) => {
             const { poolId } = event.detail;
-            if (poolId) {
-                App.state.selectedPoolId = poolId;
-                document.querySelectorAll('[data-pool-select]').forEach(select => {
-                    select.value = poolId;
-                });
-            }
+            if (poolId) selectPool(poolId);
             setActiveView('advanced');
             App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
         });
@@ -553,7 +561,9 @@ export const Wallet = {
                     // Surface it even on auto-connect (the common multi-tab trigger).
                     showDbLockedModal(message);
                 } else if (!auto) {
-                    Toast.show(message || 'Failed to connect wallet', 'error');
+                    const options = walletErrorToastOptions(error);
+                    // An install link needs time to be read and clicked.
+                    Toast.show(message || 'Failed to connect wallet', 'error', options.linkUrl ? 10_000 : 4000, options);
                 }
                 throw error;
             } finally {
@@ -713,7 +723,8 @@ export const Wallet = {
             Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, { linkUrl: Utils.explorerTxUrl(hash) });
             App.events.dispatchEvent(new CustomEvent('profile:updated'));
         } catch (error) {
-            Toast.show(getRegistrationErrorMessage(error), 'error');
+            const { message, details } = describeRegistrationError(error);
+            Toast.show(message, 'error', 4000, { details });
             if (btn) btn.disabled = false; // re-enable so the user can retry
         }
     },

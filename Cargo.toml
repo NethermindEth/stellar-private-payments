@@ -145,3 +145,61 @@ opt-level = 3
 
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
+
+# The browser prover (and native CLI) is compute-bound in arkworks field and
+# group arithmetic. Build that stack at opt-level 3 while the shipped release
+# profile stays `z`, so contract wasm size and hashes are untouched.
+#
+# Per-package rather than a full opt-level 3 profile: the main and storage wasm
+# modules stay small, and only the prover worker pays the size increase.
+# `stellar-private-payments` is listed because ark-ff's arithmetic is generic
+# and `#[inline(always)]`, so it is monomorphised where it is instantiated.
+[profile.prover-hot]
+inherits = "release"
+
+[profile.prover-hot.package.stellar-private-payments]
+opt-level = 3
+
+[profile.prover-hot.package.ark-bn254]
+opt-level = 3
+
+[profile.prover-hot.package.ark-ec]
+opt-level = 3
+
+[profile.prover-hot.package.ark-ff]
+opt-level = 3
+
+[profile.prover-hot.package.ark-groth16]
+opt-level = 3
+
+[profile.prover-hot.package.ark-poly]
+opt-level = 3
+
+[profile.prover-hot.package.ark-relations]
+opt-level = 3
+
+[profile.prover-hot.package.ark-serialize]
+opt-level = 3
+
+[profile.prover-hot.package.ark-snark]
+opt-level = 3
+
+[profile.prover-hot.package.circom-witness-rs]
+opt-level = 3
+
+[profile.prover-hot.package.ruint]
+opt-level = 3
+
+[profile.prover-hot.package.sha2]
+opt-level = 3
+
+[profile.prover-hot.package.sha3]
+opt-level = 3
+
+[profile.prover-hot.package.taceo-poseidon2]
+opt-level = 3
+
+# Diagnostic build: same proving speed, with debug assertions enabled.
+[profile.prover-hot-with-logs]
+inherits = "prover-hot"
+debug-assertions = true
