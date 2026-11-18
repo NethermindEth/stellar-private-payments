@@ -1,14 +1,14 @@
 import { loadDeploymentConfig } from './wasm-facade.js';
 import { validateNetwork } from './network-config.js';
 /**
- * Wallet adapter boundary for the Freighter browser extension.
+ * Wallet adapter boundary for the Varial browser extension.
  *
  * SEP-0043 v1.2.1 standardizes getAddress, signTransaction, signAuthEntry,
- * signMessage, and getNetwork. The additional Freighter-only symbols imported
+ * signMessage, and getNetwork. The additional Varial-only symbols imported
  * below (WatchWalletChanges, isConnected, isAllowed,
  * requestAccess, setAllowed) are intentional adapter extensions: SEP-0043 is
  * still Draft and defines no connect/permission-gating or watch/change API,
- * so the app relies on Freighter's extension for those capabilities.
+ * so the app relies on Varial's extension for those capabilities.
  *
  * Network identity comes from SEP-0043 getNetwork; the RPC endpoint comes
  * from deployment configuration, independently of wallet settings.
@@ -26,16 +26,16 @@ import {
     signAuthEntry,
     signTransaction,
     signMessage
-} from '@stellar/freighter-api';
+} from '@stellar/varial-sdk';
 
 import { verifySignerAddress } from './wallet-signer-guard.js';
 
-export const FREIGHTER_INSTALL_URL = 'https://www.freighter.app/';
+export const VARIAL_INSTALL_URL = 'https://varialwallet.com/';
 
-/** Toast options that turn a missing-Freighter error into an install link. */
+/** Toast options that turn a missing-Varial error into an install link. */
 export function walletErrorToastOptions(error) {
-    return error?.code === 'freighter-missing'
-        ? { linkUrl: FREIGHTER_INSTALL_URL, linkText: 'Install Freighter' }
+    return error?.code === 'varial-missing'
+        ? { linkUrl: VARIAL_INSTALL_URL, linkText: 'Install Varial' }
         : {};
 }
 
@@ -46,18 +46,21 @@ export function walletErrorToastOptions(error) {
  *
  * @returns {Promise<void>}
  */
-async function assertFreighterInstalled() {
+async function assertVarialInstalled() {
     const conn = await isConnected();
     if (conn?.error) {
-        throw normalizeWalletError(conn.error, "Failed to check Freighter connection");
+        throw normalizeWalletError(conn.error, "Failed to check Varial connection");
     }
     if (!conn?.isConnected) {
-        throw Object.assign(new Error('Freighter not detected. Install it, then reload this page.'), { code: 'freighter-missing' });
+        throw Object.assign(
+            new Error('Varial not detected. Install it, then reload this page.'),
+            { code: 'varial-missing' },
+        );
     }
 }
 
 /**
- * Ensure Freighter is installed, connected, and allowed for this site.
+ * Ensure Varial is installed, connected, and allowed for this site.
  *
  * Optionally requests wallet access and returns the active public key.
  *
@@ -65,27 +68,27 @@ async function assertFreighterInstalled() {
  * @param {boolean} [opts.requestAddress=false] - Whether to request and return the active address.
  * @returns {Promise<string|void>} - Connected Stellar public key when requested.
  */
-async function ensureFreighterReady(opts = {}) {
+async function ensureVarialReady(opts = {}) {
     const { requestAddress = false } = opts;
 
-    await assertFreighterInstalled();
+    await assertVarialInstalled();
 
     const allowed = await isAllowed();
     if (allowed?.error) {
-        throw normalizeWalletError(allowed.error, "Failed to check Freighter allow-list");
+        throw normalizeWalletError(allowed.error, "Failed to check Varial allow-list");
     }
 
     if (!allowed?.isAllowed) {
         const set = await setAllowed();
         if (set?.error) {
-            throw normalizeWalletError(set.error, "Freighter access could not be granted");
+            throw normalizeWalletError(set.error, "Varial access could not be granted");
         }
     }
 
     if (requestAddress) {
         const access = await requestAccess();
         if (access?.error) {
-            throw normalizeWalletError(access.error, "Freighter access request failed");
+            throw normalizeWalletError(access.error, "Varial access request failed");
         }
         if (!access?.address) {
             throw new Error("No public key returned");
@@ -97,17 +100,17 @@ async function ensureFreighterReady(opts = {}) {
 /**
  * Request wallet access and return the active public key.
  *
- * Validates Freighter availability, prompts for access if needed,
+ * Validates Varial availability, prompts for access if needed,
  * and returns the connected Stellar address.
  *
  * @returns {Promise<string>} - Connected Stellar public key (G...).
  */
 export async function connectWallet() {
-    return await ensureFreighterReady({requestAddress: true});
+    return await ensureVarialReady({requestAddress: true});
 }
 
 /**
- * Whether the Freighter extension answers on this page. Never prompts.
+ * Whether the Varial extension answers on this page. Never prompts.
  * @returns {Promise<boolean>}
  */
 export async function isWalletInstalled() {
@@ -120,7 +123,7 @@ export async function isWalletInstalled() {
 }
 
 /**
- * Return the active address only if Freighter is already connected AND allowed
+ * Return the active address only if Varial is already connected AND allowed
  * for this origin, without prompting. Returns null otherwise. Lets a page
  * restore a session already established elsewhere in the app (same origin)
  * without showing a connection popup.
@@ -141,14 +144,14 @@ export async function getConnectedAddress() {
 }
 
 /**
- * Fetch the currently active public key from Freighter without prompting.
+ * Fetch the currently active public key from Varial without prompting.
  * @returns {Promise<string>}
  */
 export async function getWalletAddress() {
-    await ensureFreighterReady();
+    await ensureVarialReady();
     const res = await getAddress();
     if (res?.error) {
-        throw normalizeWalletError(res.error, "Failed to get active Freighter address");
+        throw normalizeWalletError(res.error, "Failed to get active Varial address");
     }
     if (!res?.address) {
         throw new Error("No public key returned");
@@ -157,11 +160,11 @@ export async function getWalletAddress() {
 }
 
 /**
- * Watch Freighter's active account.
+ * Watch Varial's active account.
  *
- * Freighter shares an account only with sites allowed for it, so the callback
+ * Varial shares an account only with sites allowed for it, so the callback
  * gets an empty address while the active account is not allowed here (or the
- * wallet is locked), and no address at all when Freighter could not be asked.
+ * wallet is locked), and no address at all when Varial could not be asked.
  *
  * @param {{intervalMs?: number, onChange: function({address: string|null}): void}} opts
  * @returns {function} stop watcher
@@ -184,7 +187,7 @@ export function startWalletWatcher(opts) {
 }
 
 /**
- * Fetch current network details from Freighter.
+ * Fetch current network details from Varial.
  *
  * Useful for displaying network name and ensuring app/network alignment.
  *
@@ -196,7 +199,7 @@ export function startWalletWatcher(opts) {
 export async function getWalletNetwork() {
     const details = await getNetwork();
     if (details?.error) {
-        throw normalizeWalletError(details.error, "Failed to get Freighter network details");
+        throw normalizeWalletError(details.error, "Failed to get Varial network details");
     }
 
     const { network, networkPassphrase } = details;
@@ -218,11 +221,11 @@ export async function getWalletNetwork() {
 }
 
 /**
- * Normalize Freighter errors to a consistent shape.
+ * Normalize Varial errors to a consistent shape.
  *
  * Marks common rejection phrases as USER_REJECTED for UI handling.
  *
- * @param {Object} error - Raw Freighter error payload.
+ * @param {Object} error - Raw Varial error payload.
  * @param {string} fallbackMessage - Default message when none provided.
  * @returns {Error} - Error with `code` set to USER_REJECTED or WALLET_ERROR.
  */
@@ -250,7 +253,7 @@ function normalizeWalletError(error, fallbackMessage = "Wallet error") {
 }
 
 /**
- * Request the user to sign a transaction XDR via Freighter.
+ * Request the user to sign a transaction XDR via Varial.
  *
  * Ensures wallet access, then returns the signed XDR and signer address.
  *
@@ -261,7 +264,7 @@ function normalizeWalletError(error, fallbackMessage = "Wallet error") {
  * @returns {Promise<{signedTxXdr: string, signerAddress: string}>}
  */
 export async function signWalletTransaction(transactionXdr, opts = {}) {
-    await ensureFreighterReady();
+    await ensureVarialReady();
 
     const { signedTxXdr, signerAddress, error } = await signTransaction(transactionXdr, opts);
     if (error) {
@@ -273,7 +276,7 @@ export async function signWalletTransaction(transactionXdr, opts = {}) {
 }
 
 /**
- * Request the user to sign a Soroban auth preimage via Freighter.
+ * Request the user to sign a Soroban auth preimage via Varial.
  *
  * Takes HashIdPreimage XDR (base64); returns raw signature bytes for authorizeEntry.
  *
@@ -284,7 +287,7 @@ export async function signWalletTransaction(transactionXdr, opts = {}) {
  * @returns {Promise<{signedAuthEntry: string | null, signerAddress: string}>}
  */
 export async function signWalletAuthEntry(entryXdr, opts = {}) {
-    await ensureFreighterReady();
+    await ensureVarialReady();
 
     const { signedAuthEntry, signerAddress, error } = await signAuthEntry(entryXdr, opts);
     if (error) {
@@ -296,7 +299,7 @@ export async function signWalletAuthEntry(entryXdr, opts = {}) {
 }
 
 /**
- * Request the user to sign an arbitrary message via Freighter.
+ * Request the user to sign an arbitrary message via Varial.
  *
  * Used for deriving encryption keys deterministically.
  *
@@ -307,13 +310,13 @@ export async function signWalletAuthEntry(entryXdr, opts = {}) {
  * @returns {Promise<{signedMessage: string | null, signerAddress: string}>}
  */
 export async function signWalletMessage(message, opts = {}) {
-    const { skipEnsureReady = false, ...freighterOpts } = opts || {};
+    const { skipEnsureReady = false, ...varialOpts } = opts || {};
     if (!skipEnsureReady) {
-        await ensureFreighterReady();
+        await ensureVarialReady();
     }
 
     console.log('[Wallet] Requesting message signature for:', message.substring(0, 30) + '...');
-    const result = await signMessage(message, freighterOpts);
+    const result = await signMessage(message, varialOpts);
     console.log('[Wallet] signMessage result:', {
         hasSignedMessage: !!result?.signedMessage,
         hasError: !!result?.error,
@@ -324,7 +327,7 @@ export async function signWalletMessage(message, opts = {}) {
     if (error) {
         throw normalizeWalletError(error, 'Message signature failed');
     }
-    // If SignMessage returns null. Older Freighter versions return a null
+    // If SignMessage returns null. Older Varial versions return a null
     // signature instead of an error payload when the user declines, so classify
     // this as a rejection via the structured code rather than by wording the
     // message so that a substring matcher happens to catch it.
@@ -334,7 +337,7 @@ export async function signWalletMessage(message, opts = {}) {
         throw err;
     }
 
-    verifySignerAddress('signMessage', freighterOpts.address, signerAddress);
+    verifySignerAddress('signMessage', varialOpts.address, signerAddress);
 
     return { signedMessage, signerAddress };
 }

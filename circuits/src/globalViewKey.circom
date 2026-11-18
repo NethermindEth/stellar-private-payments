@@ -7,22 +7,21 @@ pragma circom 2.2.2;
 //
 // The scheme performs the ECDH key exchange and the encryption *inside* the
 // circuit. Encryption is a field addition of a Poseidon2-derived keystream
-//  whose security rests on ECDH hardness and the pseudo-randomness of Poseidon2.
+// whose security rests on ECDH hardness and the pseudo-randomness of Poseidon2.
 //
 // Domain separation tags
 //   0x05 - ephemeral scalar `r` derivation
 //   0x06 - keystream KDF
 //
-// R = H(note, salt, D, nonce, idx)*G is derived from a dedicated per-note secret
-// `salt`, so the encryption randomness is independent of the note fields. Given a
-// unique (nonce, idx) the derivation still binds r to the full context, so
-// keystreams never collide even under a weak or repeated salt.
-// Some of the requirements that cannot be enforced in-circuit and need to be 
-// done at the contract level:
-//   - `nonce` must be unique per transaction; a reused nonce makes identical
-//     notes produce identical (R, c) and publicly linkable.
-//   - every encryption sharing a nonce must receive a distinct `idx`, including
-//     across input and output note sets when composed into a transaction circuit.
+// r = H(note, salt, D, nonce, idx) uses a dedicated per-note secret `salt`, so
+// the encryption randomness does not depend on the note fields.
+//
+// Not enforced in-circuit:
+//   - `salt` must be fresh and random for every note, dummy notes included.
+//   - `D` must be the pool's key. The pool contract passes its stored key.
+//   - `nonce` is the transaction's extDataHash, passed by the pool contract. It
+//     is not unique on its own; the salt keeps `r` distinct.
+//   - Notes sharing a nonce need distinct `idx`. GvkNotes template assigns them.
 
 include "./poseidon2/poseidon2_hash.circom";
 include "./poseidon2/poseidon2_perm.circom";
@@ -36,9 +35,9 @@ include "./circomlib/circuits/bitify.circom";
 template GlobalViewKeyEncryption() {
     /** PUBLIC INPUTS **/
     signal input D[2];          // D (authority Baby JubJub public key)
-    signal input nonce;         // Unique nonce
+    signal input nonce;         // Transaction nonce
     signal input idx;           // Per-note index, so sibling notes in the same transaction never reuse a keystream.
-    
+
     /** PRIVATE INPUTS **/
     signal input pk;            // pk of note
     signal input amount;        // amount of note
@@ -52,8 +51,8 @@ template GlobalViewKeyEncryption() {
     signal output c3;   // encrypted blinding
 
     // 1. Validate the authority public key D
-    // D is a non-validated public input. Enforce it satisfies the curve equation.
-    // Needs to be verified on the smart contract level. We need to accept the correct pk, not any valid curve point. 
+    // D is a public input. Enforce it is on the curve. Whether D is the pool's
+    // key is checked outside the circuit: the pool contract passes its stored key.
     component dCheck = BabyCheck();
     dCheck.x <== D[0];
     dCheck.y <== D[1];
@@ -92,7 +91,7 @@ template GlobalViewKeyEncryption() {
     signal r;
     r <== hr.out;
 
-    // Canonical bit decomposition (constrains r < p, rejecting the r / r + p ambiguity
+    // Canonical bit decomposition (constrains r < p, rejecting the r / r + p ambiguity)
     component rBits = Num2Bits_strict();
     rBits.in <== r;
 

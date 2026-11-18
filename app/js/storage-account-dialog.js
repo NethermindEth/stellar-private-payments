@@ -11,8 +11,8 @@ export function confirmStorageAccount({ address, fresh, watchAccount }) {
         const title = el('h2', 'text-xl font-semibold', fresh ? 'Choose your unlocking account' : 'Unlock local storage');
         title.id = 'storage-account-title';
         const description = el('p', 'mt-4 text-sm text-slate-300', fresh
-            ? 'Select the account in Freighter that you want to use to unlock local storage. You’ll need this account whenever you unlock. The selected account updates automatically when you switch accounts.'
-            : 'Unlock local storage using this account in Freighter. This is the account you chose when setting up local storage.');
+            ? 'Select the account in Varial that you want to use to unlock local storage. You’ll need this account whenever you unlock. The selected account updates automatically when you switch accounts.'
+            : 'Unlock local storage using this account in Varial. This is the account you chose when setting up local storage.');
         description.id = 'storage-account-description';
         const label = el('p', 'mt-5 text-sm text-slate-400', fresh ? 'Selected account' : 'Unlocking account');
         const account = el('p', 'mt-2 break-all font-mono text-sm', address);
@@ -20,7 +20,7 @@ export function confirmStorageAccount({ address, fresh, watchAccount }) {
         const actions = el('div', 'mt-6 flex justify-end gap-3');
         const cancel = el('button', 'btn-secondary', 'Cancel');
         cancel.type = 'button';
-        const proceed = el('button', 'btn-primary', fresh ? 'Continue' : 'Unlock with Freighter');
+        const proceed = el('button', 'btn-primary', fresh ? 'Continue' : 'Unlock with Varial');
         proceed.type = 'button';
         proceed.dataset.testid = 'storage-account-continue';
         const finish = accepted => {
@@ -45,7 +45,7 @@ export function confirmStorageAccount({ address, fresh, watchAccount }) {
                 stopWatching = watchAccount({ intervalMs: 500, onChange: ({ address: next }) => {
                     if (closed) return;
                     selectedAddress = typeof next === 'string' ? next : '';
-                    account.textContent = selectedAddress || 'Select an account in Freighter and allow this app to access it.';
+                    account.textContent = selectedAddress || 'Select an account in Varial and allow this app to access it.';
                     proceed.disabled = !selectedAddress;
                 } });
             } catch (error) {

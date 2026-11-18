@@ -19,7 +19,7 @@ const PLAINTEXT_NOTE ='Your private keys and history are stored unencrypted in t
 
 const COPY = {
     encrypted: {
-        connectLabel: { welcome: 'Connect Freighter', returning: 'Connect & unlock', ready: 'Connect Freighter' },
+        connectLabel: { welcome: 'Connect Varial', returning: 'Connect & unlock', ready: 'Connect Varial' },
         cards: {
             welcome: {
                 title: 'Send and hold tokens privately',
@@ -28,12 +28,12 @@ const COPY = {
             },
             returning: {
                 title: 'Welcome back',
-                body: 'Connect Freighter to unlock your private balance and history on this device.',
+                body: 'Connect Varial to unlock your private balance and history on this device.',
                 note: SIGNATURE_NOTE,
             },
             connecting: {
                 title: 'Connecting',
-                body: 'Approve each request in Freighter to continue.',
+                body: 'Approve each request in Varial to continue.',
                 note: '',
             },
             locked: {
@@ -44,7 +44,7 @@ const COPY = {
         },
     },
     plaintext: {
-        connectLabel: { welcome: 'Connect Freighter', returning: 'Connect Freighter', ready: 'Connect Freighter' },
+        connectLabel: { welcome: 'Connect Varial', returning: 'Connect Varial', ready: 'Connect Varial' },
         cards: {
             welcome: {
                 title: 'Send and hold tokens privately',
@@ -53,12 +53,12 @@ const COPY = {
             },
             returning: {
                 title: 'Welcome back',
-                body: 'Connect Freighter to open your private balance and history in this browser.',
+                body: 'Connect Varial to open your private balance and history in this browser.',
                 note: PLAINTEXT_NOTE,
             },
             connecting: {
                 title: 'Connecting',
-                body: 'Approve each request in Freighter to continue.',
+                body: 'Approve each request in Varial to continue.',
                 note: '',
             },
         },

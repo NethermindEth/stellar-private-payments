@@ -27,6 +27,8 @@ The registry does **not** check that the registrant holds the encryption secret 
 |---|---|---|---|---|
 | `NewCommitmentEvent` | `pool` | `[Symbol("NewCommitmentEvent"), commitment: U256]` | `index: u32`, `encrypted_output: Bytes` | **Public Data / Correlatable**: Commitment is a blinded Poseidon hash; encrypted output uses fresh OS CSPRNG nonces per note. Correlatable with public transaction args (`ExtData`). |
 | `NewNullifierEvent` | `pool` | `[Symbol("NewNullifierEvent"), nullifier: U256]` | *empty* | **Pseudonymous / One-Time Use**: Unlinks spent note from new commitments, but nullifier reuse would break privacy. A [disclosure receipt](./disclosure.md) carries its notes' nullifiers, so its holder can see when they are spent. |
+| `NewCommitmentEvent` | `pool-gvk` | `[Symbol("NewCommitmentEvent"), commitment: U256]` | `index: u32`, `encrypted_output: Bytes`, `gvk_ciphertext: GvkCiphertext` | **Readable by the GVK holder**: Same as in `pool`, plus the note encrypted under the pool's GVK key. See [section 5](#5-global-view-key-pools). |
+| `NewNullifierEvent` | `pool-gvk` | `[Symbol("NewNullifierEvent"), nullifier: U256]` | `gvk_ciphertext: Option<GvkCiphertext>` | **Readable by the GVK holder**: `Some` in traceable pools only, where it links the spend to the note it consumed. See [section 5](#5-global-view-key-pools). |
 | `LeafAddedEvent` | `asp-membership` | `[Symbol("LeafAdded")]` | `leaf: U256`, `index: u64`, `root: U256` | **Public Protocol Data**: Blinded membership commitment `poseidon2_hash2(note_pubkey, blinding, 1)`. |
 | `LeafInsertedEvent` | `asp-non-membership` | `[Symbol("LeafInserted")]` | `key: U256`, `value: U256`, `root: U256` | **Transparency Property / Correlatable**: In ASP blocklist management, `key` is the unblinded note public key. Public blocklist key transparency allows users to verify non-membership. |
 | `LeafDeletedEvent` | `asp-non-membership` | `[Symbol("LeafDeleted")]` | `key: U256`, `root: U256` | **Transparency Property**: Key removed from blocklist. |
@@ -39,7 +41,18 @@ The proof binds each output commitment, but not the `encrypted_output` attached 
 * **Readers Must Recheck**: The SDK recomputes the commitment from the decrypted note and ignores notes that don't match. Indexers, wallets, and exchanges that decrypt `encrypted_output` themselves must do the same before crediting a note.
 * **GVK Pools**: The proof checks the GVK holder's copy of each note, not the recipient's. A note the GVK holder can audit may still be unreadable by its recipient.
 
-## 5. Forward secrecy
+## 5. Global View Key Pools
+
+A GVK pool encrypts every note to the pool's GVK public key `D`. Whoever holds the private key `d` can read them. For the scheme, see [Global View Key](./global_view_key.md).
+
+* **Public**: The pool's GVK mode (`get_gvk_mode`), its key `D` (`get_admin_view_key` and `deployments.json`), and every GVK ciphertext in its events. Without `d`, a ciphertext reveals nothing about its note and can't be linked to other ciphertexts. In traceable mode a note is encrypted twice, as an output and later as an input, and the two ciphertexts look unrelated.
+* **View-only**: The holder reads every new note: its owner's note public key, amount and blinding, and so its commitment. Unlike in traceable mode, the holder does not see the spending side: which notes a transaction consumed, or when a note is spent. Nullifiers need the owner's private key, so the holder can't match them to notes. The holder therefore can't follow funds from one transaction to the next or tell a key's current balance, only which notes each key has received.
+* **Traceable**: The holder also reads every spent note, which links each spend to the note it consumed. This is enough to rebuild the whole flow of funds through the pool.
+* **Stellar Addresses**: The admin page looks up each decrypted note key in the public key registry, so users who registered show up by their Stellar address.
+* **No Key Rotation**: `D` and the mode are fixed at deployment. A former holder of `d` keeps reading new notes, and a leaked `d` exposes every past and future note. All GVK pools from one `deploy.sh` run share the same `D`, so one leaked `d` exposes all of them.
+* **Read Only**: `d` only decrypts. The holder can't spend, freeze or change notes.
+
+## 6. Forward secrecy
 
 ### No forward secrecy in case of recipient's private key leak
 If a recipient encryption private key is compromised, an attacker is able to decrypt all the past notes addressed to the original private key holder.

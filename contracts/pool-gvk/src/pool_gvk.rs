@@ -214,12 +214,8 @@ pub struct Proof {
 
 /// Event emitted when a new commitment is added to the Merkle tree.
 ///
-/// `pool::NewCommitmentEvent`'s fields plus `gvk_ciphertext`: unlike `pool`,
-/// this crate always encrypts every output note (both `VIEW_ONLY` and
-/// `TRACEABLE` modes), so the field is mandatory, not optional — there is no
-/// separate trailing "memo" event, since this local copy of
-/// `NewCommitmentEvent` isn't shared with non-GVK pools and carries no
-/// schema-compatibility risk to protect.
+/// `pool::NewCommitmentEvent`'s fields plus `gvk_ciphertext`, which is
+/// mandatory: every output note is encrypted in both modes.
 #[contractevent]
 #[derive(Clone)]
 pub struct NewCommitmentEvent {
@@ -237,8 +233,7 @@ pub struct NewCommitmentEvent {
 /// Event emitted when a nullifier is spent.
 ///
 /// `pool::NewNullifierEvent`'s field plus `gvk_ciphertext`, present (`Some`)
-/// only in `TRACEABLE` mode — `VIEW_ONLY` never encrypts input notes. This is
-/// the one genuinely optional piece of GVK data in this crate's events.
+/// only in `TRACEABLE` mode. `VIEW_ONLY` never encrypts input notes.
 #[contractevent]
 #[derive(Clone)]
 pub struct NewNullifierEvent {
@@ -341,22 +336,14 @@ impl PoolGvkContract {
     /// Checked once here rather than in `verify_proof`, since `AdminViewKey`
     /// is written only by the constructor and has no setter.
     ///
-    /// Two cheap checks:
-    /// - canonical range
-    /// - `x != 0`: the only on-curve points with `x == 0` are `(0, 1)` and `(0,
-    ///   -1)`, both low-order and both already rejected in-circuit, so this
-    ///   excludes nothing legitimate. It does catch the likely mistake of
-    ///   deploying with an all-zero point.
-    ///
-    /// Full on-curve/subgroup validation is deliberately *not* done here: `D`
-    /// is a circuit public input, so `BabyCheck` and the low-order guard
-    /// already run on every proof.
+    /// Requires canonical coordinates, a point on the curve, and `8·D` not the
+    /// identity: the same conditions the circuit enforces on every proof.
     fn validate_admin_view_key(env: &Env, key: &BabyJubJubPoint) -> Result<(), Error> {
         let modulus = bn256_modulus(env);
         if key.x >= modulus || key.y >= modulus {
             return Err(Error::InvalidAdminViewKey);
         }
-        if key.x == U256::from_u32(env, 0) {
+        if !key.is_on_curve() || key.has_small_order() {
             return Err(Error::InvalidAdminViewKey);
         }
         Ok(())
@@ -1057,19 +1044,11 @@ impl PoolGvkContract {
                 return Err(Error::AlreadySpentNullifier);
             }
         }
-        // 4. External data hash check. This is also the value the circuit's
-        // `nonce` public input is required to equal (see `verify_proof`),
-        // which *binds* the nonce to this transaction's parameters. It does
-        // not make the nonce unique: `hash_ext_data` is a deterministic
-        // function of caller-chosen `ExtData` plus this pool's address and
-        // token, so two transactions with identical `ExtData` on the same
-        // pool share a nonce. `globalViewKey.circom` asks the contract for
-        // uniqueness, and this does not provide it — but the property that
-        // matters is upheld elsewhere: the ciphertext's ephemeral scalar is
-        // derived as `H(pk, amount, blinding, salt, D, nonce, idx)`, and
-        // `blinding` is fresh per output note, so colliding `(R, c)`
-        // additionally requires an identical note *and* salt. Only a prover
-        // can arrange that, and only against their own privacy.
+        // 4. External data hash check. The same hash is the circuit's `nonce`
+        // (see `verify_proof`), which binds the GVK ciphertexts to this
+        // transaction. It is not unique: two transactions with identical
+        // `ExtData` on the same pool share a nonce. The per-note salt keeps the
+        // ephemeral scalar distinct.
         let token = Self::get_token(env)?;
         let ext_hash = hash_ext_data(env, &ext_data, &token);
         if ext_hash != proof.ext_data_hash {

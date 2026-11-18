@@ -11,7 +11,7 @@ use crate::{
     pool_gvk::DataKey,
 };
 use ark_bn254::{Bn254, Fr as ArkFr};
-use ark_ff::PrimeField;
+use ark_ff::{BigInteger, Field, MontFp, PrimeField};
 use ark_groth16::{Groth16, Proof as ArkProof};
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable};
 use ark_std::rand::{SeedableRng, rngs::StdRng};
@@ -65,6 +65,33 @@ fn mk_point(env: &Env, x: u32, y: u32) -> BabyJubJubPoint {
         x: U256::from_u32(env, x),
         y: U256::from_u32(env, y),
     }
+}
+
+/// Circomlib's `BASE8` generator
+const BASE8_X: ArkFr =
+    MontFp!("5299619240641551281634865583518297030282874472190772894086521144482721001553");
+const BASE8_Y: ArkFr =
+    MontFp!("16950150798460657717958625567821834550301663161624707787222815936182638968203");
+
+fn u256_from_ark(env: &Env, v: ArkFr) -> U256 {
+    U256::from_be_bytes(env, &Bytes::from_slice(env, &v.into_bigint().to_bytes_be()))
+}
+
+fn ark_point(env: &Env, x: ArkFr, y: ArkFr) -> BabyJubJubPoint {
+    BabyJubJubPoint {
+        x: u256_from_ark(env, x),
+        y: u256_from_ark(env, y),
+    }
+}
+
+/// A valid admin view key.
+fn base8_key(env: &Env) -> BabyJubJubPoint {
+    ark_point(env, BASE8_X, BASE8_Y)
+}
+
+/// A valid admin view key distinct from [`base8_key`].
+fn neg_base8_key(env: &Env) -> BabyJubJubPoint {
+    ark_point(env, -BASE8_X, BASE8_Y)
 }
 
 /// Helper struct to hold all test setup
@@ -156,7 +183,7 @@ fn register_pool_charging(env: &Env, setup: &TestSetup, fee: i128, minimum: i128
         U256::from_u32(env, 1000),
         3,
         0,
-        mk_point(env, 1, 2),
+        base8_key(env),
         VIEW_ONLY,
     )
 }
@@ -201,7 +228,7 @@ fn pool_gvk_constructor_sets_state() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    let admin_view_key = mk_point(&env, 7, 11);
+    let admin_view_key = base8_key(&env);
     let pool_id = register_pool_gvk(
         &env,
         &setup,
@@ -253,7 +280,7 @@ fn the_depth_lives_in_the_instance() {
         U256::from_u32(&env, 100),
         levels,
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-        mk_point(&env, 7, 11),
+        base8_key(&env),
         TRACEABLE,
     );
 
@@ -279,7 +306,7 @@ fn the_filled_subtrees_are_one_entry() {
         U256::from_u32(&env, 100),
         levels,
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-        mk_point(&env, 7, 11),
+        base8_key(&env),
         TRACEABLE,
     );
 
@@ -304,7 +331,7 @@ fn pool_gvk_constructor_rejects_invalid_policy_flags() {
         U256::from_u32(&env, 100),
         8,
         !policy::MASK,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
 }
@@ -320,121 +347,187 @@ fn pool_gvk_constructor_rejects_invalid_gvk_mode() {
         U256::from_u32(&env, 100),
         8,
         policy::ALLOWLIST_BIT,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         0,
     );
 }
 
-/// `AdminViewKey` is immutable and has no setter, so a key that can never
-/// satisfy the circuit permanently bricks the pool: every `transact` would
-/// fail at proof verification with no way to fix it. These four cases are the
-/// ones catchable without on-chain curve arithmetic.
-#[test]
-#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
-fn pool_gvk_constructor_rejects_non_canonical_admin_view_key_x() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let key = BabyJubJubPoint {
-        x: bn256_modulus(&env),
-        y: U256::from_u32(&env, 2),
-    };
+fn register_with_admin_view_key(env: &Env, key: BabyJubJubPoint) -> Address {
+    let setup = setup_test_contracts(env);
     register_pool_gvk(
-        &env,
+        env,
         &setup,
-        U256::from_u32(&env, 100),
+        U256::from_u32(env, 100),
         8,
         policy::ALLOWLIST_BIT,
         key,
         VIEW_ONLY,
-    );
+    )
+}
+
+/// `1/sqrt(a)`: the order-4 points are `(±1/sqrt(a), 0)`.
+fn order_four_x() -> ArkFr {
+    ArkFr::from(gvk::CURVE_A)
+        .sqrt()
+        .and_then(|s| s.inverse())
+        .expect("a is a nonzero square")
+}
+
+/// An order-8 point
+const ORDER_EIGHT_X: ArkFr =
+    MontFp!("4342719913949491028786768530115087822524712248835451589697801404893164183326");
+const ORDER_EIGHT_Y: ArkFr =
+    MontFp!("4826523245007015323400664741523384119579596407052839571721035538011798951543");
+
+fn order_eight_point(env: &Env, neg_x: bool, neg_y: bool) -> BabyJubJubPoint {
+    let x = if neg_x { -ORDER_EIGHT_X } else { ORDER_EIGHT_X };
+    let y = if neg_y { -ORDER_EIGHT_Y } else { ORDER_EIGHT_Y };
+    ark_point(env, x, y)
+}
+
+/// `AdminViewKey` is immutable and has no setter, so a key that can never
+/// satisfy the circuit permanently bricks the pool: every `transact` would
+/// fail at proof verification with no way to fix it.
+///
+/// `x + p` reduces to a valid key, so only the range check rejects it.
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_non_canonical_admin_view_key_x() {
+    let env = test_env();
+    let key = base8_key(&env);
+    let key = BabyJubJubPoint {
+        x: key.x.add(&bn256_modulus(&env)),
+        y: key.y,
+    };
+    register_with_admin_view_key(&env, key);
 }
 
 #[test]
 #[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
 fn pool_gvk_constructor_rejects_non_canonical_admin_view_key_y() {
     let env = test_env();
-    let setup = setup_test_contracts(&env);
+    let key = base8_key(&env);
     let key = BabyJubJubPoint {
-        x: U256::from_u32(&env, 1),
-        y: bn256_modulus(&env),
+        x: key.x,
+        y: key.y.add(&bn256_modulus(&env)),
     };
-    register_pool_gvk(
-        &env,
-        &setup,
-        U256::from_u32(&env, 100),
-        8,
-        policy::ALLOWLIST_BIT,
-        key,
-        VIEW_ONLY,
-    );
+    register_with_admin_view_key(&env, key);
 }
 
-/// The likely deployment mistake: an all-zero point, which is not even on the
-/// curve.
 #[test]
 #[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
 fn pool_gvk_constructor_rejects_zero_admin_view_key() {
     let env = test_env();
-    let setup = setup_test_contracts(&env);
-    register_pool_gvk(
-        &env,
-        &setup,
-        U256::from_u32(&env, 100),
-        8,
-        policy::ALLOWLIST_BIT,
-        mk_point(&env, 0, 0),
-        VIEW_ONLY,
-    );
+    register_with_admin_view_key(&env, mk_point(&env, 0, 0));
 }
 
-/// `x == 0` also covers the identity `(0, 1)`, which passes `BabyCheck` but is
-/// low-order and would be rejected in-circuit on every proof.
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_off_curve_admin_view_key() {
+    let env = test_env();
+    register_with_admin_view_key(&env, mk_point(&env, 1, 2));
+}
+
 #[test]
 #[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
 fn pool_gvk_constructor_rejects_identity_admin_view_key() {
     let env = test_env();
-    let setup = setup_test_contracts(&env);
-    register_pool_gvk(
-        &env,
-        &setup,
-        U256::from_u32(&env, 100),
-        8,
-        policy::ALLOWLIST_BIT,
-        mk_point(&env, 0, 1),
-        VIEW_ONLY,
-    );
+    register_with_admin_view_key(&env, mk_point(&env, 0, 1));
 }
 
-/// The check must not be over-tight: `modulus - 1` is a canonical field
-/// element and has to be accepted.
 #[test]
-fn pool_gvk_constructor_accepts_boundary_canonical_admin_view_key() {
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_order_two_admin_view_key() {
     let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let max = bn256_modulus(&env).sub(&U256::from_u32(&env, 1));
-    let key = BabyJubJubPoint {
-        x: max.clone(),
-        y: max.clone(),
-    };
-    let pool = register_pool_gvk(
-        &env,
-        &setup,
-        U256::from_u32(&env, 100),
-        8,
-        policy::ALLOWLIST_BIT,
-        key,
-        VIEW_ONLY,
-    );
+    register_with_admin_view_key(&env, ark_point(&env, ArkFr::from(0u64), -ArkFr::from(1u64)));
+}
 
-    let client = PoolGvkContractClient::new(&env, &pool);
-    assert_eq!(client.get_admin_view_key().x, max);
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_order_four_admin_view_key() {
+    let env = test_env();
+    register_with_admin_view_key(&env, ark_point(&env, order_four_x(), ArkFr::from(0u64)));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_negated_order_four_admin_view_key() {
+    let env = test_env();
+    register_with_admin_view_key(&env, ark_point(&env, -order_four_x(), ArkFr::from(0u64)));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_order_eight_admin_view_key() {
+    let env = test_env();
+    register_with_admin_view_key(&env, order_eight_point(&env, false, false));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_order_eight_admin_view_key_neg_x() {
+    let env = test_env();
+    register_with_admin_view_key(&env, order_eight_point(&env, true, false));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_order_eight_admin_view_key_neg_y() {
+    let env = test_env();
+    register_with_admin_view_key(&env, order_eight_point(&env, false, true));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_order_eight_admin_view_key_neg_xy() {
+    let env = test_env();
+    register_with_admin_view_key(&env, order_eight_point(&env, true, true));
+}
+
+#[test]
+fn has_small_order_matches_the_eight_torsion() {
+    let env = test_env();
+    let zero = ArkFr::from(0u64);
+    let one = ArkFr::from(1u64);
+    let torsion = [
+        ark_point(&env, zero, one),
+        ark_point(&env, zero, -one),
+        ark_point(&env, order_four_x(), zero),
+        ark_point(&env, -order_four_x(), zero),
+        order_eight_point(&env, false, false),
+        order_eight_point(&env, true, false),
+        order_eight_point(&env, false, true),
+        order_eight_point(&env, true, true),
+    ];
+    for p in &torsion {
+        assert!(p.is_on_curve() && p.has_small_order());
+    }
+    assert!(!base8_key(&env).has_small_order());
+    assert!(!neg_base8_key(&env).has_small_order());
+}
+
+#[test]
+fn pool_gvk_constructor_accepts_subgroup_admin_view_keys() {
+    let env = test_env();
+    let testnet_key = ark_point(
+        &env,
+        MontFp!("13251217480239285067729835136753440448520662553562064354198374928107380238783"),
+        MontFp!("8211928541513156342501887772690352868376962862021814735593036593447638044991"),
+    );
+    for key in [base8_key(&env), neg_base8_key(&env), testnet_key] {
+        let pool = register_with_admin_view_key(&env, key.clone());
+        assert_eq!(
+            PoolGvkContractClient::new(&env, &pool).get_admin_view_key(),
+            key
+        );
+    }
 }
 
 #[test]
 fn pool_gvk_getters_round_trip() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let admin_view_key = mk_point(&env, 3, 4);
+    let admin_view_key = base8_key(&env);
     let pool_id = register_pool_gvk(
         &env,
         &setup,
@@ -476,7 +569,7 @@ fn pool_gvk_update_admin_transfers_control() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 1),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -639,7 +732,7 @@ fn update_admin_errors_when_admin_unset() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 1),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -670,7 +763,7 @@ fn update_admin_requires_admin() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 1),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -688,7 +781,7 @@ fn pool_gvk_update_asp_membership_transfers_control() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 1),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -720,7 +813,7 @@ fn pool_gvk_update_asp_non_membership_transfers_control() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 1),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -757,7 +850,7 @@ fn pool_gvk_update_asp_membership_requires_admin() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 1),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -780,7 +873,7 @@ fn pool_gvk_update_asp_non_membership_requires_admin() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 1),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -812,7 +905,7 @@ fn constructor_refuses_an_allowlist_of_another_code() {
         3u32.into_val(&env),
         0u32.into_val(&env),
         String::from_str(&env, KDF_DOMAIN).into_val(&env),
-        mk_point(&env, 1, 2).into_val(&env),
+        base8_key(&env).into_val(&env),
         VIEW_ONLY.into_val(&env),
     ];
     env.register(PoolGvkContract, args);
@@ -842,7 +935,7 @@ fn constructor_refuses_a_blocklist_of_another_code() {
         3u32.into_val(&env),
         0u32.into_val(&env),
         String::from_str(&env, KDF_DOMAIN).into_val(&env),
-        mk_point(&env, 1, 2).into_val(&env),
+        base8_key(&env).into_val(&env),
         VIEW_ONLY.into_val(&env),
     ];
     env.register(PoolGvkContract, args);
@@ -912,7 +1005,7 @@ fn constructor_refuses_a_fee_and_minimum_that_overflow() {
         maximum,
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
 }
@@ -948,7 +1041,7 @@ fn constructor_accepts_a_maximum_above_u128() {
         maximum,
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
 }
@@ -1283,7 +1376,7 @@ fn assert_policy_transact_rejects_wrong_asp_root(
         U256::from_u32(&env, 1000),
         3,
         flags,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1329,7 +1422,7 @@ fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifie
         U256::from_u32(&env, 1000),
         3,
         flags,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1375,7 +1468,7 @@ fn transact_rejects_unknown_root() {
         U256::from_u32(&env, 1000),
         3,
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1421,7 +1514,7 @@ fn transact_rejects_bad_ext_hash() {
         U256::from_u32(&env, 1000),
         3,
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1468,7 +1561,7 @@ fn transact_rejects_bad_public_amount() {
         U256::from_u32(&env, 1000),
         3,
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1517,7 +1610,7 @@ fn transact_rejects_a_withdrawal_with_a_deposit_signed_public_amount() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1555,7 +1648,7 @@ fn transact_bounds_withdrawals_to_i128() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1609,7 +1702,7 @@ fn transact_rejects_non_canonical_nullifier() {
         U256::from_u32(&env, 1000),
         3,
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1655,7 +1748,7 @@ fn transact_rejects_non_canonical_output_commitment() {
         U256::from_u32(&env, 1000),
         3,
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1704,7 +1797,7 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1777,7 +1870,7 @@ fn transact_accepts_a_previous_asp_membership_root() {
         U256::from_u32(&env, 1000),
         3,
         policy::ALLOWLIST_BIT,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1817,7 +1910,7 @@ fn transact_rejects_an_evicted_asp_membership_root() {
         U256::from_u32(&env, 1000),
         3,
         policy::ALLOWLIST_BIT,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1860,7 +1953,7 @@ fn transact_rejects_a_blocklist_root_one_insert_old() {
         U256::from_u32(&env, 1000),
         3,
         policy::BLOCKLIST_BIT,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1911,7 +2004,7 @@ fn transact_errors_when_policy_flags_unset() {
         U256::from_u32(&env, 1000),
         3,
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1950,7 +2043,7 @@ fn transact_rejects_wrong_output_gvk_ciphertext_count() {
             U256::from_u32(&env, 1000),
             3,
             0,
-            mk_point(&env, 1, 2),
+            base8_key(&env),
             gvk_mode,
         );
         let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -1992,7 +2085,7 @@ fn transact_rejects_wrong_input_gvk_ciphertext_count_when_traceable() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         TRACEABLE,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -2029,7 +2122,7 @@ fn transact_rejects_input_gvk_ciphertexts_present_when_view_only() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -2066,7 +2159,7 @@ fn transact_rejects_non_canonical_gvk_ciphertext_field() {
             U256::from_u32(&env, 1000),
             3,
             0,
-            mk_point(&env, 1, 2),
+            base8_key(&env),
             gvk_mode,
         );
         let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -2110,7 +2203,7 @@ fn transact_does_not_reject_boundary_canonical_gvk_ciphertext_field() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -2194,14 +2287,14 @@ fn transact_never_accepts_caller_supplied_admin_view_key() {
     let is_invalid_proof_a = transact_with_admin_view_key(
         &env,
         &setup,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         member_root.clone(),
         non_member_root.clone(),
     );
     let is_invalid_proof_b = transact_with_admin_view_key(
         &env,
         &setup,
-        mk_point(&env, 99, 100),
+        neg_base8_key(&env),
         member_root,
         non_member_root,
     );
@@ -2232,7 +2325,7 @@ fn pool_gvk_commitment_event_carries_ciphertext() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let commitment = U256::from_u32(&env, 123);
@@ -2275,7 +2368,7 @@ fn pool_gvk_nullifier_event_carries_ciphertext_only_when_traceable() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         TRACEABLE,
     );
     let nullifier = U256::from_u32(&env, 456);
@@ -2549,7 +2642,7 @@ fn build_gvk_transact(
     setup.token = env
         .register_stellar_asset_contract_v2(Address::generate(&env))
         .address();
-    let admin_view_key = mk_point(&env, 1, 2);
+    let admin_view_key = base8_key(&env);
     let levels = 3u32;
 
     // Root is a pure function of `levels` (the empty-tree root), so it can be
@@ -2797,7 +2890,7 @@ fn transact_rejects_deposit_over_maximum() {
         U256::from_u32(&env, 100),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -2853,7 +2946,7 @@ fn transact_accepts_deposit_at_maximum_bound() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -2889,7 +2982,7 @@ fn transact_rejects_a_deposit_past_i128_under_a_larger_cap() {
         U256::from_parts(&env, 0x100, 0, 0, 0),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -2927,7 +3020,7 @@ fn transact_accepts_zero_ext_amount_with_zero_maximum_deposit() {
         U256::from_u32(&env, 0),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -2990,7 +3083,7 @@ fn transact_rejects_a_batch_with_one_spent_nullifier() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -3030,7 +3123,7 @@ fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -3067,7 +3160,7 @@ fn the_configuration_lives_in_the_instance() {
         U256::from_u32(&env, 1000),
         3,
         policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
-        mk_point(&env, 7, 11),
+        base8_key(&env),
         TRACEABLE,
     );
 
@@ -3122,7 +3215,7 @@ fn transact_reports_verifier_rejection_as_invalid_proof() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
 
@@ -3270,7 +3363,7 @@ fn assert_transact_reports_a_failing_tree(field: PolicyAspRootField, nullifier: 
         U256::from_u32(&env, 1000),
         3,
         flags,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -3350,7 +3443,7 @@ fn transact_rejects_deposit_with_invalid_proof_without_moving_funds() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
 
@@ -3423,7 +3516,7 @@ fn transact_deposit_verification_runs_before_transfer_when_sender_unfunded() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
 
@@ -3489,7 +3582,7 @@ fn transact_deposit_validation_failures_do_not_transfer() {
         U256::from_u32(&env, 1000),
         3,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
 
@@ -3563,7 +3656,7 @@ fn transact_refuses_an_insertion_into_a_full_tree() {
         U256::from_u32(&env, 1000),
         1,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool = PoolGvkContractClient::new(&env, &pool_id);
@@ -3609,7 +3702,7 @@ fn transact_rejects_pool_a_proof_replayed_on_pool_b() {
         U256::from_u32(&env, 1000),
         8,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let token_a = setup.token.clone();
@@ -3620,7 +3713,7 @@ fn transact_rejects_pool_a_proof_replayed_on_pool_b() {
         U256::from_u32(&env, 1000),
         8,
         0,
-        mk_point(&env, 1, 2),
+        base8_key(&env),
         VIEW_ONLY,
     );
     let pool_a = PoolGvkContractClient::new(&env, &pool_a_id);
@@ -3690,7 +3783,7 @@ fn register_open_pool_gvk(env: &Env, setup: &TestSetup) -> Address {
         U256::from_u32(env, 1000),
         3,
         0,
-        mk_point(env, 1, 2),
+        base8_key(env),
         VIEW_ONLY,
     )
 }

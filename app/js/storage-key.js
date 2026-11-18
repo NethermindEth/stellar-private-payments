@@ -51,7 +51,7 @@ async function openLockedWalletStorage({ storage, getAddress, signMessage, verif
             // Confirm the updated account before binding any persistent data.
             const selected = await getAddress();
             if (selected === record.address) break;
-            if (typeof selected !== 'string' || !selected) throw new Error('Select an account in Freighter to unlock local storage.');
+            if (typeof selected !== 'string' || !selected) throw new Error('Select an account in Varial to unlock local storage.');
             record.address = selected;
         }
     }

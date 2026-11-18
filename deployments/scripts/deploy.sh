@@ -461,7 +461,7 @@ load_gvk_authority_pub_key() {
   need cargo
   printf '%s' "$raw" \
     | cargo run --manifest-path "$ROOT_DIR/Cargo.toml" -p gvkey-gen --quiet -- validate >/dev/null \
-    || die "gvk authority pub key failed on-curve/low-order validation (see gvkey-gen error above)"
+    || die "gvk authority pub key is not a valid Baby JubJub subgroup point (see gvkey-gen error above)"
 
   GVK_AUTHORITY_PUB_KEY_COMPACT="$(jq -c . <<<"$raw")"
 }

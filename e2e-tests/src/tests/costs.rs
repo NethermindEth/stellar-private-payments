@@ -45,6 +45,8 @@ use super::utils::{
     test_env, wasm_hash,
 };
 use anyhow::Result;
+use ark_bn254::Fr;
+use ark_ff::{BigInteger, MontFp, PrimeField};
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use contract_types::Groth16Proof;
@@ -307,9 +309,15 @@ impl PoolFixture {
 fn gvk_transact_row() -> Row {
     let base = PoolFixture::new(policy::BLOCKLIST_BIT);
     let env = &base.env;
+    let coord =
+        |v: Fr| U256::from_be_bytes(env, &Bytes::from_slice(env, &v.into_bigint().to_bytes_be()));
     let view_key = BabyJubJubPoint {
-        x: U256::from_u32(env, 1),
-        y: U256::from_u32(env, 2),
+        x: coord(MontFp!(
+            "5299619240641551281634865583518297030282874472190772894086521144482721001553"
+        )),
+        y: coord(MontFp!(
+            "16950150798460657717958625567821834550301663161624707787222815936182638968203"
+        )),
     };
     let args: Vec<Val> = soroban_sdk::vec![
         env,

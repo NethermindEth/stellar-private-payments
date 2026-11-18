@@ -39,7 +39,7 @@ export function buildPauseAuthorization({ admin, pool, nonce, latestLedger, maxE
   });
 }
 
-/** Base64 preimage for Freighter's `signAuthEntry`. */
+/** Base64 preimage for Varial's `signAuthEntry`. */
 export function authorizationPreimage(entry, networkPassphrase) {
   return preimage(entry, networkPassphrase).toXdr('base64');
 }
@@ -139,7 +139,7 @@ export function countedEntry(entry, { weights }) {
 }
 
 export function walletSignature(signedAuthEntry) {
-  if (!signedAuthEntry) throw new Error('Freighter returned no signature');
+  if (!signedAuthEntry) throw new Error('Varial returned no signature');
   return Uint8Array.from(atob(signedAuthEntry), (char) => char.charCodeAt(0));
 }
 

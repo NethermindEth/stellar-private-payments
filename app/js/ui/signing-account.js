@@ -2,14 +2,14 @@
  * The "Sign and pay with" pickers: which account signs and pays for an
  * on-chain transaction, while the connected account keeps owning the notes.
  *
- * Freighter does not list the accounts it holds, only the active one, and that
+ * Varial does not list the accounts it holds, only the active one, and that
  * only once the user allowed it for this site. So beyond the owner the choices
  * are the accounts added before, remembered per owner across sessions, and
- * Freighter's active account, offered until it signs a transaction and so
- * joins them. When Freighter keeps its active account from the app, a picker
+ * Varial's active account, offered until it signs a transaction and so
+ * joins them. When Varial keeps its active account from the app, a picker
  * option asks for it. Any account can also be pasted.
  *
- * Freighter signs as a requested account it holds whichever account is active;
+ * Varial signs as a requested account it holds whichever account is active;
  * one it does not hold fails at signing, which is where the user finds out.
  *
  * Each picker is a `[data-signing-account]` element. Added accounts are shared
@@ -80,9 +80,9 @@ function render(p, selected = null) {
     if (suggestion) {
         options.push(new Option(Utils.shortAddress(suggestion), suggestion));
     }
-    // An empty active address is Freighter keeping its account from this site.
+    // An empty active address is Varial keeping its account from this site.
     if (owner && active === '') {
-        options.push(new Option('Use the account active in Freighter…', REQUEST_ACTIVE));
+        options.push(new Option('Use the account active in Varial…', REQUEST_ACTIVE));
     }
     options.push(new Option('Enter another address…', OTHER));
     select.replaceChildren(...options);
@@ -163,7 +163,7 @@ function renderSettings() {
     }
 }
 
-// Ask Freighter to share its active account, and offer it in `p`.
+// Ask Varial to share its active account, and offer it in `p`.
 async function requestActiveAccount(p) {
     try {
         const address = await connectWallet();
@@ -171,7 +171,7 @@ async function requestActiveAccount(p) {
         renderKeepingSelections({ [p.scope]: address });
     } catch (error) {
         renderKeepingSelections({ [p.scope]: '' });
-        Toast.show(error?.message || 'Freighter did not share its active account', 'error');
+        Toast.show(error?.message || 'Varial did not share its active account', 'error');
     }
 }
 
@@ -253,7 +253,7 @@ export const SigningAccount = {
 
     /**
      * Remember `signer` for the owner once the user confirmed a transaction
-     * with it. This is how Freighter's active account, offered in the picker,
+     * with it. This is how Varial's active account, offered in the picker,
      * joins the added accounts; one already added, or the owner, is left as
      * it is.
      *

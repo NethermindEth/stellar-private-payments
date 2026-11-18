@@ -12,12 +12,9 @@ are cheap) with Poseidon2 as the KDF. This avoids the foreign-field arithmetic
 that verifying an off-circuit X25519 ciphertext would require.
 
 > **Scope**: This page documents the circuits, the cryptographic scheme, the
-> `pool-gvk` contract, deployment, and the SDK admin audit API. The app shows
+> `pool-gvk` contract, deployment, and the admin audit tools. The app shows
 > a pool's GVK mode as an admin view key control (view-only or traceable)
-> under its token selectors. The admin page (`/admin.html`) provides a
-> **Global View** tab to decrypt and export notes as CSV; there is no `spp`
-> CLI subcommand for GVK audit yet. The
-> Rust reference used by circuit tests lives in
+> under its token selectors. The Rust reference used by circuit tests lives in
 > `circuits/src/test/utils/global_view_key.rs`.
 
 ---
@@ -55,25 +52,27 @@ modes never changes what an output memo looks like.
 | `policy_tx_2_2*_gvk_*` | The 8 entry points listed above. |
 | `test/circuits/globalViewKey_{2,4}_test.circom` | Standalone encryption-only circuits for the known-answer/roundtrip tests (built with `--tests`). |
 
-`D` and `nonce` are public inputs; the note plaintexts stay private and
-`R, c1, c2, c3` are public outputs.
+`D` and `nonce` are public inputs. The note plaintexts and a per-note `salt`
+stay private. `R, c1, c2, c3` are public outputs.
 
 ---
 
 ## Cryptographic scheme
 
-For a note `(pk, amount, blinding)`, public key `D`, `nonce`, and per-note index
-`idx`:
+For a note `(pk, amount, blinding)`, a random per-note `salt`, public key `D`,
+`nonce`, and per-note index `idx`:
 
 1. **Validate `D`.** `BabyCheck(D)` enforces that the untrusted public input `D`
    is on the curve.
 2. **Derive the ephemeral scalar `r`** by a chained Poseidon2 absorb (Poseidon2
    supports at most `t = 4`, so a single wide hash is not possible):
    - `h1 = Poseidon2(pk, amount, blinding)`
-   - `h2 = Poseidon2(h1, D.x, D.y)`
-   - `r  = Poseidon2(h2, nonce, idx)`
+   - `h2 = Poseidon2(h1, salt, D.x)`
+   - `h3 = Poseidon2(h2, D.y, nonce)`
+   - `r  = Poseidon2(h3, idx, 0)`
 
-   Binding every field plus `idx` prevents keystream reuse.
+   The salt makes `r` independent of the note fields. `r` is decomposed
+   canonically, so `r < p`.
 3. **Ephemeral key** `R = r · BASE8`.
 4. **Shared secret** `S = r · (8·D)`. The cofactor `8` is cleared on the possibly
    untrusted `D` (three doublings) so `S` lands in the prime-order subgroup.
@@ -82,6 +81,8 @@ For a note `(pk, amount, blinding)`, public key `D`, `nonce`, and per-note index
      has order dividing 8. Without this guard circomlib's `EscalarMulAny` would
      silently return `S = (0, 1)` and the keystream would be publicly
      computable. `BabyCheck` does not catch this — low-order points are on-curve.
+   - **Degenerate secret guard:** `S.x ≠ 0` is enforced. This rules out
+     `r ≡ 0 (mod l)`, which would also give `S = (0, 1)`.
 5. **Keystream (KDF):** a single width-4 Poseidon2 permutation over
    `(S.x, S.y, 0, 0x06)`. The three rate lanes are the pads `k1, k2, k3`; the
    fourth (capacity) lane is never exposed.
@@ -118,33 +119,26 @@ by the round-trip tests.
 
 ## Security notes
 
-- **The verifier must bind `D` to the registered authority key.** `D` is a
-  public *input*: the circuit proves the memos are encrypted under whatever `D`
-  the prover supplied. A prover could otherwise use their own key and produce a
-  valid proof whose memos the administrator cannot decrypt, silently evading
-  the audit. The contract must compare the public `D` signals against the
-  registered global view key.
-- **`nonce` must be unique per transaction.** A reused nonce makes identical
-  notes produce identical `(R, c)` and therefore publicly linkable. This cannot
-  be enforced in-circuit and must be guaranteed by the contract (e.g. by
-  deriving the nonce from an already-unique value such as an input nullifier).
+- **The contract binds `D` to the pool's key.** `D` is a public *input*: the
+  circuit proves the memos are encrypted under whatever `D` the prover
+  supplied. `pool-gvk` always passes its stored key, and `Proof` has no `D`
+  field, so a prover cannot swap in their own key to evade the audit.
+- **`nonce` is the transaction's `extDataHash`.** The contract passes it, which
+  binds the ciphertexts to the transaction. It is not unique: two transactions
+  with the same `ExtData` share it. The per-note `salt` keeps `r` distinct.
 - **Every encryptor sharing a nonce must get a distinct `idx`.** In the combined
   circuit, inputs use `idx = 0..nIns-1` and outputs use `idx = nIns..nIns+nOuts-1`
   so keystreams never collide (in particular, never two encryptors at `idx = 0`).
-- **Determinism.** Because `r` is derived deterministically from the note and
-  context, confidentiality also rests on the entropy of `blinding`. This applies
-  to **dummy notes too**: padding notes with predictable contents (known key,
-  constant blinding) make their ciphertexts publicly recomputable, letting an
-  observer identify which slots are dummies and fingerprint the transaction's
-  real arity. Every note fed to an encryptor must carry fresh random blinding.
+- **`salt` must be fresh and secret.** `r` is deterministic given the note,
+  `salt` and context. The SDK draws a fresh random salt for every note, dummies included.
 - **Keystream lanes.** The KDF uses one width-4 Poseidon2 permutation as a
   sponge with rate 3 and capacity 1: it absorbs `(S.x, S.y)` under the `0x06`
   tag and squeezes `out[0..2]` as the pads, keeping `out[3]` hidden. Other call
   sites read one lane because they hash, this one generates a stream. Getting
   `S` back from known pads means inverting the permutation with one lane
   unknown, and the generic bound for a one-element (254-bit) capacity is about
-  2^127. Each note has its own `S`, since `r` binds the note, `nonce`, and
-  `idx`, so known pads for one note reveal nothing about another.
+  2^127. Each note has its own `S`, since `r` binds the note, `salt`, `nonce`,
+  and `idx`, so known pads for one note reveal nothing about another.
 
 ---
 
@@ -156,20 +150,32 @@ mutually exclusive with plain `pool`: to turn GVK off, deploy `pool` instead —
 there is no runtime toggle.
 
 - **`admin_view_key` (`D`) and `gvk_mode` are constructor arguments**, validated
-  once (`gvk::is_valid`, a canonical-range + non-zero check on `D`) and stored
-  immutably. **There is no setter for either.** A rotated-out admin therefore
+  once (see [Key validation](#key-validation)) and stored immutably. **There
+  is no setter for either.** A rotated-out admin therefore
   keeps the ability to decrypt every future note, and a leaked private `d`
   retroactively deanonymizes the pool's whole history — the only recovery is
   deploying a new pool and migrating.
 - **`transact` rejects a proof whose ciphertext counts don't match the mode**:
   `output_gvk_ciphertexts` must cover every output always; `input_gvk_ciphertexts`
   must be empty in `VIEW_ONLY` and cover every input in `TRACEABLE`.
-- **Events carry the ciphertext directly**, unlike plain `pool`'s separate memo
-  event — `NewCommitmentEvent.gvk_ciphertext` is mandatory (every output is
-  always encrypted), `NewNullifierEvent.gvk_ciphertext` is `Some` only in
-  `TRACEABLE` mode.
+- **Events carry the ciphertext directly.** `NewCommitmentEvent.gvk_ciphertext`
+  is mandatory (every output is always encrypted), and
+  `NewNullifierEvent.gvk_ciphertext` is `Some` only in `TRACEABLE` mode.
 - `get_admin_view_key` / `get_gvk_mode` are unauthenticated reads: `D` is a
   circuit public input published in every proof, so it isn't secret.
+
+### Key validation
+
+| Where | Checks on `D` |
+|---|---|
+| Circuit, every proof; SDK before encrypting | on the curve, `8·D` not the identity |
+| `pool-gvk` constructor | canonical coordinates, on the curve, `8·D` not the identity |
+| `gvkey-gen validate`, run by `deploy.sh` | on the curve, `8·D` not the identity, `l·D` the identity |
+
+`l` is the order of the subgroup generated by `BASE8`. `gvkey-gen generate`
+returns `d·BASE8`, which passes every check. A key with a torsion component
+still works with the circuit and the SDK, since `S = r·(8·D)` clears it, but it
+cannot come from `gvkey-gen`, so `deploy.sh` refuses it.
 
 ---
 
@@ -180,7 +186,7 @@ there is no runtime toggle.
 into the WASM, so a pool with a different mode needs a different verifier
 contract — and one `pool-gvk` (or plain `pool`) contract per `--pool` spec.
 GVK mode is an optional `[policy:][gvk-mode:]` prefix on a `--pool` spec; see
-[DEPLOY.md](../../DEPLOY.md#global-view-key-gvk) for the full syntax, required
+[Deploy](./deploy.md#global-view-key-gvk) for the full syntax, required
 options, and worked examples.
 
 Per-pool `gvkMode` and `gvkAuthorityPubKey` are recorded in
@@ -200,23 +206,38 @@ traceable pool):
 }
 ```
 
-**Never lose the admin's private scalar `d`.** It is not stored anywhere by
-the deployment tooling — only the public `D` is. Losing `d` permanently
-disables auditing for that pool; there is no recovery path.
+`gvkMode` is `viewOnly` or `traceable`. All GVK pools in one `deploy.sh` run
+use the same `D`, passed with `--gvk-authority-pubkey` or
+`--gvk-authority-pubkey-file`. Before deploying, `deploy.sh` checks `D` with
+`gvkey-gen validate` (on the curve, not low order). After deploying, it reads
+`get_admin_view_key` and `get_gvk_mode` back from each pool.
+
+**Never lose the private scalar `d`.** `deploy.sh` stores only the public `D`.
+`gvkey-gen generate` writes `d` to `--out-file` and can also save it to an
+encrypted wallet database (`--db`, `--storage-account`). Losing `d`
+permanently disables auditing for that pool; there is no recovery path.
 
 ---
 
-## Admin Audit (SDK)
+## Admin Audit
 
-`sdk/native/src/gvk::GvkAudit` walks a pool's on-chain events and decrypts
-every note reachable with the admin's private scalar `d`. It groups each
-`transact` call's commitment/nullifier events back into one record and
-decrypts each ciphertext, using `8d` per [Admin decryption](#admin-decryption-cofactor-8d):
+Three tools decrypt a pool's notes with `d`:
+
+- **Admin page:** the **Global View** tab of `/admin.html`, with CSV export.
+- **CLI:** `spp gvk audit --pool <C…> --key-file <gvkey-gen JSON> [--limit N]`.
+  With `--json` it prints one JSON object per transaction.
+- **SDK:** `client.gvk_authority(d)?.audit(pool).await?` returns a `GvkAudit`.
+
+`audit` checks that the pool is a GVK pool in the deployment config and that
+`d` matches its `gvkAuthorityPubKey`, then syncs local storage. `GvkAudit`
+reads the synced events, groups each `transact` call's commitment and
+nullifier events into one record, and decrypts each ciphertext using `8d` per
+[Admin decryption](#admin-decryption-cofactor-8d):
 
 ```rust
-let mut audit = GvkAudit::new(storage, pool_contract_id, d_priv);
+let mut audit = client.gvk_authority(d_priv)?.audit(pool_contract_id).await?;
 while let Some(tx) = audit.next_tx().await? {
-    // tx.ledger, tx.outputs: Vec<GvkOutputSlot>, tx.inputs: Vec<GvkSpentInput>
+    // tx: GvkTxAudit { ledger, outputs: Vec<GvkOutputSlot>, inputs: Vec<GvkSpentInput> }
 }
 ```
 
@@ -224,18 +245,16 @@ while let Some(tx) = audit.next_tx().await? {
   `None` for a dummy output or a ciphertext that fails to decrypt/verify.
 - `GvkSpentInput { nullifier, note: Option<GvkAuditedNote> }` — `note` is
   `None` for a dummy input, a `VIEW_ONLY` pool (inputs carry no ciphertext),
-  or a decrypt/verify failure.
-
-The admin page (`/admin.html`) exposes this audit view in the browser under its
-**Global View** tab (with CSV export); there is no `spp` CLI subcommand for GVK
-audit yet.
+  or a decrypt/verify failure. A decrypted input counts only if its recomputed
+  commitment is in the pool.
 
 ---
 
 ## Key material provenance
 
-The proving/verifying keys for the GVK circuits are locally generated (see
-`make circuits TESTS=1 REGEN_KEYS=1`) and land in the gitignored `testdata/`.
-As with the other circuits, a trusted ceremony would be required before any
-mainnet deployment. See `deployments/testnet/circuit_keys/README.md` for the
-committed testnet artifacts and full provenance note.
+The proving/verifying keys for the GVK circuits are locally generated with
+`make circuits REGEN_KEYS=1` and land in the gitignored `testdata/`. The
+testnet copies are committed under `deployments/testnet/circuit_keys/`. As with
+the other circuits, a trusted ceremony would be required before any mainnet
+deployment. See `deployments/testnet/circuit_keys/README.md` for the full
+provenance note.

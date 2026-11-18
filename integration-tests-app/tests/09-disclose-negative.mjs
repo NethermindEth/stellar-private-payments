@@ -39,11 +39,11 @@ async function verifyWithExpectedChecks(page, receipt, expectedChecks) {
 }
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForVarialApproval, approveOrWatch } = helpers;
   const logTag = '09-disclose-negative';
   const rpcUrl = RPC_URL;
 
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
   const initialSync = await waitForSyncedLedger(page);
   const noteReady = waitForNotesAfterIndexer(page, {

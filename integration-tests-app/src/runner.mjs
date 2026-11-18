@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Runner core for driving the app against a real Freighter extension.
+// Runner core for driving the app against a real Varial extension.
 //
-// Freighter approvals appear as ordinary CDP page targets at
-// chrome-extension://<freighter-id>/index.html#/<route>?<payload> where
+// Varial approvals appear as ordinary CDP page targets at
+// chrome-extension://<varial-id>/index.html#/<route>?<payload> where
 // <route> is "grant-access" (connect), "sign-message" (key derivation), or
 // "sign-transaction". Headed + sidebar mode prefixes that with
 // "?mode=sidebar" before the hash; headless does not. Discovery here always
 // matches on the hash route alone, browser-wide across every open target
-// (approvals can land in a separate window), and never on Freighter's CSS
+// (approvals can land in a separate window), and never on Varial's CSS
 // classes — only visible button text (Confirm / Cancel / Connect / Sign).
 
 import { createLogger } from './logger.mjs';
@@ -28,20 +28,20 @@ import { fileURLToPath } from 'node:url';
 import {
   approveOrWatch,
   importAccount,
-  rejectInFreighter,
-  unlockFreighter,
-  waitForAnyFreighterApproval,
-  waitForFreighterApproval,
+  rejectInVarial,
+  unlockVarial,
+  waitForAnyVarialApproval,
+  waitForVarialApproval,
 } from './wallet.mjs';
 import { closeIsolatedRegistration, createAccount, fund, seedDriverOnboarding } from './testAccount.mjs';
 
 export {
   approveOrWatch,
   importAccount,
-  rejectInFreighter,
-  unlockFreighter,
-  waitForAnyFreighterApproval,
-  waitForFreighterApproval,
+  rejectInVarial,
+  unlockVarial,
+  waitForAnyVarialApproval,
+  waitForVarialApproval,
 } from './wallet.mjs';
 export {
   closeIsolatedRegistration,
@@ -64,7 +64,7 @@ export {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, '..');
-const EXT_PATH = path.resolve(PKG_ROOT, 'vendor', 'freighter');
+const EXT_PATH = path.resolve(PKG_ROOT, 'vendor', 'varial');
 const log = createLogger('runner');
 
 export async function launch({ userDataDir, headless = true, video = false } = {}) {
@@ -104,7 +104,7 @@ export async function launch({ userDataDir, headless = true, video = false } = {
   return context;
 }
 
-// Opens the app, connects Freighter if not already connected, and asserts
+// Opens the app, connects Varial if not already connected, and asserts
 // the connection succeeded.
 //
 // The app displays a truncated address. Connection is asserted from the
@@ -159,7 +159,7 @@ export async function connectApp(page, { appUrl = requireAppUrl(), context } = {
       if (await page.locator('body').getAttribute('data-storage-state') === 'unlocking') {
         const confirmAccount = page.getByTestId('storage-account-continue');
         if (await confirmAccount.isVisible()) await confirmAccount.click();
-        const approval = await waitForFreighterApproval(context, 'signMessage', { timeoutMs: 500 }).catch(error => {
+        const approval = await waitForVarialApproval(context, 'signMessage', { timeoutMs: 500 }).catch(error => {
           if (error.name !== 'WaitTimeoutError') throw error;
           return null;
         });
@@ -236,11 +236,11 @@ async function main() {
 
   const context = await launch({ userDataDir, headless, video });
   try {
-    await unlockFreighter(context);
+    await unlockVarial(context);
 
     // Every run gets its own fresh driver account: create, fund, (usually)
     // seed the app-level onboarding state it gates on, import into
-    // Freighter, then connect. No account is ever baked into the profile
+    // Varial, then connect. No account is ever baked into the profile
     // snapshot.
     const driver = createAccount();
     await fund(driver);
@@ -264,10 +264,10 @@ async function main() {
       page,
       driver,
       connectApp: (target = page, opts = {}) => connectApp(target, { context, ...opts }),
-      waitForFreighterApproval,
-      waitForAnyFreighterApproval,
+      waitForVarialApproval,
+      waitForAnyVarialApproval,
       approveOrWatch,
-      rejectInFreighter,
+      rejectInVarial,
     });
   } finally {
     await closeIsolatedRegistration();

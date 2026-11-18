@@ -31,7 +31,7 @@ export function removeSigner(signers = [], address) {
 }
 
 /**
- * Freighter's active account, when it is worth offering as a signer: shared
+ * Varial's active account, when it is worth offering as a signer: shared
  * with the app, and neither the owner nor an account already added.
  *
  * @param {{ active: string | null, owner: string | null, signers?: string[] }} accounts
@@ -44,7 +44,7 @@ export function activeSuggestion({ active, owner, signers = [] }) {
 /**
  * The account that signs the next transaction.
  *
- * The explicitly selected owner, added account, or Freighter account on offer.
+ * The explicitly selected owner, added account, or Varial account on offer.
  * Missing or stale selections require a new choice instead of using the owner.
  *
  * @param {{

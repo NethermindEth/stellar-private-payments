@@ -9,7 +9,7 @@ test('a first visit offers only Connect and explains the signature', () => {
     const access = describe({});
     assert.equal(access.state, 'welcome');
     assert.equal(access.action, 'connect');
-    assert.equal(access.label, 'Connect Freighter');
+    assert.equal(access.label, 'Connect Varial');
     assert.equal(access.showLock, false);
     assert.equal(access.showViews, false);
     assert.equal(access.cardVisible, true);
@@ -69,7 +69,7 @@ test('open storage without a wallet keeps the app visible and offers Connect', (
     const access = describe({ storeExists: true, unlocked: true });
     assert.equal(access.state, 'ready');
     assert.equal(access.action, 'connect');
-    assert.equal(access.label, 'Connect Freighter');
+    assert.equal(access.label, 'Connect Varial');
     assert.equal(access.showLock, true);
     assert.equal(access.showViews, true);
 });
@@ -113,7 +113,7 @@ test('the card names the tab it stands in for', () => {
 
 test('plaintext storage never locks and never claims encryption', () => {
     const plaintext = overrides => describe({ mode: 'plaintext', ...overrides });
-    assert.equal(plaintext({ storeExists: true }).label, 'Connect Freighter');
+    assert.equal(plaintext({ storeExists: true }).label, 'Connect Varial');
     // Plaintext storage opens without a signature, so a connected wallet only waits for it.
     assert.equal(plaintext({ storeExists: true, walletState: 'locked', walletConnected: true }).state, 'connecting');
     assert.equal(plaintext({ storeExists: true, walletState: 'ready', walletConnected: true, unlocked: true }).showLock, false);

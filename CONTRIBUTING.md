@@ -30,7 +30,7 @@ stellar-private-payments/
 │   │   ├── disclosure.js       # Selective disclosure UI entry
 │   │   ├── app-storage.js      # App-only persistence (settings, op history)
 │   │   ├── db-locked.js        # DB-locked (storage in use by another tab) modal
-│   │   ├── wallet.js           # Freighter connect/watch/sign UX
+│   │   ├── wallet.js           # Varial connect/watch/sign UX
 │   │   ├── wasm-facade.js      # Runtime facade over stellar-private-payments
 │   │   └── sw.js               # Service worker
 │   ├── css/                    # Stylesheets
@@ -70,7 +70,7 @@ stellar-private-payments/
 │   ├── bootnode/               # HTTPS JSON-RPC getEvents service (excluded from workspace)
 │   └── ceremony-cli/           # Groth16 BN254 trusted-setup ceremony CLI (wraps snarkjs)
 ├── cli/                        # CLI binary (stellar-private-payments-cli; see CLI development)
-├── integration-tests-app/      # Real-Freighter browser e2e suite (see integration-tests-app/README.md)
+├── integration-tests-app/      # Real-Varial browser e2e suite (see integration-tests-app/README.md)
 ├── integration-tests-web/      # Pre-signing SDK browser e2e suite (see integration-tests-web/README.md)
 ├── e2e-tests/                  # End-to-end integration tests
 ├── deployments/                # Deployment scripts, testnet config, legal notices
@@ -193,16 +193,6 @@ committed `circom-witness-rs` graphs (see `make circuits GRAPHS=1`). The per-cir
 crate (`make circuits TESTS=1`, then `cargo test -p circuits -- --ignored`) calculate witnesses with the
 `generate_witness.js` that the Circom compiler writes next to each compiled circuit, so they need Node.js.
 
-The SDK aliases `rusqlite_migration` to the published
-[`spp-rusqlite-migration`](https://crates.io/crates/spp-rusqlite-migration) (`2.7.0`) crate.
-It is published from upstream `rusqlite_migration` `master` at commit `d92f64e1` with the
-`rusqlite` dependency raised to `0.41`
-([`rusqlite_migration` PR #370](https://github.com/cljoly/rusqlite_migration/pull/370)), because
-upstream `2.6.0` requires `rusqlite ^0.40`, which links the `libsqlite3-sys` versions affected by
-RUSTSEC-2026-0459. Because `cargo audit` and `cargo deny` match RustSec advisories by crate name,
-check `rusqlite_migration` advisories manually until an upstream release supports `rusqlite 0.41`
-and the alias is dropped.
-
 ### Running WASM tests
 
 Some crates include unit tests intended to run under `wasm32-unknown-unknown` via `wasm-bindgen-test`.
@@ -267,7 +257,7 @@ cargo test -p e2e-tests
 ### Browser E2E setup
 
 The two browser e2e suites — the pre-signing SDK wasm tests and the
-real-Freighter tests in `integration-tests-app/` (see `integration-tests-app/README.md`) —
+real-Varial tests in `integration-tests-app/` (see `integration-tests-app/README.md`) —
 each bring up their own prerequisites directly in their entry point script,
 rather than through a separate generalized preflight tool:
 

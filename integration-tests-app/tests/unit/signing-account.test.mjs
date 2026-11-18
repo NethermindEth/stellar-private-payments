@@ -62,7 +62,7 @@ test('incomplete withdrawal accounts do not trigger a warning', () => {
 });
 
 
-test('a signature from another account says the chosen account is not in Freighter', () => {
+test('a signature from another account says the chosen account is not in Varial', () => {
   const messages = [
     // sdk/web/src/signer.rs, which signs the app's transactions
     `signer.signTransaction: wallet signed as ${OWNER}, not the requested ${SIGNER}`,
@@ -70,7 +70,7 @@ test('a signature from another account says the chosen account is not in Freight
     'signTransaction: the wallet signed with a different account than the one requested.',
   ];
   for (const message of messages) {
-    assert.match(getTransactionErrorMessage(new Error(message), 'Deposit'), /isn't in Freighter/);
+    assert.match(getTransactionErrorMessage(new Error(message), 'Deposit'), /isn't in Varial/);
   }
 });
 
@@ -87,16 +87,16 @@ test('removing an account keeps the others in order', () => {
   assert.deepEqual(removeSigner([STRANGER], SIGNER), [STRANGER]);
 });
 
-test('Freighter\'s active account is offered only when it is new to the picker', () => {
+test('Varial\'s active account is offered only when it is new to the picker', () => {
   assert.equal(activeSuggestion({ active: STRANGER, owner: OWNER, signers: [SIGNER] }), STRANGER);
   assert.equal(activeSuggestion({ active: OWNER, owner: OWNER, signers: [SIGNER] }), null);
   assert.equal(activeSuggestion({ active: SIGNER, owner: OWNER, signers: [SIGNER] }), null);
-  // Freighter keeping its account from the site, or no wallet connected.
+  // Varial keeping its account from the site, or no wallet connected.
   assert.equal(activeSuggestion({ active: '', owner: OWNER, signers: [] }), null);
   assert.equal(activeSuggestion({ active: STRANGER, owner: null, signers: [] }), null);
 });
 
-test('the offered active account signs only while Freighter still has it active', () => {
+test('the offered active account signs only while Varial still has it active', () => {
   assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: STRANGER }), STRANGER);
   assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: SIGNER }), null);
   assert.equal(chosenSigner({ selected: STRANGER, owner: OWNER, signers: [], active: '' }), null);

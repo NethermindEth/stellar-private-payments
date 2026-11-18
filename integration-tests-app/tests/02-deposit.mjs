@@ -1,4 +1,4 @@
-// Flagship deposit happy path. Transaction submission, Freighter approvals,
+// Flagship deposit happy path. Transaction submission, Varial approvals,
 // submitted-toast identity, and RPC confirmation are owned by the reusable
 // deposit operation; this scenario only describes the business assertion.
 
@@ -11,11 +11,11 @@ import { RPC_URL } from '../src/testAccount.mjs';
 const log = createLogger('02-deposit');
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForVarialApproval, approveOrWatch } = helpers;
   const logTag = '02-deposit';
 
   // Complete onboarding when required before exercising the transaction flow.
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
 
   const result = await deposit(helpers, {

@@ -111,7 +111,7 @@ const state = {
   pauseFiles: [],
   // The latest refreshPauseFiles; an older one landing late is dropped.
   pauseRefresh: null,
-  // Card or pause panel waiting on Freighter or the network. Set via setBusy.
+  // Card or pause panel waiting on Varial or the network. Set via setBusy.
   busy: false,
   cryptoReady: false,
 };
@@ -248,7 +248,7 @@ function disconnect() {
   state.networkPassphrase = null;
   state.rpcUrl = null;
 
-  walletChip.textContent = 'Connect Freighter';
+  walletChip.textContent = 'Connect Varial';
   connectBtn.removeAttribute('title');
   networkChip.textContent = 'Disconnected';
 
@@ -322,7 +322,7 @@ function kindOf(contractId) {
   return 'unknown';
 }
 
-// For status and toasts. The card shows the raw function, as Freighter does.
+// For status and toasts. The card shows the raw function, as Varial does.
 const CALL_NAMES = {
   pause_deposits: 'Pausing deposits',
   unpause_deposits: 'Unpausing deposits',
@@ -343,7 +343,7 @@ const KIND_LABELS = { pool: 'pool', 'asp-membership': 'allowlist', 'asp-non-memb
 function formatAdminCall({ source, sequence, fee, validUntil, contract, method, args }, kind) {
   // Show blocklist keys as the note public keys signers were asked about.
   const number = kind === 'asp-non-membership' ? blocklistKeyToNoteKey : (value) => value.toString();
-  // Arguments keep the base units Freighter shows.
+  // Arguments keep the base units Varial shows.
   return [
     `Source: ${source}`,
     `Sequence: ${sequence}`,
@@ -438,7 +438,7 @@ function renderAdminTx(kind) {
   }
 }
 
-// Freighter takes one request at a time, so the card and the pause panel share a lock.
+// Varial takes one request at a time, so the card and the pause panel share a lock.
 function setBusy(busy) {
   state.busy = busy;
   adminTxSignersEl.querySelectorAll('.sign-as-btn').forEach((button) => {
@@ -508,7 +508,7 @@ async function prepareAdminCall(kind, contractId, build) {
       return;
     }
     try {
-      setStatus('Sign the admin call in Freighter...', 'info');
+      setStatus('Sign the admin call in Varial...', 'info');
       signed = await walletSign(built.xdr, state.address);
     } catch (err) {
       setStatus('Admin call built but not signed', 'error');
@@ -522,12 +522,12 @@ async function prepareAdminCall(kind, contractId, build) {
   await submitAdminTx();
 }
 
-// Signs `envelope` with Freighter as `address`; Freighter switches to that
+// Signs `envelope` with Varial as `address`; Varial switches to that
 // account when it holds it.
 async function walletSign(envelope, address) {
   const { signedTxXdr } = await signWalletTransaction(envelope, { networkPassphrase: state.networkPassphrase, address });
   // The wallet's own check passes a reply that names no signer.
-  if (!signedBy(signedTxXdr, state.networkPassphrase, address)) throw new Error(`Freighter did not sign as ${shortAddress(address)}`);
+  if (!signedBy(signedTxXdr, state.networkPassphrase, address)) throw new Error(`Varial did not sign as ${shortAddress(address)}`);
   return signedTxXdr;
 }
 
@@ -552,7 +552,7 @@ async function signAdminTx(signer, button) {
     const refusal = signRefusal(rule, envelope, state.networkPassphrase, signer);
     if (refusal) throw new Error(refusal);
     const signedTxXdr = await walletSign(envelope, signer);
-    if (adminTxXdrInput.value.trim() !== envelope) throw new Error('The card changed while Freighter was signing. Sign again.');
+    if (adminTxXdrInput.value.trim() !== envelope) throw new Error('The card changed while Varial was signing. Sign again.');
     loadAdminTx(signedTxXdr, state.adminTxKind);
     // In the card: a toast would cover Copy link.
     adminTxNoticeEl.textContent = signedWeight(rule, signedTxXdr, state.networkPassphrase) >= rule.threshold
@@ -560,7 +560,7 @@ async function signAdminTx(signer, button) {
       : 'Signed. Press Copy link and send the new link to the next signer.';
   } catch (err) {
     const reason = err.code === 'SIGNER_ADDRESS_MISMATCH'
-      ? `Freighter does not hold ${shortAddress(signer)}. Pass the link to that signer.`
+      ? `Varial does not hold ${shortAddress(signer)}. Pass the link to that signer.`
       : explainFailure(err, state.adminTxKind);
     showToast(`Signing failed: ${reason}`, 'error');
   } finally {
@@ -1256,7 +1256,7 @@ async function buildPauseFile() {
     setBusy(false);
   }
   if (file && (file.rule.weights.get(state.address) ?? 0) >= file.rule.threshold) {
-    setStatus('Sign the new pause file in Freighter...', 'info');
+    setStatus('Sign the new pause file in Varial...', 'info');
     await signPauseFile(file, state.address);
   }
 }
@@ -1279,7 +1279,7 @@ async function openPauseFiles() {
   setBusy(false);
 }
 
-// Freighter switches to `key` if it holds it.
+// Varial switches to `key` if it holds it.
 async function signPauseFile(file, key) {
   if (refuseWhileBusy()) return;
   file.signing.add(key);
@@ -1295,15 +1295,15 @@ async function signPauseFile(file, key) {
       networkPassphrase: state.networkPassphrase,
       address: key,
     });
-    // The file may have left the panel, or merged with a copy, while Freighter was open.
+    // The file may have left the panel, or merged with a copy, while Varial was open.
     const held = heldPauseFile(file.authorization);
-    if (!held) throw new Error('The file left the panel while Freighter was signing');
+    if (!held) throw new Error('The file left the panel while Varial was signing');
     held.authorization = describeAuthorization(addSignature(held.authorization.entry, key, walletSignature(signedAuthEntry), state.networkPassphrase));
     held.saved = false;
     setStatus(`Pause file signed as ${shortAddress(key)}`, 'ok');
   } catch (err) {
     const reason = err.code === 'SIGNER_ADDRESS_MISMATCH'
-      ? `Freighter does not hold ${shortAddress(key)}. Save the file and pass it to that signer.`
+      ? `Varial does not hold ${shortAddress(key)}. Save the file and pass it to that signer.`
       : err.message;
     setStatus('Pause file not signed', 'error');
     showToast(`Signing failed: ${reason}`, 'error');

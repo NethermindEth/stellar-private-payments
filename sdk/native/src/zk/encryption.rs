@@ -14,7 +14,7 @@
 //! # Key Architecture
 //!
 //! ```text
-//! Freighter Wallet (Ed25519)
+//! Varial Wallet (Ed25519)
 //!        │
 //!        └── signMessage("Privacy Pool Key Derivation [v1] (<kdf_domain>)
 //!                         WARNING: signing this gives full control of …")
@@ -221,7 +221,7 @@ fn derive_keypair_from_signature(signature: &KeyDerivationSignature) -> Result<E
     })
 }
 
-/// Derive private key (BN254 scalar) deterministically from a Freighter
+/// Derive private key (BN254 scalar) deterministically from a Varial
 /// signature for note identity. Used for ZK circuit ownership proofs
 ///
 /// This private key is used inside ZK circuits to prove ownership of notes.

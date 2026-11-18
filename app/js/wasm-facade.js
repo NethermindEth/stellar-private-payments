@@ -25,7 +25,7 @@ import init, {
   dump_recent_logs,
   debugLogsEnabled as sdkDebugLogsEnabled,
 } from 'stellar-private-payments';
-import { FreighterSigner } from 'stellar-private-payments/freighter';
+import { VarialSigner } from 'stellar-private-payments/varial';
 
 import { deploymentDefaults, networkPresentation } from './network-config.js';
 import { AppStorage } from './app-storage.js';
@@ -179,7 +179,7 @@ function wrapSdkClient(sdk) {
         },
         async openAccount(
             { networkPassphrase, userAddress, signerAddress },
-            signer = new FreighterSigner(),
+            signer = new VarialSigner(),
         ) {
             const effectiveSigner = signerAddress ?? userAddress;
             if (

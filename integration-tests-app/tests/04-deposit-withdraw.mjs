@@ -14,10 +14,10 @@ import { RPC_URL } from '../src/testAccount.mjs';
 const log = createLogger('04-deposit-withdraw');
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForVarialApproval, approveOrWatch } = helpers;
 
   // Complete onboarding when required.
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag: '04-deposit-withdraw' });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag: '04-deposit-withdraw' });
   await gotoMoveFunds(page);
 
   const rpcUrl = RPC_URL;

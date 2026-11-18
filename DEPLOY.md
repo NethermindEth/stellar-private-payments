@@ -80,7 +80,7 @@ the user belongs to an approved set or avoids a blocked one.
 ## Global View Key (GVK)
 
 A Global View Key lets the pool admin decrypt and view notes — see [Global
-View Key](docs/src/global_view_key.md) for the full scheme.
+View Key](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/global_view_key.md) for the full scheme.
 
 | `<gvk-mode>` | Meaning |
 |---|---|
@@ -95,6 +95,14 @@ JubJub public key via `--gvk-authority-pubkey-file`.
 
 ```sh
 cargo run -p gvkey-gen -- generate --out-file admin-d.json > admin-pub.json
+```
+
+`deploy.sh` runs `gvkey-gen validate` on the key before deploying anything: it
+must be on the Baby JubJub curve and in the prime-order subgroup, as every
+generated key is. To check a key from elsewhere:
+
+```sh
+cargo run -p gvkey-gen -- validate --file admin-pub.json
 ```
 
 **Back up `admin-d.json` — the private key cannot be recovered.** `gvkey-gen
