@@ -201,6 +201,7 @@ export interface Client {
   backgroundSync(): Promise<void>;
   stopBackgroundSync(): void;
   sync(): Promise<void>;
+  prepareProvers(): Promise<void>;
   operationalFeed(limit: number): Promise<OperationalFeedItem[]>;
   contractConfig(): ContractConfig;
   account(options: AccountOptions, signer: WalletSigner): Promise<Account>;

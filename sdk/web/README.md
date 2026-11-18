@@ -38,6 +38,7 @@ if (await bootnodeRequired(rpcUrl, storage, { contractConfig })) {
 
 const client = await Client.new({ rpcUrl, storage, contractConfig, circuitsBaseUrl, circuitLock });
 await client.backgroundSync();
+client.prepareProvers().catch(console.warn); // decompress proving keys ahead of the first proof
 
 const account = await client.account({ networkPassphrase }, signer);
 await account.derivePrivacyKeys(); // idempotent; prompts the wallet only the first time
@@ -180,6 +181,8 @@ only exists once `scripts/stage-wasm-types.sh` has staged it from `dist/`.
 ## Workers
 
 Web Workers run the OPFS SQLite storage backend and Groth16 prover off the main thread. `Storage.open()` and `Client.new()` resolve default worker URLs relative to `import.meta.url` (overridable via `workerUrl`, `storageWorkerUrl`, and `proverWorkerUrl`). When `Client.new()` opens storage itself instead of receiving a `storage` handle, pass `keyProvider` in its options.
+
+Proving keys ship compressed, and the first proof on a circuit decompresses its key, which takes seconds; the uncompressed copy is kept in the circuit cache for later page loads. `client.prepareProvers()` does this ahead of time for the circuits of the deployment's enabled pools and for key registration, on a separate prover worker that closes when it is done; when every key is already in the cache, it starts no worker. It is best-effort: it rejects if a circuit could not be prepared, and that circuit is then decompressed on its first proof as before. A Web Lock per key makes sure each key is decompressed once: a proof that needs a key still being decompressed waits for it, then reads it from the cache.
 
 ## Build & publish (maintainers)
 

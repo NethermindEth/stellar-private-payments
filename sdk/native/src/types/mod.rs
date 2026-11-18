@@ -423,6 +423,18 @@ impl ContractConfig {
         self.pools.iter().filter(|p| p.enabled)
     }
 
+    /// Transact circuits of the enabled pools, each once, in pool order.
+    pub fn enabled_pool_circuits(&self) -> Vec<CircuitStem> {
+        let mut stems: Vec<CircuitStem> = Vec::new();
+        for pool in self.enabled_pools() {
+            let stem = CircuitStem::transact(pool.policy_flags, pool.gvk_mode);
+            if !stems.contains(&stem) {
+                stems.push(stem);
+            }
+        }
+        stems
+    }
+
     /// Enabled pool metadata for portfolio rendering.
     pub fn portfolio_pools(&self) -> Vec<PortfolioPoolEntry> {
         self.enabled_pools().map(PortfolioPoolEntry::from).collect()
@@ -876,6 +888,37 @@ mod contract_config_tests {
         }
         assert!(!config.is_deployment_contract("GADMIN"));
         assert!(!config.is_deployment_contract(""));
+        Ok(())
+    }
+
+    #[test]
+    fn enabled_pool_circuits_lists_each_enabled_circuit_once() -> Result<()> {
+        let mut config = config()?;
+        let base = config.pool("CPOOL")?.clone();
+        config.pools.extend([
+            PoolConfigEntry {
+                pool_contract_id: "CSAME".into(),
+                ..base.clone()
+            },
+            PoolConfigEntry {
+                pool_contract_id: "CGVK".into(),
+                gvk_mode: GvkMode::Traceable,
+                ..base.clone()
+            },
+            PoolConfigEntry {
+                pool_contract_id: "COFF".into(),
+                policy_flags: PolicyFlags::BLOCKLIST,
+                enabled: false,
+                ..base
+            },
+        ]);
+
+        let stems: Vec<String> = config
+            .enabled_pool_circuits()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(stems, ["policy_tx_2_2_A", "policy_tx_2_2_A_gvk_T"]);
         Ok(())
     }
 

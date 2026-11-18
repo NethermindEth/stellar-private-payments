@@ -8,6 +8,7 @@ import init, {
   parseTokenAmount as wasmParseTokenAmount,
   Storage as WasmStorage,
   ProverBridge,
+  circuitsToPrepare,
   WalletSigner as WasmWalletSigner,
   bootnodeRequired as wasmBootnodeRequired,
   verifySelectiveDisclosure as wasmVerifySelectiveDisclosure,
@@ -100,7 +101,26 @@ async function bootnodeRequired(rpcUrl, storage, options) {
   }
 }
 
-function wrapClient(wasmClient, telemetrySinks) {
+/** Decompress the missing proving keys on a separate prover worker; a no-op for a client given its own prover. */
+function prepareProvers(preparation) {
+  if (!preparation) return Promise.resolve();
+  preparation.running ??= (async () => {
+    const stems = await circuitsToPrepare(preparation.contractConfig, preparation.circuitsBaseUrl, preparation.lockJson);
+    if (stems.length === 0) return;
+    const worker = ProverBridge.spawn(preparation.proverWorkerUrl);
+    try {
+      await worker.configureCircuitsBase(preparation.circuitsBaseUrl, preparation.lockJson);
+      await worker.prepareCircuits(stems);
+    } finally {
+      worker.free();
+    }
+  })().finally(() => {
+    preparation.running = null;
+  });
+  return preparation.running;
+}
+
+function wrapClient(wasmClient, telemetrySinks, preparation) {
   return {
     backgroundSync: () => wasmClient.backgroundSync(),
     stopBackgroundSync: () => wasmClient.stopBackgroundSync(),
@@ -115,6 +135,7 @@ function wrapClient(wasmClient, telemetrySinks) {
       wasmClient.free();
     },
     sync: () => wasmClient.sync(),
+    prepareProvers: () => prepareProvers(preparation),
     operationalFeed: (limit) => wasmClient.operationalFeed(limit),
     contractConfig: () => wasmClient.contractConfig(),
     account: async (options, signer) => {
@@ -175,12 +196,14 @@ async function newClient(options) {
     }));
 
   let prover = options.prover;
+  let preparation = null;
   if (!prover) {
     const circuitsBaseUrl = requireField(options.circuitsBaseUrl, 'circuitsBaseUrl');
     const resolvedProverWorkerUrl = options.proverWorkerUrl ?? proverWorkerUrl;
     if (!resolvedProverWorkerUrl.trim()) {
       throw new Error('proverWorkerUrl is required (absolute URL to prover-worker.js)');
     }
+    preparation = { proverWorkerUrl: resolvedProverWorkerUrl, circuitsBaseUrl, lockJson, contractConfig, running: null };
     prover = ProverBridge.spawn(resolvedProverWorkerUrl);
     try {
       await prover.configureCircuitsBase(circuitsBaseUrl, lockJson);
@@ -203,7 +226,7 @@ async function newClient(options) {
       options.bootnodeUrl ?? undefined,
     );
     telemetryFinalizer.register(wasmClient, telemetrySinks);
-    return wrapClient(wasmClient, telemetrySinks);
+    return wrapClient(wasmClient, telemetrySinks, preparation);
   } finally {
     storageHandle.free();
     proverHandle.free();

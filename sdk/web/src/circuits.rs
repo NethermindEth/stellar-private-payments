@@ -1,10 +1,11 @@
 //! Fetch compiled circuit artifacts bundled with the npm package or from the
 //! host app.
 
-use js_sys::{ArrayBuffer, Reflect, Uint8Array};
+use futures::FutureExt as _;
+use js_sys::{ArrayBuffer, Function, Promise, Reflect, Uint8Array};
 use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, fmt::Write as _};
-use wasm_bindgen::{JsCast, JsError, JsValue};
+use wasm_bindgen::{JsCast, JsError, JsValue, closure::Closure};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Cache, CacheStorage, Request, RequestInit, RequestMode, Response};
 
@@ -263,6 +264,133 @@ pub(crate) async fn fetch_circuit_file_verified(
     Ok(bytes)
 }
 
+/// Cache entry name of the uncompressed copy of `filename`, whose compressed
+/// bytes hash to `compressed_sha256`.
+fn uncompressed_file_name(filename: &str, compressed_sha256: [u8; 32]) -> String {
+    format!("{filename}.uncompressed.{}", to_hex(&compressed_sha256))
+}
+
+/// Whether the cache has an entry under `key`, without reading it. `false`
+/// when the cache is unavailable.
+async fn cache_has(key: &str) -> bool {
+    let Ok(Some(cache)) = open_cache().await else {
+        return false;
+    };
+    matches!(
+        JsFuture::from(cache.match_with_str(key)).await,
+        Ok(found) if !found.is_undefined()
+    )
+}
+
+/// Whether the cache holds an uncompressed copy of `filename` under
+/// `circuits_base_url` (as normalized by `require_circuits_base_url`). Only
+/// checks that the entry exists; its integrity is checked when it is loaded.
+pub(crate) async fn has_uncompressed(
+    circuits_base_url: &str,
+    filename: &str,
+    compressed_sha256: [u8; 32],
+) -> bool {
+    cache_has(&format!(
+        "{circuits_base_url}{}",
+        uncompressed_file_name(filename, compressed_sha256)
+    ))
+    .await
+}
+
+/// [`has_uncompressed`] under this worker's configured circuits base.
+pub(crate) async fn has_configured_uncompressed(
+    filename: &str,
+    compressed_sha256: [u8; 32],
+) -> bool {
+    match circuit_fetch_url(&uncompressed_file_name(filename, compressed_sha256)) {
+        Ok(key) => cache_has(&key).await,
+        Err(_) => false,
+    }
+}
+
+/// Longest wait for a proving-key lock before deriving without it.
+const LOCK_WAIT_MS: u32 = 60_000;
+
+/// Web Lock request options that give up waiting after [`LOCK_WAIT_MS`], or
+/// `None` without `AbortSignal.timeout`.
+fn lock_wait_options() -> Option<JsValue> {
+    let abort_signal = Reflect::get(&js_sys::global(), &JsValue::from_str("AbortSignal")).ok()?;
+    let timeout: Function = Reflect::get(&abort_signal, &JsValue::from_str("timeout"))
+        .ok()?
+        .dyn_into()
+        .ok()?;
+    let signal = timeout
+        .call1(&abort_signal, &JsValue::from(LOCK_WAIT_MS))
+        .ok()?;
+    let options = js_sys::Object::new();
+    Reflect::set(&options, &JsValue::from_str("signal"), &signal).ok()?;
+    Some(options.into())
+}
+
+/// An exclusive Web Lock, released when dropped.
+struct HeldLock {
+    release: Function,
+}
+
+impl Drop for HeldLock {
+    fn drop(&mut self) {
+        let _ = self.release.call0(&JsValue::NULL);
+    }
+}
+
+/// Wait for the exclusive Web Lock `name`, which every page and worker of this
+/// origin shares. The browser releases it if the holder's worker or page goes
+/// away.
+///
+/// `None` when the Web Locks API is unavailable, the request fails, or the lock
+/// is not granted within [`LOCK_WAIT_MS`]; callers then go on without it. The
+/// bound keeps a holder that never releases (a worker whose Wasm instance
+/// trapped mid-derive stays alive) from blocking everyone else.
+async fn acquire_lock(name: &str) -> Option<HeldLock> {
+    let global = js_sys::global();
+    let navigator = Reflect::get(&global, &JsValue::from_str("navigator")).ok()?;
+    let locks = Reflect::get(&navigator, &JsValue::from_str("locks")).ok()?;
+    if locks.is_undefined() || locks.is_null() {
+        return None;
+    }
+    let request: Function = Reflect::get(&locks, &JsValue::from_str("request"))
+        .ok()?
+        .dyn_into()
+        .ok()?;
+
+    // The lock is held until `held` settles; `release` settles it.
+    let mut release = None;
+    let held = Promise::new(&mut |resolve, _reject| release = Some(resolve));
+    let mut on_acquired = None;
+    let acquired = Promise::new(&mut |resolve, _reject| on_acquired = Some(resolve));
+    let (release, on_acquired) = (release?, on_acquired?);
+
+    let callback = Closure::once_into_js(move |_lock: JsValue| -> JsValue {
+        let _ = on_acquired.call0(&JsValue::NULL);
+        held.into()
+    });
+    let granted = match lock_wait_options() {
+        Some(options) => request.call3(&locks, &JsValue::from_str(name), &options, &callback),
+        None => request.call2(&locks, &JsValue::from_str(name), &callback),
+    };
+    let Ok(granted) = granted.and_then(|value| value.dyn_into::<Promise>()) else {
+        let _ = release.call0(&JsValue::NULL);
+        return None;
+    };
+
+    // `granted` settles only after the lock is released, or early if the
+    // request fails; in that case the lock was never acquired.
+    let mut acquired = JsFuture::from(acquired).fuse();
+    let mut granted = JsFuture::from(granted).fuse();
+    futures::select! {
+        _ = acquired => Some(HeldLock { release }),
+        result = granted => {
+            tracing::warn!("[circuits] lock request for {name} failed: {result:?}");
+            None
+        }
+    }
+}
+
 /// Split a cached `sha256(payload) || payload` frame, returning the payload
 /// only when the stored digest matches a fresh hash of the payload. Returns
 /// `None` for a too-short or tampered/truncated frame so the caller re-derives.
@@ -297,6 +425,9 @@ fn verify_framed_uncompressed(framed: &[u8]) -> Option<Vec<u8>> {
 /// * Any cache failure (unavailable / open / match / put error) degrades to
 ///   simply calling `derive` — caching is best-effort and never breaks a load.
 ///   Only a `derive` error propagates.
+/// * The whole lookup holds a Web Lock named after the cache key, so a key that
+///   another worker (or this one) is deriving is derived once: the later caller
+///   waits, then reads it from the cache.
 ///
 /// `derive` is async so it can fetch the compressed artifact and build the
 /// proving key; it is invoked at most once, only on a miss or corrupt entry.
@@ -309,10 +440,9 @@ where
     F: FnOnce() -> Fut,
     Fut: core::future::Future<Output = Result<Vec<u8>, JsError>>,
 {
-    let key = circuit_fetch_url(&format!(
-        "{filename}.uncompressed.{}",
-        to_hex(&compressed_sha256)
-    ))?;
+    let key = circuit_fetch_url(&uncompressed_file_name(filename, compressed_sha256))?;
+
+    let _lock = acquire_lock(&format!("stellar-circuits-uncompressed:{key}")).await;
 
     let cache_opt = open_cache().await.unwrap_or_else(|e| {
         tracing::warn!("[circuits] failed to open cache for uncompressed {filename}: {e:?}");
@@ -627,6 +757,58 @@ mod tests {
             derive_count2.get(),
             0,
             "cache hit must NOT invoke derive again"
+        );
+    }
+
+    /// `has_uncompressed` sees an entry only after it has been stored.
+    #[wasm_bindgen_test]
+    async fn test_has_uncompressed_reports_stored_entries() {
+        setup_test_env().await;
+        let base = "http://127.0.0.1:8080/";
+        assert!(!has_uncompressed(base, UNCOMPRESSED_FILE, UNCOMPRESSED_SHA).await);
+
+        let (_, derive) = install_derive_counter();
+        get_or_derive_uncompressed(UNCOMPRESSED_FILE, UNCOMPRESSED_SHA, derive)
+            .await
+            .unwrap();
+        assert!(has_uncompressed(base, UNCOMPRESSED_FILE, UNCOMPRESSED_SHA).await);
+    }
+
+    /// Two lookups of the same key that run at once derive it once: the second
+    /// waits for the first's lock, then reads the key from the cache.
+    #[wasm_bindgen_test]
+    async fn test_concurrent_uncompressed_lookups_derive_once() {
+        setup_test_env().await;
+
+        let derive_count = Rc::new(Cell::new(0u32));
+        let derive = |counter: Rc<Cell<u32>>| {
+            move || async move {
+                counter.set(counter.get().wrapping_add(1));
+                // Yield, so the other lookup runs while this one holds the
+                // lock.
+                gloo_timers::future::TimeoutFuture::new(10).await;
+                Ok(DERIVED_BYTES.to_vec())
+            }
+        };
+
+        let (first, second) = futures::join!(
+            get_or_derive_uncompressed(
+                UNCOMPRESSED_FILE,
+                UNCOMPRESSED_SHA,
+                derive(derive_count.clone())
+            ),
+            get_or_derive_uncompressed(
+                UNCOMPRESSED_FILE,
+                UNCOMPRESSED_SHA,
+                derive(derive_count.clone())
+            ),
+        );
+        assert_eq!(first.unwrap(), DERIVED_BYTES.to_vec());
+        assert_eq!(second.unwrap(), DERIVED_BYTES.to_vec());
+        assert_eq!(
+            derive_count.get(),
+            1,
+            "concurrent lookups of one key must derive it once"
         );
     }
 
