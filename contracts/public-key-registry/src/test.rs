@@ -577,3 +577,32 @@ fn the_event_chain_covers_every_registration() {
     }
     assert_eq!(chain.count, 2);
 }
+
+/// Same vector as `registration_digest` in the SDK
+/// (`sdk/native/src/zk/encryption.rs`), so the wallet and the registry cannot
+/// drift apart: the owner signature and the proof both cover this digest.
+#[test]
+fn registration_vector() {
+    let env = Env::default();
+    let registry = Address::from_str(
+        &env,
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+    );
+    let account = Account {
+        owner: Address::from_str(
+            &env,
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPP4V",
+        ),
+        encryption_key: Bytes::from_slice(&env, &[0x22; ENCRYPTION_KEY_LEN as usize]),
+        note_key: Bytes::from_slice(&env, &[0x11; 32]),
+    };
+
+    let digest = registration_digest(&env, &registration_message(&env, &registry, &account));
+
+    let expected: [u8; 32] = [
+        0xa3, 0x9c, 0xa7, 0xd5, 0x22, 0x71, 0xb2, 0xb0, 0x22, 0x41, 0x52, 0x82, 0xca, 0x44, 0x54,
+        0x4f, 0xfd, 0x86, 0xfe, 0xa8, 0xc9, 0x82, 0xbd, 0x31, 0x78, 0xc7, 0x41, 0x5f, 0x0f, 0xb1,
+        0x63, 0x1c,
+    ];
+    assert_eq!(digest.to_array(), expected);
+}

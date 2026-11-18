@@ -253,3 +253,28 @@ test('cancelling account confirmation never signs or changes storage', async () 
     assert.equal(f.keys.length, opens);
   }
 });
+
+// Known answer: a record written by an earlier build must keep unlocking.
+// The signature stands in for a wallet's (bytes 7), the record holds the salt,
+// IV and envelope that the HKDF + AES-GCM wrapping in `storage-key.js` produced
+// once, and the database key is what that envelope must yield. Changing the
+// HKDF info string, the signed message or the AAD makes this fail, which would
+// otherwise lock every existing user out of their local data.
+test('a stored key envelope still unwraps to the pinned database key', async () => {
+  const { options, values, keys, setSignature } = fixture();
+  setSignature(new Uint8Array(64).fill(7));
+  values.set('poolstellar_encrypted_storage_v1', JSON.stringify({
+    version: 1, address: 'owner-a', origin: 'https://storage.test', pending: false,
+    salt: 'AQQHCg0QExYZHB8iJSgrLjE0Nzo9QENGSUxPUlVYW14=',
+    iv: 'AwYJDA8SFRgbHiEk',
+    envelope: 'HrNTYTW6lNXNG6DVHgO135baIhA5oiBuK0+qUxGVl7RZO7TaOnvgGCQ3LHOsRC91',
+  }));
+  // `fixture`'s storage asserts the key equals the one it saw at creation, so
+  // compare against the pinned value instead.
+  options.storage = { open: async ({ keyProvider }) => {
+    keys.push(Buffer.from(await keyProvider()).toString('hex'));
+    return { encrypted: true };
+  } };
+  await openWalletStorage(options);
+  assert.deepEqual(keys, ['0205080b0e1114171a1d202326292c2f3235383b3e4144474a4d505356595c5f']);
+});

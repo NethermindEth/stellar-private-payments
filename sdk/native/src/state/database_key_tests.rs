@@ -396,3 +396,58 @@ fn encrypted_open_rejects_plaintext_files_without_changes() -> Result<()> {
     assert_eq!(before, snapshot(&f.db())?);
     Ok(())
 }
+
+const FIXTURE_KEY: [u8; 32] = [0x42; 32];
+
+/// Writes the committed fixture once. Run by hand when the format is changed
+/// on purpose (and then a migration is needed for existing wallets):
+/// `SPP_WRITE_DB_FIXTURE=1 cargo test -p stellar-private-payments --lib write_the_encrypted_fixture`
+#[test]
+fn write_the_encrypted_fixture() -> Result<()> {
+    if std::env::var_os("SPP_WRITE_DB_FIXTURE").is_none() {
+        return Ok(());
+    }
+    let path = std::path::absolute("src/state/testdata/encrypted_v1.db")?;
+    let _ = fs::remove_file(&path);
+    let mut storage = SqliteStorage::connect_encrypted(
+        &path,
+        &DatabaseKey::new(FIXTURE_KEY),
+        OpenPurpose::CreateNew,
+    )?;
+    storage.set_setting_json("fixture", &"encrypted-v1")?;
+    Ok(())
+}
+
+/// A database file written once by an earlier build must keep opening with its
+/// key. A SQLite3MC upgrade or a change to the cipher settings in `configure`
+/// (cipher, `kdf_iter`, HMAC, header) would otherwise make every existing
+/// wallet unreadable.
+#[test]
+fn a_committed_encrypted_database_still_opens() -> Result<()> {
+    let f = Fixture::new()?;
+    let copy = f.db();
+    fs::copy(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/state/testdata/encrypted_v1.db"
+        ),
+        &copy,
+    )?;
+    let storage = SqliteStorage::connect_encrypted(
+        &copy,
+        &DatabaseKey::new(FIXTURE_KEY),
+        OpenPurpose::OpenExisting,
+    )?;
+    let value: Option<String> = storage.get_setting_json("fixture")?;
+    assert_eq!(value.as_deref(), Some("encrypted-v1"));
+    // The wrong key must not open it.
+    assert!(
+        SqliteStorage::connect_encrypted(
+            &copy,
+            &DatabaseKey::new([0x43; 32]),
+            OpenPurpose::OpenExisting
+        )
+        .is_err()
+    );
+    Ok(())
+}

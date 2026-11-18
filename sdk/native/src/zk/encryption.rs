@@ -896,3 +896,154 @@ mod registration_tests {
         }
     }
 }
+
+/// Known-answer tests. Everything here is derived from a fixed signature and
+/// pinned, so a change in key derivation, X-Wing or the HPKE wire format (for
+/// example from an `hpke` upgrade) fails here instead of making existing
+/// accounts unable to recover their keys or read their notes.
+///
+/// Changing any value below means every user's keys or notes change. Do not
+/// update a vector to make a test pass without a migration plan.
+#[cfg(test)]
+mod known_answer_tests {
+    use super::*;
+    use std::vec;
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    /// Not a real signature: bytes `0..64`.
+    fn signature() -> KeyDerivationSignature {
+        KeyDerivationSignature((0u8..64).collect::<vec::Vec<u8>>())
+    }
+
+    const NOTE_PRIVATE_KEY: &str =
+        "93cffddaf98d0ce3c510f565f085bcc61ec42855dd2defb559dbe466bc1af52f";
+    const NOTE_PUBLIC_KEY: &str =
+        "efbecb60293baa5cf5900a6ea8a72f03b77dfbbb2b12f3dbcaf38983dcca5223";
+    const ENCRYPTION_PRIVATE_KEY: &str =
+        "30a06df7925d37af1a88dddcacaf05c2e9fd3dbafa8e25dcef3f9ec7f16f524e";
+    /// First 32 bytes of the 1216-byte public key; the hash below covers all of it.
+    const ENCRYPTION_PUBLIC_KEY_HEAD: &str =
+        "b025157f0253d7747bcc6a32a2249d9f043bdf0564921961c429bdd4c8307683";
+    const ENCRYPTION_PUBLIC_KEY_SHA256: &str =
+        "1d07fb5d2cc1775c37a0ded6c6c718a7229de942ed06bd20285303cb4c4cd750";
+    const MEMBERSHIP_BLINDING_TESTNET: &str =
+        "6f376451fe6b541ef08331b62ca9d092d64fe71a9b9ad0785ff4cedad2a79820";
+    /// A 1184-byte note ciphertext produced once for the keys above with
+    /// amount 1234567 and blinding `[9; 32]`.
+    const NOTE_CIPHERTEXT: &str = include_str!("testdata/note_ciphertext.hex");
+    const NOTE_AMOUNT: u128 = 1_234_567;
+    const NOTE_BLINDING: [u8; 32] = [9; 32];
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn keys_derived_from_a_fixed_signature_are_pinned() {
+        let (note, enc) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
+        assert_eq!(hex::encode(note.private.0), NOTE_PRIVATE_KEY);
+        assert_eq!(hex::encode(note.public.0), NOTE_PUBLIC_KEY);
+        assert_eq!(hex::encode(enc.private.0), ENCRYPTION_PRIVATE_KEY);
+        assert_eq!(enc.public.0.len(), EncryptionPublicKey::LEN);
+        assert_eq!(hex::encode(&enc.public.0[..32]), ENCRYPTION_PUBLIC_KEY_HEAD);
+        assert_eq!(
+            hex::encode(Sha256::digest(&enc.public.0)),
+            ENCRYPTION_PUBLIC_KEY_SHA256
+        );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn membership_blinding_from_a_fixed_signature_is_pinned() {
+        let blinding = derive_membership_blinding(&signature(), "testnet").expect("derivation");
+        assert_eq!(
+            hex::encode(blinding.to_le_bytes()),
+            MEMBERSHIP_BLINDING_TESTNET
+        );
+    }
+
+    /// Decapsulation and decryption of a stored ciphertext must keep working:
+    /// notes already on chain were encrypted by an earlier build.
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn a_pinned_ciphertext_still_decrypts() {
+        let (_, enc) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
+        let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
+        assert_eq!(ciphertext.len(), 1184);
+        let (amount, blinding) = decrypt_output_note(&enc.private, &ciphertext)
+            .expect("decrypt")
+            .expect("note addressed to this key");
+        assert_eq!(amount, NoteAmount::from(NOTE_AMOUNT));
+        assert_eq!(
+            blinding.to_le_bytes(),
+            Field::try_from_le_bytes(NOTE_BLINDING)
+                .expect("blinding")
+                .to_le_bytes()
+        );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn a_pinned_ciphertext_is_not_readable_by_another_key() {
+        let other = KeyDerivationSignature(vec![1u8; 64]);
+        let (_, enc) = derive_encryption_and_note_keypairs(other).expect("derivation");
+        let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
+        assert!(
+            decrypt_output_note(&enc.private, &ciphertext)
+                .expect("decrypt")
+                .is_none()
+        );
+    }
+
+    /// Signature of the real `stellar message sign` vector in
+    /// `signer::local` (a genuine 64-byte Ed25519 SEP-53 signature).
+    const CLI_SIGNATURE_B64: &str =
+        "sVN7t6f95HnWra/b23AqHVVhEXlS2wEBd2Sng7yqHjRKoieWbmbGNnFQST+L08ON4YrUYp9NMaJhdMT0w6jHDg==";
+
+    /// Starts from a real wallet signature, so the derivation is pinned from
+    /// what a signer actually returns, not from made-up bytes.
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn keys_derived_from_a_real_wallet_signature_are_pinned() {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let bytes = STANDARD.decode(CLI_SIGNATURE_B64).expect("base64");
+        let (note, enc) =
+            derive_encryption_and_note_keypairs(KeyDerivationSignature(bytes)).expect("keys");
+        assert_eq!(
+            hex::encode(note.private.0),
+            "427ef402c9f0a1acfce1a241ef21941fd06d5702c01cd91a77ba25b441bac029"
+        );
+        assert_eq!(
+            hex::encode(note.public.0),
+            "2c7cd526dbb6490b01ec386b8cf663737c6172b57413e7ee28c2e55128cafd23"
+        );
+        assert_eq!(
+            hex::encode(enc.private.0),
+            "4484038c91b5974f44c26f12057c89708fc6c7888fa7dd5f6db01a526e622e27"
+        );
+        assert_eq!(
+            hex::encode(Sha256::digest(&enc.public.0)),
+            "1185892349c709c3a8bae9a76d146a02ec41ae0c036a9df31e327730b948590f"
+        );
+    }
+
+    /// Shared with `contracts/public-key-registry` (`registration_vector`),
+    /// so the wallet and the registry cannot drift apart.
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn the_registration_digest_and_hash_are_pinned() {
+        let message = registration_message(
+            "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPP4V",
+            &NotePublicKey([0x11; 32]),
+            &EncryptionPublicKey::try_from(vec![0x22u8; EncryptionPublicKey::LEN]).expect("key"),
+        );
+        let digest = registration_digest(&message);
+        assert_eq!(
+            hex::encode(digest),
+            "a39ca7d52271b2b022415282ca44544ffd86fea8c982bd3178c7415f0fb1631c"
+        );
+        assert_eq!(
+            hex::encode(registration_hash(&digest).to_le_bytes()),
+            "1963b13fa36021ad7d6b565ccf45eb84384bc0455f8150f932d2dc7e7cbc6f12"
+        );
+    }
+}
