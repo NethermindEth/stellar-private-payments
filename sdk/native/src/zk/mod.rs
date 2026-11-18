@@ -2,6 +2,11 @@
 //! and selective-disclosure receipt validation.
 
 pub mod babyjub;
+// With `parallel` also on, `prover.rs` proves through `ark-groth16` and only
+// the tests call this module; see its docs.
+#[cfg(feature = "parallel-chunked-msm")]
+#[cfg_attr(feature = "parallel", allow(dead_code))]
+mod chunked_msm;
 pub mod circom_reduction;
 pub mod crypto;
 pub mod disclosure;
