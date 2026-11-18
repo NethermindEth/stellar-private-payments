@@ -14,7 +14,12 @@ use gloo_worker::{
     oneshot::{OneshotBridge, oneshot},
 };
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    fmt::Write as _,
+    rc::Rc,
+};
 use stellar_private_payments::{
     CircuitLockfile, Error, Prover, disclosure,
     prover::ProverEngine,
@@ -55,6 +60,9 @@ pub(crate) enum ProverWorkerRequest {
     ConfigureTelemetry(WorkerTelemetryConfig),
     DumpLogs,
     PrepareCircuit(String),
+    /// Size of the threaded prover worker's thread pool, sent before the first
+    /// proof. The serial worker answers with an error.
+    ConfigureThreads(u32),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -68,6 +76,8 @@ pub(crate) enum ProverWorkerResponse {
     DisclosureProofVerified(bool),
     KeyOwnershipProof(Vec<u8>),
     Logs(String),
+    /// Pool size the threaded prover worker will use, after clamping.
+    ThreadsConfigured(u32),
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -486,6 +496,9 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::DumpLogs => {
             ProverWorkerResponse::Logs(crate::telemetry::dump_recent_logs())
         }
+        ProverWorkerRequest::ConfigureThreads(_) => {
+            anyhow::bail!("this prover worker proves on one thread and has no thread pool")
+        }
         ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
             tracing::debug!("[{WORKER_NAME}] verify disclosure proof");
 
@@ -564,17 +577,37 @@ pub async fn circuits_to_prepare(
 
 const PROVE_TIMEOUT_MS: u32 = 30_000;
 const PREPARE_TIMEOUT_MS: u32 = 60_000;
+/// `ConfigureThreads` is the first request a threaded worker answers, so this
+/// also covers downloading and compiling its wasm, and starting its pool (up
+/// to 10 s).
+const CONFIGURE_THREADS_TIMEOUT_MS: u32 = 40_000;
+const CONFIGURE_CIRCUITS_TIMEOUT_MS: u32 = 5_000;
+
+/// The serial prover worker that replaces a threaded one whose request timed
+/// out, and the circuits to configure it with.
+struct SerialFallback {
+    worker_url: String,
+    circuits_base_url: String,
+    lock_json: String,
+}
 
 /// Prover worker bridge — main-thread ↔ worker I/O for Groth16 proving.
+///
+/// Every fork shares the worker, so a fallback to the serial worker applies to
+/// all of them.
 #[wasm_bindgen]
 pub struct ProverBridge {
-    bridge: OneshotBridge<ProverWorker>,
+    bridge: Rc<RefCell<OneshotBridge<ProverWorker>>>,
+    fallback: Rc<RefCell<Option<SerialFallback>>>,
+    fell_back: Rc<Cell<bool>>,
 }
 
 impl Clone for ProverBridge {
     fn clone(&self) -> Self {
         Self {
-            bridge: self.bridge.fork(),
+            bridge: Rc::clone(&self.bridge),
+            fallback: Rc::clone(&self.fallback),
+            fell_back: Rc::clone(&self.fell_back),
         }
     }
 }
@@ -601,6 +634,43 @@ impl ProverBridge {
         self.configure_circuits_base(base_url, lock_json)
             .await
             .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Sizes and starts a threaded prover worker's thread pool, which clamps
+    /// the size to `1..=hardwareConcurrency`, and resolves to the number of
+    /// threads proofs will run on (1 if the pool did not start). Rejects on
+    /// the serial worker and after the first proof.
+    #[wasm_bindgen(js_name = configureThreads)]
+    pub async fn configure_threads_js(&self, threads: u32) -> Result<u32, JsError> {
+        self.configure_threads(threads)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Replace this (threaded) worker with the serial worker at `worker_url`,
+    /// configured with these circuits, once a request to it times out. A pool
+    /// thread that traps leaves its proof waiting forever; without this, every
+    /// later proof would wait out its timeout too.
+    #[wasm_bindgen(js_name = fallBackToSerialOnTimeout)]
+    pub fn fall_back_to_serial_on_timeout(
+        &self,
+        worker_url: String,
+        circuits_base_url: String,
+        lock_json: String,
+    ) -> Result<(), JsError> {
+        let circuits_base_url = crate::deployment::require_circuits_base_url(circuits_base_url)?;
+        *self.fallback.borrow_mut() = Some(SerialFallback {
+            worker_url,
+            circuits_base_url,
+            lock_json,
+        });
+        Ok(())
+    }
+
+    /// Whether a timeout replaced this worker with the serial one.
+    #[wasm_bindgen(js_name = fellBackToSerial)]
+    pub fn fell_back_to_serial(&self) -> bool {
+        self.fell_back.get()
     }
 
     #[wasm_bindgen(js_name = toHandle)]
@@ -643,7 +713,69 @@ impl ProverBridge {
 
 impl ProverBridge {
     pub(crate) fn new(bridge: OneshotBridge<ProverWorker>) -> Self {
-        Self { bridge }
+        Self {
+            bridge: Rc::new(RefCell::new(bridge)),
+            fallback: Rc::new(RefCell::new(None)),
+            fell_back: Rc::new(Cell::new(false)),
+        }
+    }
+
+    /// Send `req` to `bridge` and wait at most `timeout_ms` for the answer.
+    async fn run(
+        bridge: &OneshotBridge<ProverWorker>,
+        req: ProverWorkerRequest,
+        timeout_ms: u32,
+    ) -> Option<ProverWorkerResponse> {
+        let correlated_req = CorrelatedRequest {
+            correlation_id: crate::correlation::current_correlation_id()
+                .unwrap_or_else(|| "-".to_string()),
+            payload: req,
+        };
+        let mut bridge = bridge.fork();
+        let fut = bridge.run(correlated_req).fuse();
+        let timeout = TimeoutFuture::new(timeout_ms).fuse();
+        futures::pin_mut!(fut, timeout);
+        futures::select! {
+            value = fut => Some(value),
+            _ = timeout => None,
+        }
+    }
+
+    /// If a serial fallback is set, replace the worker with it. Dropping the
+    /// last bridge to the old worker terminates it and its pool threads.
+    async fn fall_back_to_serial(&self) {
+        let Some(fallback) = self.fallback.borrow_mut().take() else {
+            return;
+        };
+        tracing::warn!(
+            "[{WORKER_NAME}] threaded prover worker timed out, switching to the serial worker"
+        );
+        let serial = ProverWorker::spawner()
+            .with_loader(true)
+            .as_module(true)
+            .spawn(&fallback.worker_url);
+        let configured = Self::run(
+            &serial,
+            ProverWorkerRequest::ConfigureCircuitsBase(
+                fallback.circuits_base_url,
+                fallback.lock_json,
+            ),
+            PROVE_TIMEOUT_MS,
+        )
+        .await;
+        if !matches!(configured, Some(ProverWorkerResponse::Saved)) {
+            tracing::warn!(
+                "[{WORKER_NAME}] serial prover worker did not configure its circuits: {configured:?}"
+            );
+        }
+        let _ = Self::run(
+            &serial,
+            ProverWorkerRequest::ConfigureTelemetry(crate::telemetry::current_worker_config()),
+            CONFIGURE_CIRCUITS_TIMEOUT_MS,
+        )
+        .await;
+        *self.bridge.borrow_mut() = serial;
+        self.fell_back.set(true);
     }
 
     pub(crate) async fn call(
@@ -651,22 +783,11 @@ impl ProverBridge {
         req: ProverWorkerRequest,
         timeout_ms: u32,
     ) -> anyhow::Result<ProverWorkerResponse> {
-        let correlated_req = CorrelatedRequest {
-            correlation_id: crate::correlation::current_correlation_id()
-                .unwrap_or_else(|| "-".to_string()),
-            payload: req,
-        };
-        let mut bridge = self.bridge.fork();
-        let fut = bridge.run(correlated_req).fuse();
-        let timeout = TimeoutFuture::new(timeout_ms).fuse();
-
-        futures::pin_mut!(fut, timeout);
-
-        let resp = futures::select! {
-            value = fut => value,
-            _ = timeout => {
-                return Err(anyhow!("operation timed out after {timeout_ms} ms"));
-            }
+        let bridge = self.bridge.borrow().fork();
+        let Some(resp) = Self::run(&bridge, req, timeout_ms).await else {
+            drop(bridge);
+            self.fall_back_to_serial().await;
+            return Err(anyhow!("operation timed out after {timeout_ms} ms"));
         };
 
         match resp {
@@ -706,11 +827,29 @@ impl ProverBridge {
         match self
             .call(
                 ProverWorkerRequest::ConfigureCircuitsBase(base_url, lock_json),
-                5_000,
+                CONFIGURE_CIRCUITS_TIMEOUT_MS,
             )
             .await?
         {
             ProverWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    /// Sizes and starts the threaded prover worker's thread pool, and returns
+    /// the number of threads proofs will run on: `threads` clamped to
+    /// `1..=hardwareConcurrency`, or 1 if the pool did not start. The pool
+    /// cannot be resized, so this has to come before the first proof;
+    /// afterwards, and from the serial prover worker, the answer is an error.
+    pub async fn configure_threads(&self, threads: u32) -> anyhow::Result<u32> {
+        match self
+            .call(
+                ProverWorkerRequest::ConfigureThreads(threads),
+                CONFIGURE_THREADS_TIMEOUT_MS,
+            )
+            .await?
+        {
+            ProverWorkerResponse::ThreadsConfigured(threads) => Ok(threads),
             other => Err(anyhow!("unexpected response: {other:?}")),
         }
     }

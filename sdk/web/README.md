@@ -186,9 +186,24 @@ Web Workers run the OPFS SQLite storage backend and Groth16 prover off the main 
 
 Proving keys ship compressed, and the first proof on a circuit decompresses its key, which takes seconds; the uncompressed copy is kept in the circuit cache for later page loads. `client.prepareProvers()` does this ahead of time for the circuits of the deployment's enabled pools and for key registration, on a separate prover worker that closes when it is done; when every key is already in the cache, it starts no worker. It is best-effort: it rejects if a circuit could not be prepared, and that circuit is then decompressed on its first proof as before. A Web Lock per key makes sure each key is decompressed once: a proof that needs a key still being decompressed waits for it, then reads it from the cache.
 
+### Multi-threaded proving
+
+The package ships two prover workers. The serial one (`dist/workers/prover-worker.js`) proves on a single thread. The threaded one (`dist/workers/prover-worker-threads.js`) proves on a pool of Web Workers that share one `SharedArrayBuffer`, and browsers allow that memory only on cross-origin isolated pages. `Client.new()` therefore picks the threaded worker only when `crossOriginIsolated` is `true`, which takes both of these response headers, on the page and on its workers:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+Once they are set, everything the page loads must be same-origin or opt in through CORS or `Cross-Origin-Resource-Policy`.
+
+The serial worker stays the fallback, and threads never change the result of a proof. `Client.new()` keeps to it on a page that is not isolated, in a build made with `SPP_WEB_THREADS=0`, and when the threaded worker's pool does not start, in which case the SDK logs a warning. If a request to the threaded worker times out later, for example because a pool thread crashed, the SDK replaces it with the serial worker for the rest of the client's life.
+
+`proverThreads` on `Client.new()` sets how many threads proofs may use. Omitted or `true` means one per logical core, `false` or `1` forces the serial worker, and a larger number caps the pool after the SDK clamps it to the logical cores. `verifySelectiveDisclosure()` uses the serial worker unless `proverThreads` asks for threads, because checking one proof does not need a pool. An explicit `proverWorkerUrl` is spawned as given, without any of this selection. `client.proverInfo()` reports what runs, as `{ mode: 'serial' | 'threaded' | 'custom', threads }`, and `client.dispose()` frees the prover worker together with its pool.
+
 ## Build & publish (maintainers)
 
-Browser builds compile SQLite3MC through `sqlite-wasm-rs` (`sqlite3mc` feature), which requires Clang and `llvm-ar` (or `ar`). Building the npm package from source also requires `wasm-bindgen-cli` and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see [CONTRIBUTING.md](../../CONTRIBUTING.md)):
+Browser builds compile SQLite3MC through `sqlite-wasm-rs` (`sqlite3mc` feature), which requires Clang and `llvm-ar` (or `ar`). Building the npm package from source also requires `wasm-bindgen-cli` and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see [CONTRIBUTING.md](../../CONTRIBUTING.md)). The threaded prover worker needs more: it is compiled with atomics against a std rebuilt from the toolchain's `rust-src` component, which `rust-toolchain.toml` installs, and it builds in a target directory of its own, `target/web-threads`. `SPP_WEB_THREADS=0` skips it for a quicker local build, but a published package must include it, and `npm run check:package` fails without it.
 
 ```bash
 make circuits
@@ -197,6 +212,8 @@ npm pack
 ```
 
 Published tarball: `dist/` (WASM, workers, **bundled circuits** + LGPL source bundle) and `js/` (entry + types).
+
+After a build, two scripts exercise the prover workers in a real browser. `node scripts/test-prover-threads.js --artifacts <dir>` proves on the threaded worker of an isolated page and on the serial worker of a page that is not, in headless Chromium, or in Firefox with `--browser firefox`. `node scripts/bench-prover-threads.js --artifacts <dir>` times both workers at several pool sizes. Each script builds the `prover-driver` binary first, and takes `--binary` and `--driver` to point at the browser and its WebDriver.
 
 CI publishes from `main` when `version` in `package.json` is bumped (see `.github/workflows/release.yml`).
 
