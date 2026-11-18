@@ -1,9 +1,9 @@
 //! Global View Key (GVK) mode and ciphertext types.
 //!
-//! Mirrors `pool::policy`'s style: a small discrete mode plus pure
+//! Same style as `pool_core::policy`: a small discrete mode plus pure
 //! validation functions. Unlike `PolicyFlags`, view-only and traceable are
-//! mutually exclusive: a pool that wants GVK off is simply deployed from
-//! `contracts/pool`
+//! mutually exclusive: a pool that wants GVK off is deployed from
+//! `contracts/pool`.
 
 use soroban_sdk::{U256, contracttype, crypto::bn254::Bn254Fr};
 
@@ -80,8 +80,7 @@ impl BabyJubJubPoint {
 /// A single note's Global View Key ciphertext: ephemeral key `R` and the
 /// three masked field elements. Field names mirror
 /// `stellar_private_payments::types::GlobalViewKeyCiphertext` (no code sharing
-/// is possible since this crate is `#![no_std]`), keeping future
-/// `contract_state.rs`/indexer mapping mechanical.
+/// is possible since this crate is `#![no_std]`).
 #[contracttype]
 #[derive(Clone)]
 pub struct GvkCiphertext {

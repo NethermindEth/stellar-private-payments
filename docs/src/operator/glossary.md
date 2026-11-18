@@ -8,7 +8,7 @@ differs.
 | Admin | The address stored as a contract's admin (`Admin`). One admin account usually administers every pool and tree in a deployment. |
 | Admin account | A Stellar account that needs M of its N signers on every transaction, used as the admin. |
 | Admin call | A transaction that calls an admin-only entry point, signed by the admin. |
-| Admin view key | A cryptographic key that allow the pool admin to view the private details of a note without granting access to spend's user funds. · In view-only admin can see only the owner key, the amount and the blinding · In traceable the admin can see everything. |
+| Admin view key | The app's name for the GVK. It lets the GVK holder read notes without being able to spend them. In view-only mode the holder sees each new note's owner key, amount and blinding. In traceable mode the holder also sees which note each spend consumed. |
 | Allowlist | The tree of approved members (`asp-membership`). A pool with the allowlist policy accepts only spenders whose leaf is in it. |
 | ASP | Association set provider: whoever maintains a pool's allowlist or blocklist. |
 | ASP secret | A per-user value derived from the user's key-derivation signature (`membership_blinding`). It blinds the user's allowlist leaf. |
