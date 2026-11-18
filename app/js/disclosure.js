@@ -238,7 +238,7 @@ export function mountGenerate(container) {
   container.replaceChildren();
 
   if (!App.state.wallet.address || !App.state.keys.notePublicKey) {
-    container.appendChild(el('div', 'text-sm text-slate-400', 'Connect your Freighter wallet to generate disclosure receipts for your notes.'));
+    container.appendChild(el('div', 'text-sm text-slate-400', 'Connect your Varial wallet to generate disclosure receipts for your notes.'));
     return;
   }
 

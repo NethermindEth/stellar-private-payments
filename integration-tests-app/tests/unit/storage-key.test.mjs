@@ -190,7 +190,7 @@ test('missing Web Locks fails before reading records or asking for signatures', 
   assert.equal(f.keys.length, 0);
 });
 
-test('enrollment reconfirms an account changed in Freighter before binding storage', async () => {
+test('enrollment reconfirms an account changed in Varial before binding storage', async () => {
   const f = fixture();
   let active = 'owner-a';
   const confirmations = [];

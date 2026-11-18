@@ -2,7 +2,7 @@
  * The rule that a wallet must sign with the account it was asked to sign with.
  *
  * Kept in its own module, free of any import, so it is reachable from Node for
- * unit testing: `wallet.js` pulls in `@stellar/freighter-api`, whose package
+ * unit testing: `wallet.js` pulls in `@stellar/varial-sdk`, whose package
  * exports cannot be resolved outside the browser bundle.
  */
 
@@ -10,7 +10,7 @@
  * Refuse a signature the wallet produced with an account other than the one
  * requested.
  *
- * Freighter returns success with `signerAddress` set to the *active* account
+ * Varial returns success with `signerAddress` set to the *active* account
  * when it does not hold the requested one: no error, no rejection, and nothing
  * in the approval prompt naming the address that was asked for. Comparing the
  * two is what catches the substitution.

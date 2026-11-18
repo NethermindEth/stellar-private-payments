@@ -2,7 +2,7 @@ import { refreshTokenDecimals } from '../token-metadata.js';
 import { deploymentDefaults } from '../network-config.js';
 import { poolSelectLabel } from '../pool-policy.js';
 import { connectWallet, getWalletNetwork, startWalletWatcher, walletErrorToastOptions } from '../wallet.js';
-import { FreighterSigner } from 'stellar-private-payments/freighter';
+import { VarialSigner } from 'stellar-private-payments/varial';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady, isStorageUnlocked, storageWasLocked } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
@@ -294,7 +294,7 @@ function renderSettingsDrawer() {
     renderOwnerSwitch();
 }
 
-// Offer Freighter's active account as the note owner when it is another one.
+// Offer Varial's active account as the note owner when it is another one.
 function renderOwnerSwitch() {
     const box = document.getElementById('settings-owner-switch');
     if (!box) return;
@@ -474,23 +474,23 @@ export const Wallet = {
     /**
      * @param {{ auto?: boolean, owner?: string | null }} [opts] - `owner` names
      *   the note owner to connect; otherwise the remembered one, or failing
-     *   that Freighter's active account.
+     *   that Varial's active account.
      */
     async connect({ auto = false, owner = null } = {}) {
         if (this._connectPromise) return this._connectPromise;
 
         this._connectPromise = (async () => {
             // This is intentionally separate from wallet.connected: that flag
-            // flips as soon as Freighter supplies an address, while runtime
+            // flips as soon as Varial supplies an address, while runtime
             // and pool initialization still make transaction controls unusable.
             document.body.dataset.walletState = 'connecting';
             delete document.body.dataset.walletError;
-            const signer = new FreighterSigner();
+            const signer = new VarialSigner();
 
             try {
                 const activeAddress = await connectWallet();
                 // The note owner is the account the user connected, not
-                // Freighter's active one: signing as another account makes
+                // Varial's active one: signing as another account makes
                 // that account active. It stays until the user disconnects.
                 const address = owner ?? rememberedNoteOwner() ?? activeAddress;
                 const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
@@ -552,7 +552,7 @@ export const Wallet = {
             } catch (error) {
                 const message = error?.message || '';
                 document.body.dataset.walletError = message || 'Failed to connect wallet';
-                // Freighter no longer holds the remembered owner, so it could
+                // Varial no longer holds the remembered owner, so it could
                 // not sign as it; let the next connection take another.
                 const ownerNotInWallet = /not the requested|signed with a different account/i.test(message);
                 this.disconnect({ forgetOwner: ownerNotInWallet });
@@ -574,7 +574,7 @@ export const Wallet = {
         return this._connectPromise;
     },
 
-    // Follow Freighter's active account, which the signing pickers and the
+    // Follow Varial's active account, which the signing pickers and the
     // owner switch offer. It never changes the owner by itself.
     startWatcher() {
         if (this._stopWatcher) return;
@@ -593,7 +593,7 @@ export const Wallet = {
     },
 
     /**
-     * Make Freighter's active account the note owner, once the user confirms.
+     * Make Varial's active account the note owner, once the user confirms.
      * The app reconnects as it, onboarding it where it was never set up.
      */
     async switchOwner() {

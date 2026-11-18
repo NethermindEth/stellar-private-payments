@@ -1,4 +1,4 @@
-// Rejection path: reject a real Freighter signTransaction approval and prove
+// Rejection path: reject a real Varial signTransaction approval and prove
 // the app classifies it as a user cancellation before returning the control to
 // the normal idle state.
 
@@ -10,9 +10,9 @@ import { waitForCondition } from '../src/waits.mjs';
 
 const log = createLogger('03-rejection');
 
-export async function run({ page, context, waitForFreighterApproval, approveOrWatch, rejectInFreighter }) {
+export async function run({ page, context, waitForVarialApproval, approveOrWatch, rejectInVarial }) {
   const logTag = '03-rejection';
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
   await page.getByTestId('move-panel-deposit').waitFor({ state: 'visible', timeout: 10_000 });
 
@@ -31,8 +31,8 @@ export async function run({ page, context, waitForFreighterApproval, approveOrWa
     await dialog.getByTestId('confirm-dialog-confirm').click();
   }
 
-  await waitForFreighterApproval(context, 'signTransaction', { timeoutMs: 60_000 });
-  await rejectInFreighter(context, 'signTransaction', { timeoutMs: 15_000 });
+  await waitForVarialApproval(context, 'signTransaction', { timeoutMs: 60_000 });
+  await rejectInVarial(context, 'signTransaction', { timeoutMs: 15_000 });
 
   const recovery = await waitForCondition({
     operation: 'deposit-rejection-recovery',

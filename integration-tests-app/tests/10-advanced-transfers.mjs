@@ -1,6 +1,6 @@
 // Deposit, wait for the indexed note to become usable, then transfer it via
 // the Advanced composer. The reusable advanced operation owns confirmation,
-// Freighter approval, submitted-transaction identity, and RPC confirmation.
+// Varial approval, submitted-transaction identity, and RPC confirmation.
 
 import { createLogger } from '../src/logger.mjs';
 import { assert } from '../src/assert.mjs';
@@ -9,20 +9,20 @@ import { advancedTransfer, deposit, waitForOperationIdle, waitForToast } from '.
 import { gotoAdvanced, gotoMoveFunds } from '../src/navigation.mjs';
 import { waitForNotes, waitForNotesAfterIndexer } from '../src/notes.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
-import { expectNoFreighterApproval } from '../src/wallet.mjs';
+import { expectNoVarialApproval } from '../src/wallet.mjs';
 import { RPC_URL, createRegisteredAccount } from '../src/testAccount.mjs';
 
 const log = createLogger('10-advanced-transfers');
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForVarialApproval, approveOrWatch } = helpers;
   const logTag = '10-advanced-transfers';
   const rpcUrl = RPC_URL;
 
   const recipientAccount = await createRegisteredAccount();
   const recipient = recipientAccount.publicKey();
 
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
 
   const initialSync = await waitForSyncedLedger(page);
@@ -72,7 +72,7 @@ export async function run(helpers) {
       + 'public withdraw and the 0.0001 XLM pool fee. Remove 0.0001 XLM from a private output.',
   });
   assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened for an unbalanced advanced form');
-  await expectNoFreighterApproval(context, ['signMessage', 'signAuthEntry', 'signTransaction'], { timeoutMs: 5_000 });
+  await expectNoVarialApproval(context, ['signMessage', 'signAuthEntry', 'signTransaction'], { timeoutMs: 5_000 });
   await waitForOperationIdle(page, { submitSelector: '#btn-advanced-transact' });
 
   // Refused for the smallest deposit before the balance.
@@ -84,7 +84,7 @@ export async function run(helpers) {
     predicate: (toast) => toast.message === 'Public deposit must leave at least 0.001 XLM after the 0.0001 XLM pool fee.',
   });
   assert(!(await page.getByTestId('confirm-dialog').isVisible()), 'confirm dialog opened for a public deposit below the smallest deposit');
-  await expectNoFreighterApproval(context, ['signMessage', 'signAuthEntry', 'signTransaction'], { timeoutMs: 5_000 });
+  await expectNoVarialApproval(context, ['signMessage', 'signAuthEntry', 'signTransaction'], { timeoutMs: 5_000 });
   await waitForOperationIdle(page, { submitSelector: '#btn-advanced-transact' });
   await publicDeposit.fill('');
 

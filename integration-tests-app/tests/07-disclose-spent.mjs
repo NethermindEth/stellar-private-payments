@@ -22,11 +22,11 @@ const log = createLogger('07-disclose-spent');
 const PASSING_PROOF_CONTEXT_ROOT = { proof: 'pass', context: 'pass', root: 'pass' };
 
 export async function run(helpers) {
-  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
+  const { page, context, waitForVarialApproval, approveOrWatch } = helpers;
   const logTag = '07-disclose-spent';
   const rpcUrl = RPC_URL;
 
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag });
   await gotoMoveFunds(page);
 
   const deposits = [];

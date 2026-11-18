@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   integration-tests-app:
-    name: App e2e (via Freighter)
+    name: App e2e (via Varial)
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
@@ -116,7 +116,7 @@ jobs:
           fi
 
       # Same path `make integration-tests-app-e2e` uses locally: serves the
-      # app, (re)builds the Freighter profile (needs xvfb — nothing is cached
+      # app, (re)builds the Varial profile (needs xvfb — nothing is cached
       # between runs), runs the tests, tears down.
       - name: Run app e2e tests
         env:

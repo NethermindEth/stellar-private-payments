@@ -22,7 +22,7 @@ export const connectFirst = false;
 
 const log = createLogger('14-first-visit');
 
-export async function run({ page, context, connectApp, waitForFreighterApproval, approveOrWatch }) {
+export async function run({ page, context, connectApp, waitForVarialApproval, approveOrWatch }) {
   await page.goto(requireAppUrl());
   await waitForAppShell(page);
   await waitForAccessState(page, 'welcome');
@@ -34,7 +34,7 @@ export async function run({ page, context, connectApp, waitForFreighterApproval,
   await page.getByTestId('nav-dashboard').click();
   await connectApp(page);
   assert(await isOnboardingWizardVisible(page), 'onboarding did not open after the first connect');
-  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag: '14-first-visit' });
+  await driveWizard(page, context, { waitForVarialApproval, approveOrWatch, logTag: '14-first-visit' });
   await waitForWalletRuntimeReady(page);
 
   assert(await readAccessState(page) === 'ready', `access state after onboarding is "${await readAccessState(page)}"`);

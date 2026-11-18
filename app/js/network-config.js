@@ -17,6 +17,6 @@ export function validateNetwork(config, passphrase) {
         throw new Error('Deployment config is missing networkPassphrase');
     }
     if (passphrase !== config.networkPassphrase) {
-        throw new Error(`Switch Freighter to ${networkPresentation(config).displayName}`);
+        throw new Error(`Switch Varial to ${networkPresentation(config).displayName}`);
     }
 }

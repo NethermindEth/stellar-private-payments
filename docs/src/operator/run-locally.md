@@ -42,7 +42,7 @@ They do the following:
 
 ## Use the web app
 
-The app signs with Freighter. In Freighter, add a custom network with these settings and allow
+The app signs with Varial. In Varial, add a custom network with these settings and allow
 HTTP connections:
 
 | Setting | Value |
@@ -52,11 +52,11 @@ HTTP connections:
 | Passphrase | `Standalone Network ; February 2017` |
 | Friendbot URL | `http://localhost:8000/friendbot` |
 
-Fund the account you connect with from Freighter's friendbot button, then open
+Fund the account you connect with from Varial's friendbot button, then open
 `http://localhost:8080/` to deposit, transfer, and withdraw.
 
 The admin page is at `http://localhost:8080/admin.html`. Its writes need the admin, which is the
-local deployer. To sign as the deployer, import its secret key into Freighter:
+local deployer. To sign as the deployer, import its secret key into Varial:
 
 ```bash
 XDG_CONFIG_HOME=deployments/local/.config stellar keys secret spp-e2e-local-deployer

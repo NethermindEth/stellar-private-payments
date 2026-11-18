@@ -1,4 +1,4 @@
-import { FreighterSigner } from 'stellar-private-payments/freighter';
+import { VarialSigner } from 'stellar-private-payments/varial';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client } from '../wasm-facade.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
@@ -211,7 +211,7 @@ export async function runOnboardingWizard({
     address,
     networkPassphrase,
     bootnodeRequired = false,
-    signer = new FreighterSigner(),
+    signer = new VarialSigner(),
 } = {}) {
     if (!address) throw new Error('Wallet address required for onboarding');
 

@@ -1,10 +1,10 @@
 # Wallet support
 
-SPP supports the Freighter browser extension because it provides the signing operations the app needs and has been tested through the full payment flow. The app also relies on Freighter for connection permissions, account changes and network information. Supporting another wallet means checking its signing behavior and replacing those app-level calls with the equivalent for that provider.
+SPP supports the Varial browser extension because it provides the signing operations the app needs and has been tested through the full payment flow. The app also relies on Varial for connection permissions, account changes and network information. Supporting another wallet means checking its signing behavior and replacing those app-level calls with the equivalent for that provider.
 
-The contracts don't depend on Freighter. The SDK accepts other signers through its [`WalletSigner` interface](https://github.com/NethermindEth/stellar-private-payments/blob/13f2374f4a7ae5b7871caba248763d92fb7c642a/sdk/web/js/types/signer.d.ts), so a compatible wallet can be added through an adapter. The difficulty is deciding whether it is compatible: support for Stellar transactions alone doesn't cover everything SPP asks a wallet to do.
+The contracts don't depend on Varial. The SDK accepts other signers through its [`WalletSigner` interface](https://github.com/NethermindEth/stellar-private-payments/blob/13f2374f4a7ae5b7871caba248763d92fb7c642a/sdk/web/js/types/signer.d.ts), so a compatible wallet can be added through an adapter. The difficulty is deciding whether it is compatible: support for Stellar transactions alone doesn't cover everything SPP asks a wallet to do.
 
-These findings reflect wallet support as of October 2026. Freighter is the only wallet tested end-to-end with SPP; the other findings come from source code and vendor documentation.
+These findings reflect wallet support as of October 2026. Varial is the only wallet tested end-to-end with SPP; the other findings come from source code and vendor documentation.
 
 **Signing requirements**
 
@@ -24,17 +24,17 @@ Several wallets expose the required methods, but a method in an adapter can simp
 
 | Wallet or route | Findings |
 |---|---|
-| Ledger through Freighter or directly | Source exposes transaction, message and Soroban authorization signing. Released device/software combinations need testing. Direct integration would also need transport, account selection and device-version handling. |
+| Ledger through Varial or directly | Source exposes transaction, message and Soroban authorization signing. Released device/software combinations need testing. Direct integration would also need transport, account selection and device-version handling. |
 | Scopuly, Hana, Klever | Scopuly documents the required methods; the kit forwards them for Hana and Klever. Each has an injected provider. Exact signing behavior and recovery have not been tested with SPP. |
 | MetaMask | The Stellar adapter exposes all three methods, but the inspected implementation selects mainnet sessions. SPP's default deployment uses testnet. |
-| Freighter Mobile | Source documents message and auth signing through WalletConnect. Released-app behavior and the applicable WalletConnect terms need confirmation. |
+| Varial Mobile | Source documents message and auth signing through WalletConnect. Released-app behavior and the applicable WalletConnect terms need confirmation. |
 | HOT Wallet, D’CENT | Adapter methods exist, but signing behavior and recovery need verification. The license grant for HOT's SDK is unresolved. |
 | OneKey | Auth signing is unimplemented in the inspected provider. |
 | Trezor | Firmware supports Soroban authorization signing, but uses an address-bound preimage that differs from SPP's current format. A complete SEP-53 message-signing route is not established. |
 | Albedo, LOBSTR, xBull, Rabet, Bitget, Fordefi | At least one required operation is missing from the inspected API or kit module. Separate vendor APIs may differ. |
 | GhostSig, CactusLink | Not assessed sufficiently to establish compatibility. |
 
-These differences are visible in [Freighter's Ledger code](https://github.com/stellar/freighter/blob/master/extension/src/popup/helpers/hardwareConnect.ts), [MetaMask's adapter](https://github.com/MetaMask/connect-stellar/blob/ab53f92e958f89ed690d8cf2f83e3bbfc34f57e0/src/adapter.ts), [OneKey's provider](https://github.com/OneKeyHQ/app-monorepo/blob/8fc0adc44f165e3f0d94e6fd77934f97cfcf6203/packages/kit-bg/src/providers/ProviderApiStellar.ts) and [Trezor's auth implementation](https://github.com/trezor/trezor-firmware/blob/6ab39e95cf45d4b25b3f677806012ac660ae7a51/core/src/apps/stellar/sign_soroban_authorization.py). The reverse situation is possible too: a stub in the kit doesn't establish that the device or another vendor API lacks the operation.
+These differences are visible in [Varial's Ledger code](https://github.com/stellar/freighter/blob/master/extension/src/popup/helpers/hardwareConnect.ts), [MetaMask's adapter](https://github.com/MetaMask/connect-stellar/blob/ab53f92e958f89ed690d8cf2f83e3bbfc34f57e0/src/adapter.ts), [OneKey's provider](https://github.com/OneKeyHQ/app-monorepo/blob/8fc0adc44f165e3f0d94e6fd77934f97cfcf6203/packages/kit-bg/src/providers/ProviderApiStellar.ts) and [Trezor's auth implementation](https://github.com/trezor/trezor-firmware/blob/6ab39e95cf45d4b25b3f677806012ac660ae7a51/core/src/apps/stellar/sign_soroban_authorization.py). The reverse situation is possible too: a stub in the kit doesn't establish that the device or another vendor API lacks the operation.
 
 **Stellar Wallets Kit and licensing**
 
@@ -42,7 +42,7 @@ Stellar Wallets Kit supplies a wallet picker and a common API. It can reduce ada
 
 The kit itself is MIT-licensed. Its assessed dependency list includes xBull's AGPL connector, Reown and WalletConnect components with community-license terms, and the HOT SDK without an established license grant. Those dependencies need attention because SPP's distribution policy requires permissive bundled code. Selective imports can exclude unused code from the browser bundle, but the packages remain in the installed dependency graph. Their presence alone doesn't relicense SPP; what is combined and distributed still needs examination.
 
-SPP could instead use standalone libraries, write adapters for injected providers, or maintain selected MIT-licensed kit code with fewer dependencies. The assessed Freighter and Ledger client libraries are Apache-2.0, and MetaMask's Stellar adapter is ISC. Calling an injected provider does not bundle the wallet, so its own license is separate from that of the adapter SPP uses. Mobile and hosted-wallet connections also have service terms to check.
+SPP could instead use standalone libraries, write adapters for injected providers, or maintain selected MIT-licensed kit code with fewer dependencies. The assessed Varial and Ledger client libraries are Apache-2.0, and MetaMask's Stellar adapter is ISC. Calling an injected provider does not bundle the wallet, so its own license is separate from that of the adapter SPP uses. Mobile and hosted-wallet connections also have service terms to check.
 
 **Institutional and deployer-provided wallets**
 
@@ -67,7 +67,7 @@ The product's exit procedure also needs checking. Legacy embedded wallets list S
 
 **Implementation scope**
 
-If there is interest in proceeding, external-wallet support can be scoped separately from deployer-provided accounts. For an external wallet, the work would cover connection and signing, account/network changes and encoding, followed by tests of deposits, transfers, withdrawals and recovery. Freighter-specific app calls would move behind a provider interface, and each deployment could enable the wallets it needs.
+If there is interest in proceeding, external-wallet support can be scoped separately from deployer-provided accounts. For an external wallet, the work would cover connection and signing, account/network changes and encoding, followed by tests of deposits, transfers, withdrawals and recovery. Varial-specific app calls would move behind a provider interface, and each deployment could enable the wallets it needs.
 
 A Fireblocks or Dynamic integration would also need account provisioning and a chosen custody and recovery model. Depending on that model, the work could include a backend, request validation and approval handling, as well as recovery of SPP privacy keys. Approval delays can invalidate prepared authorization or proof data, so retries must handle those cases. Production access, licensing and recurring charges would need confirmation alongside the technical work.
 

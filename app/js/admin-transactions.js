@@ -117,7 +117,7 @@ export function describeAdminCall(xdr, networkPassphrase) {
  */
 export function claimLine({ source, args: [to, claimed] }, amount) {
   const payee = to === source ? 'the admin account (Source)' : `${to}, not the admin account`;
-  return `Claim${amount ? ` ${amount(claimed)} (${claimed} in the token's smallest unit, as Arguments and Freighter show it)` : ''} to ${payee}`;
+  return `Claim${amount ? ` ${amount(claimed)} (${claimed} in the token's smallest unit, as Arguments and Varial show it)` : ''} to ${payee}`;
 }
 
 /** Returns the number of signatures an envelope carries. */

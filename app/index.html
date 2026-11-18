@@ -24,7 +24,7 @@
     {
         "imports": {
             "stellar-private-payments": "./js/stellar-private-payments/js/index.js",
-            "stellar-private-payments/freighter": "./js/stellar-private-payments/js/freighter.js"
+            "stellar-private-payments/varial": "./js/stellar-private-payments/js/varial.js"
         }
     }
     </script>
@@ -66,7 +66,7 @@
                             <span id="sync-status" class="text-slate-400" data-sync-part hidden></span>
                         </div>
                         <!-- Label and action follow the access state (ui/access.js): connect, unlock, or hidden once ready. -->
-                        <button id="wallet-btn" type="button" data-access-action="connect" class="btn-primary px-4 py-2">Connect Freighter</button>
+                        <button id="wallet-btn" type="button" data-access-action="connect" class="btn-primary px-4 py-2">Connect Varial</button>
                         <button id="storage-lock-btn" data-testid="storage-lock-btn" type="button" aria-label="Lock private data" title="Lock private data" class="icon-btn h-10 w-10" hidden>
                             <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                 <rect x="4" y="11" width="16" height="10" rx="2"/>
@@ -102,8 +102,8 @@
                 </div>
                 <p data-access-meta class="mx-auto mt-4 max-w-md text-balance text-xs leading-5 text-slate-400"></p>
                 <p data-access-install class="mx-auto mt-3 max-w-md text-balance text-xs leading-5 text-amber-200" hidden>
-                    Freighter was not detected in this browser.
-                    <a class="link" href="https://www.freighter.app/" target="_blank" rel="noreferrer noopener">Install Freighter</a>, then reload this page.
+                    Varial was not detected in this browser.
+                    <a class="link" href="https://varialwallet.com/" target="_blank" rel="noreferrer noopener">Install Varial</a>, then reload this page.
                 </p>
             </div>
             <div data-access-intro class="border-t border-white/8 bg-white/2 px-6 py-12 sm:px-10" hidden>
@@ -191,7 +191,7 @@
                                         </div>
                                         <p data-signing-error data-testid="signing-account-error" class="mt-2 text-xs text-amber-200"></p>
                                     </div>
-                                    <p class="mt-3 text-xs text-slate-400">Notes stay with the connected wallet. The chosen account must be in Freighter, or signing fails.</p>
+                                    <p class="mt-3 text-xs text-slate-400">Notes stay with the connected wallet. The chosen account must be in Varial, or signing fails.</p>
                                 </div>
                             </div>
                         </div>
@@ -391,7 +391,7 @@
                                     </div>
                                     <p data-signing-error data-testid="advanced-signing-account-error" class="mt-2 text-xs text-amber-200"></p>
                                 </div>
-                                <p class="mt-3 text-xs text-slate-400">Notes stay with the connected wallet. The chosen account must be in Freighter, or signing fails.</p>
+                                <p class="mt-3 text-xs text-slate-400">Notes stay with the connected wallet. The chosen account must be in Varial, or signing fails.</p>
                             </div>
                         </div>
 
@@ -498,7 +498,7 @@
                     </div>
                 </dl>
                 <div id="settings-owner-switch" data-testid="settings-owner-switch" class="mt-5 rounded-2xl border border-cyan-300/15 bg-cyan-400/5 p-4" hidden>
-                    <p class="text-sm text-slate-300">Freighter's active account is <span id="settings-owner-switch-address" class="font-mono text-slate-100"></span>, not the note owner.</p>
+                    <p class="text-sm text-slate-300">Varial's active account is <span id="settings-owner-switch-address" class="font-mono text-slate-100"></span>, not the note owner.</p>
                     <button id="settings-owner-switch-btn" data-testid="settings-owner-switch-btn" type="button" class="btn-secondary mt-3 px-4 py-2">Make it the note owner</button>
                 </div>
             </section>
@@ -516,7 +516,7 @@
 
             <section class="panel bg-white/3">
                 <p class="field-label">Signing Accounts</p>
-                <p class="mt-2 text-sm text-slate-400">Signing accounts are saved in this browser for this wallet's notes. Removing one forgets it here without changing Freighter.</p>
+                <p class="mt-2 text-sm text-slate-400">Signing accounts are saved in this browser for this wallet's notes. Removing one forgets it here without changing Varial.</p>
                 <ul id="settings-signing-accounts" data-testid="settings-signing-accounts" class="mt-4 space-y-2"></ul>
                 <p id="settings-signing-accounts-empty" data-testid="settings-signing-accounts-empty" class="mt-4 text-sm text-slate-400"></p>
             </section>
@@ -575,7 +575,7 @@
                     <option value="0">Never</option>
                 </select>
                 <p id="settings-auto-lock-hint" class="mt-2 text-xs text-slate-400">Unlock to change the inactivity timeout.</p>
-                <p class="mt-2 text-xs text-slate-400">Locking closes local storage. Approve the storage unlock message in the enrolled Freighter account to unlock it again.</p>
+                <p class="mt-2 text-xs text-slate-400">Locking closes local storage. Approve the storage unlock message in the enrolled Varial account to unlock it again.</p>
 
                 <div class="mt-6 flex flex-col gap-3 sm:flex-row">
                     <button id="settings-save-btn" type="button" class="btn-primary flex-1">Save settings</button>
@@ -587,7 +587,7 @@
                 <h2 id="storage-backup-title" class="field-label">Local storage backup and recovery</h2>
                 <p id="storage-recovery-message" role="status" class="mt-2 text-sm text-slate-300">Backups remain encrypted and require the original unlocking account. Exporting, importing or resetting while unlocked locks local data first.</p>
                 <div id="storage-legacy-notice" data-testid="storage-legacy-notice" hidden class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-300/25 bg-amber-300/5 px-4 py-3 text-sm text-amber-100">
-                    <span>Unencrypted browser data from an earlier version (<code class="font-mono text-xs">.opfs-sahpool</code>) is still stored on disk. Derived keys and notes can be recovered via Freighter, while older local settings and history are not migrated automatically.</span>
+                    <span>Unencrypted browser data from an earlier version (<code class="font-mono text-xs">.opfs-sahpool</code>) is still stored on disk. Derived keys and notes can be recovered via Varial, while older local settings and history are not migrated automatically.</span>
                     <button id="storage-delete-legacy" type="button" class="btn-danger px-3 py-1.5 text-xs">Delete legacy unencrypted data</button>
                 </div>
                 <div class="mt-4 flex flex-wrap gap-3">
