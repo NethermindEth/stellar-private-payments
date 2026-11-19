@@ -374,14 +374,14 @@ pub fn encrypt_output_note(
 
 /// A recipient key prepared once, for trying many outputs.
 ///
-/// Building the X-Wing key expands its 32-byte seed (SHAKE, ML-KEM keygen,
-/// X25519), which costs about as much as a quarter of one decryption attempt.
-/// The key is the same for every output of an account, so scanning builds this
-/// once per account and reuses it
+/// Scanning builds the HPKE key once per account per batch, when it first
+/// encounters an output of the expected length. This saves the seed expansion
+/// during HPKE key construction. X-Wing still expands the seed for each
+/// decapsulation.
 ///
 /// The seed inside is wiped when this is dropped: hpke builds `x-wing` with its
-/// `zeroize` feature. It is neither `Clone` nor printable, so no copy of the
-/// key is made.
+/// `zeroize` feature. The wrapper does not implement `Clone`, and its
+/// `Debug` output redacts the key.
 pub struct NoteDecryptor {
     secret: <XWing as KemTrait>::PrivateKey,
 }

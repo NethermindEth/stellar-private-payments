@@ -1,4 +1,7 @@
-use crate::{error::Error, zk::notes::try_decrypt_and_derive_user_note};
+use crate::{
+    error::Error,
+    zk::{encryption::ENCRYPTED_OUTPUT_LEN, notes::try_decrypt_and_derive_user_note},
+};
 
 use super::{
     SqliteStorage,
@@ -22,13 +25,16 @@ pub fn process_local_state_batch(storage: &mut SqliteStorage) -> anyhow::Result<
     Ok(did_raw || did_notes)
 }
 
-fn derive_user_note(
+pub(super) fn derive_user_note(
     account: &AccountKeys,
     row: &PoolCommitmentRow,
 ) -> anyhow::Result<Option<DerivedUserNoteRow>> {
+    if row.encrypted_output.len() != ENCRYPTED_OUTPUT_LEN {
+        return Ok(None);
+    }
     let opt = try_decrypt_and_derive_user_note(
         &account.keys.note_keypair,
-        &account.decryptor,
+        account.decryptor()?,
         &row.commitment,
         row.leaf_index,
         &row.encrypted_output,
