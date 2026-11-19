@@ -55,7 +55,7 @@ A GVK pool encrypts every note to the pool's GVK public key `D`. Whoever holds t
 ## 6. Forward secrecy
 
 ### No forward secrecy in case of recipient's private key leak
-If a recipient encryption private key is compromised, an attacker is able to decrypt all the past notes addressed to the original private key holder.
+If a recipient encryption private key is compromised, an attacker is able to decrypt all the past notes addressed to the original private key holder but not to spend them.
 
 ### Forward secrecy in case of sender's private key leak
 If a sender's private key is compromised, the ciphertexts produced by the sender are safe (forward secrecy

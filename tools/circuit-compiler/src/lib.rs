@@ -250,9 +250,9 @@ pub fn run(opts: CompileOptions) -> Result<()> {
                     circom_file.display()
                 );
 
-                // Keep deterministic publish directory updated even on "skip"
-                // builds.
                 if wasm_path.exists() {
+                    // Keep deterministic publish directory updated even on
+                    // "skip" builds.
                     if let Err(e) = publish_circuit_artifacts(
                         &publish_dir,
                         &circuit_name,
@@ -261,36 +261,32 @@ pub fn run(opts: CompileOptions) -> Result<()> {
                     ) {
                         eprintln!("Failed to publish artifacts for {circuit_name}: {e}");
                     }
-                } else {
-                    // WASM missing: fall through so we can regenerate it
-                    // instead of silently leaving the
-                    // deterministic directory incomplete.
-                    eprintln!(
-                        "WASM missing for {} - recompiling to restore deterministic artifacts",
-                        circuit_name
-                    );
-                }
 
-                // Still check if we need to generate keys for circuits that
-                // ship PK/VK under testdata/
-                if circuit_needs_groth16_keys(circuit_name.as_str(), &groth16_key_circuits) {
-                    match generate_keys_if_needed(
-                        &testdata_dir,
-                        &circuit_name,
-                        &r1cs_file,
-                        opts.regen_keys,
-                    ) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("Key generation failed: {e}");
-                        }
+                    // Still check if we need to generate keys for circuits
+                    // that ship PK/VK under testdata/
+                    if circuit_needs_groth16_keys(circuit_name.as_str(), &groth16_key_circuits)
+                        && let Err(e) = generate_keys_if_needed(
+                            &testdata_dir,
+                            &circuit_name,
+                            &r1cs_file,
+                            opts.regen_keys,
+                        )
+                    {
+                        eprintln!("Key generation failed: {e}");
                     }
                     continue;
                 }
 
-                if wasm_path.exists() {
-                    continue;
-                }
+                // WASM missing: fall through so we can regenerate it instead
+                // of silently leaving the deterministic directory incomplete.
+                // Keys are not generated here: the recompile below rewrites the
+                // R1CS, and the key step at the end of the loop then runs once
+                // against the fresh file (setup is random, so running it
+                // before and after would produce two different key pairs).
+                eprintln!(
+                    "WASM missing for {} - recompiling to restore deterministic artifacts",
+                    circuit_name
+                );
             }
         }
 
@@ -364,22 +360,11 @@ pub fn run(opts: CompileOptions) -> Result<()> {
 
         // === GROTH16 Proving/Verifying key generation ===
         if circuit_needs_groth16_keys(circuit_name.as_str(), &groth16_key_circuits) {
+            match generate_keys_if_needed(&testdata_dir, &circuit_name, &r1cs_file, opts.regen_keys)
             {
-                match generate_keys_if_needed(
-                    &testdata_dir,
-                    &circuit_name,
-                    &r1cs_file,
-                    opts.regen_keys,
-                ) {
-                    Ok(generated) => {
-                        if generated {
-                            println!("Key generation completed for {}", circuit_name);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Key generation failed for {}: {}", circuit_name, e);
-                    }
-                }
+                Ok(true) => println!("Key generation completed for {}", circuit_name),
+                Ok(false) => {}
+                Err(e) => eprintln!("Key generation failed for {}: {}", circuit_name, e),
             }
         }
     }
