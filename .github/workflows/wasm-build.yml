@@ -141,13 +141,12 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
-      # The threaded prover worker builds `parallel-chunked-msm` with atomics
-      # (wasm-build job); keep it compiling, warning-free, without them too.
-      # `parallel` is not checked here: its MSM cannot run on wasm32.
-      - name: Check the parallel-chunked-msm feature on wasm32
+      # The threaded prover worker builds `parallel` with atomics (wasm-build
+      # job); keep it compiling, warning-free, without them too.
+      - name: Check the parallel feature on wasm32
         env:
           RUSTFLAGS: "-Dwarnings"
-        run: cargo check --target wasm32-unknown-unknown -p stellar-private-payments --features parallel-chunked-msm
+        run: cargo check --target wasm32-unknown-unknown -p stellar-private-payments --features parallel
 
       - name: Run wasm tests
         run: cargo test --target wasm32-unknown-unknown -p stellar-private-payments --lib
