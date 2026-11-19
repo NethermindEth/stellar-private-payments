@@ -129,5 +129,12 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
+      # No web build turns `parallel-chunked-msm` on yet; keep it compiling for
+      # wasm32. `parallel` is not checked here: its MSM cannot run on wasm32.
+      - name: Check the parallel-chunked-msm feature on wasm32
+        env:
+          RUSTFLAGS: "-Dwarnings"
+        run: cargo check --target wasm32-unknown-unknown -p stellar-private-payments --features parallel-chunked-msm
+
       - name: Run wasm tests
         run: cargo test --target wasm32-unknown-unknown -p stellar-private-payments --lib

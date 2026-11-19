@@ -30,11 +30,28 @@ encrypted-storage = [
 ]
 # Plaintext wallet storage using rusqlite's bundled SQLite.
 unencrypted-storage = ["rusqlite/bundled"]
-# multi-threaded proving
+# Multi-threaded proving with rayon, using the parallel code in `ark-groth16`
+# and `ark-ec`. For native targets. It compiles for wasm32 but cannot prove
+# there: `ark-ec` 0.6 builds a new rayon pool inside every MSM, which needs
+# `std::thread::spawn`. Threaded wasm32 builds use `parallel-chunked-msm`.
 parallel = [
     "dep:rayon",
     "ark-ff/parallel",
     "ark-groth16/parallel",
+    "ark-poly/parallel",
+    "ark-std/parallel",
+]
+# Multi-threaded proving on a rayon pool that cannot create nested pools, such
+# as a wasm32 thread pool. `ark-groth16` and `ark-ec` stay serial; the SDK
+# assembles the proof itself and splits each MSM over the current pool (see
+# `zk/chunked_msm.rs`). On wasm32 it needs a threaded build (shared memory plus
+# a rayon pool). Must not turn on `ark-groth16/parallel` or `ark-ec/parallel`.
+# With `parallel` also on (feature unification), `parallel` wins and proofs come
+# from `ark-groth16`, which is right on native and unusable on wasm32.
+parallel-chunked-msm = [
+    "dep:ark-ec",
+    "dep:rayon",
+    "ark-ff/parallel",
     "ark-poly/parallel",
     "ark-std/parallel",
 ]
@@ -47,7 +64,6 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 futures-timer = "3"
 getrandom = { workspace = true, features = ["std"] }
 hkdf = { version = "0.13", optional = true }
-rayon = { version = "1.12", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }
 # The storage features pick the SQLite build: `in_gecko` (`encrypted-storage`) tells
 # `libsqlite3-sys` to use the `sqlite3mc` C symbols compiled by `build.rs`, and `bundled`
@@ -96,6 +112,8 @@ zeroize = { workspace = true }
 
 # Arkworks ZK proving
 ark-bn254 = { workspace = true }
+# Already in the tree through `ark-groth16`; named here only to call its MSM.
+ark-ec = { workspace = true, optional = true }
 ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 ark-poly = { workspace = true }
@@ -104,6 +122,7 @@ ark-serialize = { workspace = true }
 ark-snark = { workspace = true }
 ark-std = { workspace = true }
 crypto_secretbox.workspace = true
+rayon = { version = "1.12", default-features = false, optional = true }
 ruint = { workspace = true }
 taceo-poseidon2 = { workspace = true }
 x25519-dalek = { version = "3.0", default-features = false, features = ["static_secrets"] }

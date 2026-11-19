@@ -8,7 +8,9 @@
 //! 2. Parses the R1CS file to get constraint matrices (see r1cs.rs)
 //! 3. Accepts pre-computed witness bytes
 //! 4. Replays constraints and generates proofs using `ark-groth16` with a
-//!    Circom-compatible R1CS→QAP reduction (see `circom_reduction.rs`)
+//!    Circom-compatible R1CS→QAP reduction (see `circom_reduction.rs`). With
+//!    the `parallel-chunked-msm` feature (and without `parallel`) the proof is
+//!    assembled by `chunked_msm.rs` instead, which gives the same proofs
 
 use crate::{
     types::correlation_id_or_new,
@@ -236,6 +238,31 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
     }
 }
 
+/// Creates a zero-knowledge Groth16 proof for `circuit`, with `r` and `s`
+/// sampled from `rng`.
+///
+/// This is `ark-groth16`'s prover, except in a build with the
+/// `parallel-chunked-msm` feature and without `parallel`: there the proof is
+/// assembled by `chunked_msm.rs`, which samples `r` and `s` the same way and
+/// returns the same proof for the same randomness. When both features are on,
+/// `parallel` wins.
+fn create_random_proof(
+    pk: &ProvingKey<Bn254>,
+    circuit: R1CSCircuit,
+    rng: &mut OsRng,
+) -> Result<Proof<Bn254>, SynthesisError> {
+    #[cfg(all(feature = "parallel-chunked-msm", not(feature = "parallel")))]
+    {
+        crate::zk::chunked_msm::create_random_proof::<Bn254, CircomReduction, _, _>(
+            pk, circuit, rng,
+        )
+    }
+    #[cfg(not(all(feature = "parallel-chunked-msm", not(feature = "parallel"))))]
+    {
+        <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(pk, circuit, rng)
+    }
+}
+
 /// Prover instance holding the loaded keys and R1CS
 pub struct Prover {
     /// Groth16 proving key
@@ -422,10 +449,8 @@ impl Prover {
 
         // Generate proof
         let mut rng = OsRng;
-        let result = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(
-            &self.pk, circuit, &mut rng,
-        )
-        .map_err(|e| anyhow!("Proof generation failed: {}", e));
+        let result = create_random_proof(&self.pk, circuit, &mut rng)
+            .map_err(|e| anyhow!("Proof generation failed: {}", e));
         tracing::debug!(
             elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
             "proof generation completed"
@@ -509,10 +534,8 @@ impl Prover {
         };
 
         let mut rng = OsRng;
-        let result = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(
-            &self.pk, circuit, &mut rng,
-        )
-        .map_err(|e| anyhow!("Proof generation failed: {}", e));
+        let result = create_random_proof(&self.pk, circuit, &mut rng)
+            .map_err(|e| anyhow!("Proof generation failed: {}", e));
         tracing::debug!(
             elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
             "proof generation completed"
@@ -640,6 +663,11 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::arithmetic_side_effects)]
 
     use super::*;
+    use crate::zk::{
+        r1cs::{Constraint, LinearCombination, Term},
+        serialization::scalar_to_bytes,
+    };
+    use ark_bn254::{Fq, Fq2};
     use ark_groth16::Groth16;
     use std::vec;
 
@@ -740,5 +768,234 @@ mod tests {
             prover2.get_verifying_key().expect("vk export"),
             "verifying keys must match after uncompressed round trip"
         );
+    }
+
+    /// In-memory R1CS for `y = x^7` with public `y` and private `x`, and a
+    /// witness that satisfies it. Wires: 0 is one, 1 is `y`, 2 is `x`, 3..=7
+    /// are `x^2..=x^6`.
+    fn power_r1cs() -> (R1CS, Vec<Fr>) {
+        let wire = |wire_id: u32| LinearCombination {
+            terms: vec![Term {
+                wire_id,
+                coefficient: Fr::ONE,
+            }],
+        };
+        // x * x = x^2, x^2 * x = x^3, ..., x^6 * x = y.
+        let constraints = [(2, 3), (3, 4), (4, 5), (5, 6), (6, 7), (7, 1)]
+            .into_iter()
+            .map(|(a, c)| Constraint {
+                a: wire(a),
+                b: wire(2),
+                c: wire(c),
+            })
+            .collect();
+        let r1cs = R1CS {
+            num_wires: 8,
+            num_pub_out: 1,
+            num_pub_in: 0,
+            num_prv_in: 1,
+            num_public: 1,
+            constraints,
+        };
+
+        let x = Fr::from(3u64);
+        let mut witness = vec![Fr::ONE, x.pow([7u64]), x];
+        for power in 2..=6u64 {
+            witness.push(x.pow([power]));
+        }
+        (r1cs, witness)
+    }
+
+    /// Decodes the Soroban proof encoding written by
+    /// `proof_to_uncompressed_bytes`. `G1Affine::new` and `G2Affine::new`
+    /// panic on a point that is off the curve or outside the subgroup.
+    fn proof_from_uncompressed_bytes(bytes: &[u8]) -> Proof<Bn254> {
+        assert_eq!(bytes.len(), 256);
+        let fq = |i: usize| Fq::from_be_bytes_mod_order(&bytes[i * 32..(i + 1) * 32]);
+        Proof {
+            a: G1Affine::new(fq(0), fq(1)),
+            // c1 || c0 for each coordinate.
+            b: G2Affine::new(Fq2::new(fq(3), fq(2)), Fq2::new(fq(5), fq(4))),
+            c: G1Affine::new(fq(6), fq(7)),
+        }
+    }
+
+    /// `prove`, `prove_bytes` and `prove_bytes_uncompressed` return proofs
+    /// that verify against the witness's public inputs and against nothing
+    /// else, in every feature configuration: these are the two places that
+    /// pick between `ark-groth16` and the chunked-MSM assembly.
+    #[test]
+    fn proofs_from_every_entry_point_verify() {
+        let (r1cs, witness) = power_r1cs();
+        let pk = Groth16::<Bn254, CircomReduction>::generate_random_parameters_with_reduction(
+            R1CSCircuit {
+                r1cs: r1cs.clone(),
+                witness: witness.clone(),
+            },
+            &mut OsRng,
+        )
+        .expect("groth16 setup should succeed");
+        let pvk =
+            <Groth16<Bn254, CircomReduction> as SNARK<Fr>>::process_vk(&pk.vk).expect("process vk");
+        let prover = Prover { pk, pvk, r1cs };
+
+        let witness_bytes: Vec<u8> = witness.iter().flat_map(scalar_to_bytes).collect();
+        let public_inputs = prover
+            .extract_public_inputs(&witness_bytes)
+            .expect("public inputs");
+        assert_eq!(public_inputs, scalar_to_bytes(&Fr::from(2187u64)));
+        let wrong_inputs = scalar_to_bytes(&Fr::from(2188u64));
+
+        let proof = prover.prove(&witness_bytes).expect("prove").to_bytes();
+        let proof_bytes = prover.prove_bytes(&witness_bytes).expect("prove_bytes");
+        let uncompressed = prover
+            .prove_bytes_uncompressed(&witness_bytes)
+            .expect("prove_bytes_uncompressed");
+        let mut from_uncompressed = Vec::new();
+        proof_from_uncompressed_bytes(&uncompressed)
+            .serialize_compressed(&mut from_uncompressed)
+            .expect("serialize proof");
+
+        // Each proof has its own `r` and `s`.
+        assert_ne!(proof, proof_bytes);
+        assert_ne!(proof, from_uncompressed);
+        assert_ne!(proof_bytes, from_uncompressed);
+
+        for (name, proof) in [
+            ("prove", &proof),
+            ("prove_bytes", &proof_bytes),
+            ("prove_bytes_uncompressed", &from_uncompressed),
+        ] {
+            assert!(
+                prover.verify(proof, &public_inputs).expect("verify"),
+                "{name}: proof must verify"
+            );
+            assert!(
+                !prover.verify(proof, &wrong_inputs).expect("verify"),
+                "{name}: proof must not verify for another public input"
+            );
+            assert_eq!(
+                prover
+                    .proof_bytes_to_uncompressed(proof)
+                    .expect("uncompressed")
+                    .len(),
+                256
+            );
+        }
+
+        // A witness that breaks `x^6 * x = y` gives no proof that verifies.
+        // `ark-groth16` and the chunked-MSM assembly both refuse it in builds
+        // with debug assertions and return a proof otherwise.
+        let mut bad_witness = witness;
+        bad_witness[1] += Fr::ONE;
+        let bad_bytes: Vec<u8> = bad_witness.iter().flat_map(scalar_to_bytes).collect();
+        let bad_inputs = prover
+            .extract_public_inputs(&bad_bytes)
+            .expect("public inputs");
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            prover.prove_bytes(&bad_bytes)
+        }));
+        if let Ok(Ok(bad_proof)) = outcome {
+            assert!(!prover.verify(&bad_proof, &bad_inputs).expect("verify"));
+        }
+    }
+
+    /// On the production `keyOwnership` circuit, with its committed proving
+    /// key and a witness from its committed graph, the chunked-MSM assembly
+    /// returns byte for byte the proof `ark-groth16` returns for the same `r`
+    /// and `s`, including `r == 0`, and the proof verifies.
+    ///
+    /// Ignored by default because the `.r1cs` is a build output that a fresh
+    /// checkout does not have: `make circuits`, or the CI circuits action,
+    /// puts it in `target/circuits-artifacts`.
+    #[cfg(all(feature = "parallel-chunked-msm", not(target_arch = "wasm32")))]
+    #[test]
+    #[ignore = "needs target/circuits-artifacts/keyOwnership.r1cs (make circuits)"]
+    fn chunked_msm_assembly_equals_ark_groth16_on_key_ownership() {
+        use crate::{
+            types::{Field, NotePrivateKey, NotePublicKey},
+            zk::{
+                chunked_msm,
+                crypto::derive_public_key,
+                flows::{KeyOwnershipParams, key_ownership},
+                witness::WitnessCalculator,
+            },
+        };
+        use ark_std::rand::{SeedableRng, rngs::StdRng};
+
+        let read = |path: &str| {
+            let path = format!("{}/../../{path}", env!("CARGO_MANIFEST_DIR"));
+            std::fs::read(&path).unwrap_or_else(|e| panic!("read {path}: {e}"))
+        };
+        let prover = Prover::new(
+            &read("deployments/testnet/circuit_keys/keyOwnership_proving_key.bin"),
+            &read("target/circuits-artifacts/keyOwnership.r1cs"),
+        )
+        .expect("prover");
+
+        let mut note_private_key = [0u8; 32];
+        note_private_key[0] = 7;
+        let note_public_key = derive_public_key(&note_private_key)
+            .expect("derive public key")
+            .try_into()
+            .expect("32 bytes");
+        let inputs = key_ownership(&KeyOwnershipParams {
+            note_private_key: NotePrivateKey(note_private_key),
+            note_public_key: NotePublicKey(note_public_key),
+            registration_hash: Field::ONE,
+        })
+        .expect("circuit inputs");
+        let witness_bytes = WitnessCalculator::from_graph(&read(
+            "deployments/testnet/circuit_keys/keyOwnership.graph.bin",
+        ))
+        .expect("witness graph")
+        .compute_witness(&serde_json::to_string(&inputs).expect("inputs json"))
+        .expect("witness");
+        let public_inputs = prover
+            .extract_public_inputs(&witness_bytes)
+            .expect("public inputs");
+        let witness: Vec<Fr> = witness_bytes
+            .as_chunks::<FIELD_SIZE>()
+            .0
+            .iter()
+            .map(|chunk| bytes_to_scalar(chunk).expect("scalar"))
+            .collect();
+        let circuit = || R1CSCircuit {
+            r1cs: prover.r1cs.clone(),
+            witness: witness.clone(),
+        };
+
+        let mut rng = StdRng::seed_from_u64(777);
+        let (r, s) = (
+            <Fr as ark_ff::UniformRand>::rand(&mut rng),
+            <Fr as ark_ff::UniformRand>::rand(&mut rng),
+        );
+        for (r, s) in [(r, s), (Fr::ZERO, s)] {
+            let reference = Groth16::<Bn254, CircomReduction>::create_proof_with_reduction(
+                circuit(),
+                &prover.pk,
+                r,
+                s,
+            )
+            .expect("reference proof");
+            let chunked =
+                chunked_msm::create_proof::<Bn254, CircomReduction, _>(circuit(), &prover.pk, r, s)
+                    .expect("chunked proof");
+            assert_eq!(chunked, reference);
+
+            let (mut chunked_bytes, mut reference_bytes) = (Vec::new(), Vec::new());
+            chunked
+                .serialize_compressed(&mut chunked_bytes)
+                .expect("serialize proof");
+            reference
+                .serialize_compressed(&mut reference_bytes)
+                .expect("serialize proof");
+            assert_eq!(chunked_bytes, reference_bytes);
+            assert!(
+                prover
+                    .verify(&chunked_bytes, &public_inputs)
+                    .expect("verify")
+            );
+        }
     }
 }
