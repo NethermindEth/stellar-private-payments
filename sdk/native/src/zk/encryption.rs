@@ -372,26 +372,6 @@ pub fn encrypt_output_note(
     encrypt_note_data(recipient_pubkey, &plaintext)
 }
 
-/// Decrypt output note data from on-chain storage.
-///
-/// Returns `Ok(None)` if the ciphertext is not addressed to the given private
-/// key or does not hold a well-formed note. The output is chosen by whoever
-/// submits the transaction, so malformed contents must not fail the scan.
-///
-/// This builds the X-Wing key on every call. To try many outputs with the same
-/// key, build a [`NoteDecryptor`] once instead.
-///
-/// Expected plaintext format: `amount (16 bytes LE) || blinding (32 bytes LE)`.
-pub fn decrypt_output_note(
-    recipient_privkey: &EncryptionPrivateKey,
-    encrypted_output: &[u8],
-) -> Result<Option<(NoteAmount, Field)>> {
-    let Some(plaintext) = decrypt_note_data(recipient_privkey.as_ref(), encrypted_output)? else {
-        return Ok(None);
-    };
-    Ok(note_from_plaintext(&plaintext))
-}
-
 /// A recipient key prepared once, for trying many outputs.
 ///
 /// Building the X-Wing key expands its 32-byte seed (SHAKE, ML-KEM keygen,
@@ -414,12 +394,21 @@ impl NoteDecryptor {
         })
     }
 
-    /// Decrypting a note without rebuilding the key.
-    /// `None` means the output is not addressed to this key or is malformed.
+    /// Decrypts an output from on-chain storage without rebuilding the key.
+    ///
+    /// Expected plaintext: `amount (16 bytes LE) || blinding (32 bytes LE)`.
+    /// `None` means the output is not addressed to this key or does not hold a
+    /// well-formed note. The output is chosen by whoever submits the
+    /// transaction, so malformed contents must not fail the scan.
     pub fn decrypt_output_note(&self, encrypted_output: &[u8]) -> Option<(NoteAmount, Field)> {
+        note_from_plaintext(&self.open_output(encrypted_output)?)
+    }
+
+    /// HPKE-opens an output to its raw plaintext, before it is parsed as a
+    /// note. Outputs of the wrong shape are rejected before any decryption.
+    fn open_output(&self, encrypted_output: &[u8]) -> Option<Vec<u8>> {
         let (enc, ciphertext) = split_output(encrypted_output)?;
-        let plaintext = open(&self.secret, &enc, ciphertext)?;
-        note_from_plaintext(&plaintext)
+        open(&self.secret, &enc, ciphertext)
     }
 }
 
@@ -519,30 +508,6 @@ fn encrypt_note_data(recipient_pubkey: &EncryptionPublicKey, plaintext: &[u8]) -
     let mut result = enc.to_bytes().to_vec();
     result.extend_from_slice(&ciphertext);
     Ok(result)
-}
-
-/// Decrypt note data sealed by [`encrypt_note_data`].
-///
-/// When scanning for notes addressed to us, we try to decrypt each encrypted
-/// output. If decryption succeeds, the note was sent to us.
-///
-/// # Arguments
-/// * `private_key_bytes` - Our X-Wing secret key (32 bytes)
-/// * `encrypted_data` - Encrypted data from on-chain event (1184 bytes)
-///
-/// # Returns
-/// - Success: the decrypted plaintext
-/// - `None`: the data has the wrong length or was not addressed to us
-fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Option<Vec<u8>>> {
-    // Reject by shape first: building the X-Wing key expands the seed (SHAKE,
-    // ML-KEM keygen, X25519), which is far too costly to spend on an output
-    // that cannot be ours. A bad key length is reported only for outputs of
-    // the right length; the key comes from the account, not from the chain.
-    let Some((enc, ciphertext)) = split_output(encrypted_data) else {
-        return Ok(None);
-    };
-    let secret = parse_private_key(private_key_bytes)?;
-    Ok(open(&secret, &enc, ciphertext))
 }
 
 /// Splits an on-chain output into its encapsulated key and AEAD ciphertext.
@@ -764,7 +729,7 @@ mod tests {
         let recipient_sig = KeyDerivationSignature(vec![2u8; 64]);
         let recip_keys = derive_keypair_from_signature(&recipient_sig).expect("Derivation failed");
         let pub_key = &recip_keys.public;
-        let priv_key = recip_keys.private.as_ref();
+        let decryptor = NoteDecryptor::new(&recip_keys.private).expect("key");
 
         // 16 bytes amount + 32 bytes blinding = 48 bytes
         let amount = [10u8; 16];
@@ -776,8 +741,8 @@ mod tests {
         let encrypted = encrypt_note_data(pub_key, &plaintext).expect("Encryption failed");
         assert_eq!(encrypted.len(), ENCRYPTED_OUTPUT_LEN);
 
-        let decrypted = decrypt_note_data(priv_key, &encrypted)
-            .expect("Decryption failed")
+        let decrypted = decryptor
+            .open_output(&encrypted)
             .expect("note should be addressed to the recipient");
         assert_eq!(decrypted, plaintext);
     }
@@ -796,11 +761,8 @@ mod tests {
         let encrypted = encrypt_note_data(alice_pub, &plaintext).expect("Encryption failed");
 
         // Bob tries to decrypt.
-        let bob_priv = bob_keys.private.as_ref();
-        let decrypted = decrypt_note_data(bob_priv, &encrypted)
-            .expect("Decryption should handle failure gracefully");
-
-        assert!(decrypted.is_none());
+        let bob = NoteDecryptor::new(&bob_keys.private).expect("key");
+        assert!(bob.open_output(&encrypted).is_none());
     }
 
     #[test]
@@ -833,7 +795,8 @@ mod tests {
         let blinding = Field::try_from_le_bytes(blind_le)?;
 
         let encrypted = encrypt_output_note(&recip_keys.public, amount, &blinding)?;
-        let got = decrypt_output_note(&recip_keys.private, &encrypted)?
+        let got = NoteDecryptor::new(&recip_keys.private)?
+            .decrypt_output_note(&encrypted)
             .expect("should decrypt for recipient key");
 
         assert_eq!(got.0, amount);
@@ -864,22 +827,23 @@ mod tests {
     #[test]
     fn test_decrypt_output_note_ignores_malformed_outputs() -> Result<()> {
         let keys = derive_keypair_from_signature(&KeyDerivationSignature(vec![6u8; 64]))?;
+        let decryptor = NoteDecryptor::new(&keys.private)?;
 
-        assert!(decrypt_output_note(&keys.private, &[]).is_ok_and(|n| n.is_none()));
-        assert!(decrypt_output_note(&keys.private, &[1, 2, 3]).is_ok_and(|n| n.is_none()));
+        assert!(decryptor.decrypt_output_note(&[]).is_none());
+        assert!(decryptor.decrypt_output_note(&[1, 2, 3]).is_none());
 
         let wrong_length = seal_raw(&keys.public, &[0u8; 49]);
-        assert!(decrypt_output_note(&keys.private, &wrong_length).is_ok_and(|n| n.is_none()));
+        assert!(decryptor.decrypt_output_note(&wrong_length).is_none());
 
         let mut tampered = seal_raw(&keys.public, &[0u8; 48]);
         assert_eq!(tampered.len(), ENCRYPTED_OUTPUT_LEN);
         tampered[ENCRYPTED_OUTPUT_LEN - 1] ^= 1;
-        assert!(decrypt_output_note(&keys.private, &tampered).is_ok_and(|n| n.is_none()));
+        assert!(decryptor.decrypt_output_note(&tampered).is_none());
 
         let mut non_canonical_blinding = [0xffu8; 48];
         non_canonical_blinding[..16].copy_from_slice(&5u128.to_le_bytes());
         let non_canonical = seal_raw(&keys.public, &non_canonical_blinding);
-        assert!(decrypt_output_note(&keys.private, &non_canonical).is_ok_and(|n| n.is_none()));
+        assert!(decryptor.decrypt_output_note(&non_canonical).is_none());
         Ok(())
     }
 }
@@ -902,8 +866,9 @@ mod wasm_tests {
             encrypt_output_note(&keys.public, NoteAmount::from(42), &blinding).expect("encrypt");
         assert_eq!(encrypted.len(), ENCRYPTED_OUTPUT_LEN);
 
-        let (amount, got) = decrypt_output_note(&keys.private, &encrypted)
-            .expect("decrypt")
+        let (amount, got) = NoteDecryptor::new(&keys.private)
+            .expect("key")
+            .decrypt_output_note(&encrypted)
             .expect("addressed to the key");
         assert_eq!(amount, NoteAmount::from(42));
         assert_eq!(got.to_le_bytes(), blinding.to_le_bytes());
@@ -998,17 +963,6 @@ mod known_answer_tests {
         assert_zeroize_on_drop::<x_wing::DecapsulationKey>();
     }
 
-    #[test]
-    fn wrong_length_outputs_are_skipped_before_the_key_is_built() {
-        // A 31-byte key would be an error if it were parsed, so `Ok(None)`
-        // shows the length was rejected first.
-        let short_key = [0u8; 31];
-        for len in [0, 1, ENCRYPTED_OUTPUT_LEN - 1, ENCRYPTED_OUTPUT_LEN + 1] {
-            let out = decrypt_note_data(&short_key, &vec![7u8; len]).expect("no error");
-            assert!(out.is_none(), "length {len}");
-        }
-        assert!(decrypt_note_data(&short_key, &vec![7u8; ENCRYPTED_OUTPUT_LEN]).is_err());
-    }
     use std::vec;
     #[cfg(target_arch = "wasm32")]
     use wasm_bindgen_test::wasm_bindgen_test;
@@ -1071,8 +1025,9 @@ mod known_answer_tests {
         let (_, enc) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
         let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
         assert_eq!(ciphertext.len(), 1184);
-        let (amount, blinding) = decrypt_output_note(&enc.private, &ciphertext)
-            .expect("decrypt")
+        let (amount, blinding) = NoteDecryptor::new(&enc.private)
+            .expect("key")
+            .decrypt_output_note(&ciphertext)
             .expect("note addressed to this key");
         assert_eq!(amount, NoteAmount::from(NOTE_AMOUNT));
         assert_eq!(
@@ -1085,23 +1040,24 @@ mod known_answer_tests {
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
-    fn a_prepared_key_decrypts_like_the_free_function() {
+    fn a_prepared_key_decrypts_many_outputs() {
         let (_, enc) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
         let decryptor = NoteDecryptor::new(&enc.private).expect("key");
         let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
 
-        let (amount, blinding) = decryptor
-            .decrypt_output_note(&ciphertext)
-            .expect("note addressed to this key");
-        assert_eq!(amount, NoteAmount::from(NOTE_AMOUNT));
-        let (free_amount, free_blinding) = decrypt_output_note(&enc.private, &ciphertext)
-            .expect("decrypt")
-            .expect("note");
-        assert_eq!(amount, free_amount);
-        assert_eq!(blinding.to_le_bytes(), free_blinding.to_le_bytes());
-
         // The same prepared key keeps working for further outputs.
-        assert!(decryptor.decrypt_output_note(&ciphertext).is_some());
+        for _ in 0..2 {
+            let (amount, blinding) = decryptor
+                .decrypt_output_note(&ciphertext)
+                .expect("note addressed to this key");
+            assert_eq!(amount, NoteAmount::from(NOTE_AMOUNT));
+            assert_eq!(
+                blinding.to_le_bytes(),
+                Field::try_from_le_bytes(NOTE_BLINDING)
+                    .expect("blinding")
+                    .to_le_bytes()
+            );
+        }
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -1139,11 +1095,8 @@ mod known_answer_tests {
         let other = KeyDerivationSignature(vec![1u8; 64]);
         let (_, enc) = derive_encryption_and_note_keypairs(other).expect("derivation");
         let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
-        assert!(
-            decrypt_output_note(&enc.private, &ciphertext)
-                .expect("decrypt")
-                .is_none()
-        );
+        let decryptor = NoteDecryptor::new(&enc.private).expect("key");
+        assert!(decryptor.decrypt_output_note(&ciphertext).is_none());
     }
 
     /// Signature of the real `stellar message sign` vector in
