@@ -192,6 +192,12 @@ fn le(mut value: [u8; 32]) -> [u8; 32] {
     value
 }
 
+fn keys_hash(env: &Env, account: &Account) -> BytesN<32> {
+    let mut keys = account.note_key.clone();
+    keys.append(&account.encryption_key);
+    env.crypto().sha256(&keys).to_bytes()
+}
+
 #[test]
 fn register_saves_registration() {
     let setup = Setup::new();
@@ -205,8 +211,7 @@ fn register_saves_registration() {
     let stored = setup
         .stored(&account.owner)
         .expect("registration should be stored");
-    assert_eq!(stored.encryption_key, account.encryption_key);
-    assert_eq!(stored.note_key, account.note_key);
+    assert_eq!(stored.keys_hash, keys_hash(env, &account));
 }
 
 #[test]
@@ -269,7 +274,7 @@ fn duplicate_registration_is_noop() {
     let stored = setup
         .stored(&account.owner)
         .expect("registration should be stored");
-    assert_eq!(stored.note_key, account.note_key);
+    assert_eq!(stored.keys_hash, keys_hash(env, &account));
 }
 
 #[test]
@@ -294,7 +299,7 @@ fn registering_different_keys_is_refused() {
     let stored = setup
         .stored(&initial.owner)
         .expect("registration should be stored");
-    assert_eq!(stored.note_key, initial.note_key);
+    assert_eq!(stored.keys_hash, keys_hash(env, &initial));
 }
 
 #[test]

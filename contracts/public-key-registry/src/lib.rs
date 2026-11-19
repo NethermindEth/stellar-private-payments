@@ -90,8 +90,12 @@ enum DataKey {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Registration {
-    encryption_key: Bytes,
-    note_key: Bytes,
+    /// `sha256(note_key || encryption_key)`. The keys themselves are not
+    /// stored, as nothing on chain reads them: clients get them from the
+    /// [`PublicKeyEvent`]. The hash is enough to tell a repeated registration
+    /// from a conflicting one. Both keys have a fixed length, so the
+    /// concatenation is unambiguous.
+    keys_hash: BytesN<32>,
 }
 
 /// Required length of the encryption key, which the SDK defines as
@@ -224,9 +228,10 @@ impl PublicKeyRegistry {
         }
 
         let key = DataKey::Registration(account.owner.clone());
+        let mut keys = account.note_key.clone();
+        keys.append(&account.encryption_key);
         let next = Registration {
-            encryption_key: account.encryption_key.clone(),
-            note_key: account.note_key.clone(),
+            keys_hash: env.crypto().sha256(&keys).to_bytes(),
         };
         if let Some(existing) = env
             .storage()
