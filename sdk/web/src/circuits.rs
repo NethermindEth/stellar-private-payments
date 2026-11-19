@@ -363,7 +363,7 @@ where
         let mut framed = Vec::with_capacity(32usize.saturating_add(payload.len()));
         framed.extend_from_slice(&sha256(&payload));
         framed.extend_from_slice(&payload);
-        match Response::new_with_opt_u8_array(Some(&mut framed[..])) {
+        match cache_response(&mut framed) {
             Ok(resp) => {
                 if let Err(e) = JsFuture::from(cache.put_with_str(&key, &resp)).await {
                     tracing::warn!("[circuits] failed to store uncompressed {filename}: {e:?}");
@@ -378,6 +378,20 @@ where
     }
 
     Ok(payload)
+}
+
+/// A `Response` holding `bytes`, to store in the Cache API.
+#[cfg(not(target_feature = "atomics"))]
+fn cache_response(bytes: &mut [u8]) -> Result<Response, JsValue> {
+    Response::new_with_opt_u8_array(Some(bytes))
+}
+
+/// A `Response` holding `bytes`, to store in the Cache API. With atomics the
+/// wasm memory is shared, and Firefox refuses a body that is a view of shared
+/// memory, so the bytes are copied out of it first.
+#[cfg(target_feature = "atomics")]
+fn cache_response(bytes: &mut [u8]) -> Result<Response, JsValue> {
+    Response::new_with_opt_js_u8_array(Some(&Uint8Array::from(&*bytes)))
 }
 
 #[cfg(test)]

@@ -30,9 +30,15 @@ jobs:
           components: clippy
           override: true
 
+      # The threaded prover worker rebuilds std from source. rustup takes the
+      # toolchain from rust-toolchain.toml, which lists rust-src; make sure.
+      - name: Install rust-src for the threaded prover worker
+        run: rustup component add rust-src
+
       - name: Install nightly rustfmt
         run: rustup toolchain install nightly --component rustfmt --profile minimal
 
+      # Also keeps target/web-threads, the threaded worker's std and dependencies.
       - name: Cache
         uses: ./.github/actions/rust-cache
         with:

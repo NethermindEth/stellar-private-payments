@@ -36,8 +36,10 @@ export default function init() {};
 const url = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
 const mockUrl = url(mockSource);
 const sourceUrl = new URL('../../../sdk/web/js/index.js', import.meta.url);
+const noThreadsUrl = url('export const threadedProverWorkerUrl = null;');
 const source = (await readFile(sourceUrl, 'utf8'))
   .replaceAll('../dist/stellar_private_payments_web.js', mockUrl)
+  .replaceAll('../dist/prover-threads.js', noThreadsUrl)
   .replaceAll('import.meta.url', JSON.stringify(sourceUrl.href));
 const sdk = await import(url(source));
 const mock = await import(mockUrl);
@@ -140,5 +142,101 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
       if (value === undefined) delete globalThis[key];
       else globalThis[key] = value;
     }
+  }
+});
+
+// Prover worker selection, against a bridge that records what it is asked.
+async function loadSdk({ threadedUrl, threadsFail }) {
+  const bridge = url(`
+    export const spawned = [];
+    export const threadRequests = [];
+    export const freed = [];
+    export const ProverBridge = { spawn(workerUrl) {
+      spawned.push(workerUrl);
+      return {
+        async configureThreads(n) {
+          threadRequests.push(n);
+          if (${JSON.stringify(Boolean(threadsFail))}) throw new Error('worker did not start');
+          return Math.min(n, 4);
+        },
+        async configureCircuitsBase() {}, async ping() {}, toHandle() { return { free() {} }; },
+        fork() { return this; }, free() { freed.push(workerUrl); },
+      };
+    }};
+  `);
+  const mockForBridge = url(mockSource.replace('export const ProverBridge', 'const _unused').replace(
+    'export default function init() {};',
+    `export { ProverBridge } from ${JSON.stringify(bridge)}; export default function init() {};`,
+  ));
+  const marker = url(`export const threadedProverWorkerUrl = ${JSON.stringify(threadedUrl ?? null)};`);
+  const text = (await readFile(sourceUrl, 'utf8'))
+    .replaceAll('../dist/stellar_private_payments_web.js', mockForBridge)
+    .replaceAll('../dist/prover-threads.js', marker)
+    .replaceAll('import.meta.url', JSON.stringify(sourceUrl.href));
+  return { sdk: await import(url(text)), bridge: await import(bridge) };
+}
+
+test('prover worker selection follows the build, isolation and proverThreads', async (t) => {
+  const THREADED = 'https://example.test/workers/prover-worker-threads.js';
+  const options = {
+    rpcUrl: 'https://rpc.example', contractConfig: {}, circuitLock: {},
+    circuitsBaseUrl: 'https://example.test/', keyProvider: async () => new Uint8Array(32),
+  };
+  const saved = { isolated: globalThis.crossOriginIsolated, warn: console.warn };
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  t.after(() => {
+    globalThis.crossOriginIsolated = saved.isolated;
+    console.warn = saved.warn;
+  });
+  const run = async (load, isolated, extra = {}) => {
+    globalThis.crossOriginIsolated = isolated;
+    const client = await load.sdk.Client.new({ ...options, ...extra });
+    const info = client.proverInfo();
+    client.dispose();
+    return { info, spawned: load.bridge.spawned.at(-1) };
+  };
+  const serialUrl = (spawned) => spawned.endsWith('/workers/prover-worker.js');
+
+  // A default build never asks for the threaded worker.
+  const plain = await loadSdk({});
+  let r = await run(plain, true, { proverThreads: 8 });
+  assert.deepEqual(r.info, { mode: 'serial', threads: 1 });
+  assert.ok(serialUrl(r.spawned));
+  assert.deepEqual(plain.bridge.threadRequests, []);
+
+  const threaded = await loadSdk({ threadedUrl: THREADED });
+  r = await run(threaded, true, { proverThreads: 8 });
+  assert.deepEqual(r.info, { mode: 'threaded', threads: 4 });
+  assert.equal(r.spawned, THREADED);
+  assert.deepEqual(threaded.bridge.threadRequests, [8]);
+
+  // Not isolated, switched off, or capped at one thread: serial, and the threaded worker is not spawned.
+  const before = threaded.bridge.spawned.length;
+  for (const [isolated, extra] of [[false, {}], [true, { proverThreads: false }], [true, { proverThreads: 1 }]]) {
+    r = await run(threaded, isolated, extra);
+    assert.deepEqual(r.info, { mode: 'serial', threads: 1 });
+    assert.ok(serialUrl(r.spawned));
+  }
+  assert.equal(threaded.bridge.spawned.length, before + 3);
+  assert.ok(!threaded.bridge.spawned.slice(before).includes(THREADED));
+
+  // An explicit worker URL wins and is not asked about threads.
+  const asked = threaded.bridge.threadRequests.length;
+  r = await run(threaded, true, { proverWorkerUrl: 'https://example.test/mine.js' });
+  assert.deepEqual(r.info, { mode: 'custom', threads: null });
+  assert.equal(r.spawned, 'https://example.test/mine.js');
+  assert.equal(threaded.bridge.threadRequests.length, asked);
+
+  // A threaded worker that does not start is freed and the serial worker takes over, once.
+  const broken = await loadSdk({ threadedUrl: THREADED, threadsFail: true });
+  r = await run(broken, true, { proverThreads: 2 });
+  assert.deepEqual(r.info, { mode: 'serial', threads: 1 });
+  assert.deepEqual(broken.bridge.spawned.slice(-2).map((u, i) => i === 0 ? u : serialUrl(u)), [THREADED, true]);
+  assert.deepEqual(broken.bridge.freed, [THREADED]);
+  assert.equal(warnings.length, 1);
+
+  for (const bad of [0, -1, 1.5, 2 ** 32, '4', null]) {
+    await assert.rejects(run(threaded, true, { proverThreads: bad }), bad === '4' || bad === null ? TypeError : RangeError);
   }
 });

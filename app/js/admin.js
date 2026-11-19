@@ -9,6 +9,7 @@ import { confirmAction } from './ui/confirm.js';
 import { el, elc } from './ui/dom.js';
 import { showToast } from './ui/toast.js';
 import { initGvkAuditPanel } from './admin-gvk.js';
+import { serviceWorkerRegistration } from './service-worker.js';
 import { NoAnswer, adminTxFromHash, adminTxLink, claimLine, custodyProblems, deadCall, describeAdminCall, explainFailure, maxEntryTtl, newAdminRefusal, repointsTo, rpcServer, shortAddress, signatureCount, signedBy, signedWeight, signerStatus, signingRule, signRefusal, submitAdminCall } from './admin-transactions.js';
 import { blocklistKeyToNoteKey, parseBlocklistKeys } from './blocklist-keys.js';
 import { adminLine, allowlistLeavesFromEvents, blocklistKeys, codeLine, compareEntries, entriesLine, eventsSince, historyStart, levelsLine, manifestLine, parseRecords, readInstance, replacesLine, unusedListWarning, usesList } from './tree-check.js';
@@ -1611,6 +1612,7 @@ async function init() {
   setStatus('Ready', 'ok');
 }
 
+serviceWorkerRegistration();
 init().catch(err => {
   setStatus('Init failed', 'error');
   console.error('Init error:', err);

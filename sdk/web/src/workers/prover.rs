@@ -51,6 +51,9 @@ pub(crate) enum ProverWorkerRequest {
     ConfigureCircuitsBase(String, String),
     ConfigureTelemetry(WorkerTelemetryConfig),
     DumpLogs,
+    /// Size of the threaded prover worker's thread pool, sent before the first
+    /// proof. The serial worker answers with an error.
+    ConfigureThreads(u32),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -64,6 +67,8 @@ pub(crate) enum ProverWorkerResponse {
     DisclosureProofVerified(bool),
     KeyOwnershipProof(Vec<u8>),
     Logs(String),
+    /// Pool size the threaded prover worker will use, after clamping.
+    ThreadsConfigured(u32),
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -452,6 +457,9 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::DumpLogs => {
             ProverWorkerResponse::Logs(crate::telemetry::dump_recent_logs())
         }
+        ProverWorkerRequest::ConfigureThreads(_) => {
+            anyhow::bail!("this prover worker proves on one thread and has no thread pool")
+        }
         ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
             tracing::debug!("[{WORKER_NAME}] verify disclosure proof");
 
@@ -533,6 +541,16 @@ impl ProverBridge {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// Sets the thread pool size of a threaded prover worker, which clamps it
+    /// to `1..=hardwareConcurrency`, and resolves to the size it will use.
+    /// Rejects on the serial worker and after the first proof.
+    #[wasm_bindgen(js_name = configureThreads)]
+    pub async fn configure_threads_js(&self, threads: u32) -> Result<u32, JsError> {
+        self.configure_threads(threads)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
     #[wasm_bindgen(js_name = toHandle)]
     pub fn to_handle(&self) -> ProverHandle {
         ProverHandle::new(self.clone().into())
@@ -606,6 +624,21 @@ impl ProverBridge {
             .await?
         {
             ProverWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    /// Sets the size of the threaded prover worker's thread pool and returns
+    /// the size it will use: `threads` clamped to `1..=hardwareConcurrency`.
+    /// The pool starts with the first proof and cannot be resized, so this has
+    /// to come before it; afterwards, and from the serial prover worker, the
+    /// answer is an error.
+    pub async fn configure_threads(&self, threads: u32) -> anyhow::Result<u32> {
+        match self
+            .call(ProverWorkerRequest::ConfigureThreads(threads), 5_000)
+            .await?
+        {
+            ProverWorkerResponse::ThreadsConfigured(threads) => Ok(threads),
             other => Err(anyhow!("unexpected response: {other:?}")),
         }
     }

@@ -183,9 +183,22 @@ only exists once `scripts/stage-wasm-types.sh` has staged it from `dist/`.
 
 Web Workers run the OPFS SQLite storage backend and Groth16 prover off the main thread. `Storage.open()` and `Client.new()` resolve default worker URLs relative to `import.meta.url` (overridable via `workerUrl`, `storageWorkerUrl`, and `proverWorkerUrl`). When `Client.new()` opens storage itself instead of receiving a `storage` handle, pass `keyProvider` in its options.
 
+### Multi-threaded proving
+
+Besides the serial prover worker, the package ships a threaded one (`dist/workers/prover-worker-threads.js`) that proves on a pool of Web Workers sharing one memory. That memory is a `SharedArrayBuffer`, which browsers only allow on cross-origin isolated pages, so `Client.new()` picks the threaded worker by itself only when the page is isolated, that is when `crossOriginIsolated` is `true` in the console. That needs both response headers on the page and on its workers:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+Everything the page loads must then be same-origin or opt in with CORS or `Cross-Origin-Resource-Policy`. On a page that is not isolated, in a build made with `SPP_WEB_THREADS=0`, or if the threaded worker fails to start (the SDK logs a warning), proofs run on one thread on the serial worker exactly as before. Threads never change the result of a proof.
+
+`proverThreads` on `Client.new()` (and `verifySelectiveDisclosure()`) tunes this: `false` or `1` forces the serial worker, a larger number caps the pool (it is clamped to the logical cores), `true` or omitted means all of them. An explicit `proverWorkerUrl` is used as given. `client.proverInfo()` returns `{ mode: 'serial' | 'threaded' | 'custom', threads }`.
+
 ## Build & publish (maintainers)
 
-Browser builds compile SQLite3MC through `sqlite-wasm-rs` (`sqlite3mc` feature), which requires Clang and `llvm-ar` (or `ar`). Building the npm package from source also requires `wasm-bindgen-cli` and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see [CONTRIBUTING.md](../../CONTRIBUTING.md)):
+Browser builds compile SQLite3MC through `sqlite-wasm-rs` (`sqlite3mc` feature), which requires Clang and `llvm-ar` (or `ar`). Building the npm package from source also requires `wasm-bindgen-cli` and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see [CONTRIBUTING.md](../../CONTRIBUTING.md)). The threaded prover worker is compiled with atomics against a std rebuilt from source, with the `rust-src` component that `rust-toolchain.toml` installs, in `target/web-threads`; `SPP_WEB_THREADS=0` leaves it out for a quicker local build, but the published package must have it (`npm run check:package` fails without it).
 
 ```bash
 make circuits
@@ -194,6 +207,8 @@ npm pack
 ```
 
 Published tarball: `dist/` (WASM, workers, **bundled circuits** + LGPL source bundle) and `js/` (entry + types).
+
+After a build, `node scripts/test-prover-threads.js --artifacts <dir>` proves in headless Chromium (`--browser firefox` for Firefox) on the threaded worker of an isolated page and on the serial worker of a page that is not, and `node scripts/bench-prover-threads.js --artifacts <dir>` times both at several pool sizes. Both build the `prover-driver` binary first and take `--binary` and `--driver` for the browser and its WebDriver.
 
 CI publishes from `main` when `version` in `package.json` is bumped (see `.github/workflows/release.yml`).
 

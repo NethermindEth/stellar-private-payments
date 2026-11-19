@@ -224,6 +224,13 @@ jobs:
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
+      # The package ships the threaded prover worker, which rebuilds std from
+      # source. rustup takes the toolchain from rust-toolchain.toml, which
+      # lists rust-src; make sure.
+      - name: Install rust-src for the threaded prover worker
+        if: steps.registry.outputs.publish == 'true'
+        working-directory: .
+        run: rustup component add rust-src
       - if: steps.registry.outputs.publish == 'true'
         run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
         working-directory: .

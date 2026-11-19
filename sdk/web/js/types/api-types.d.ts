@@ -135,8 +135,29 @@ export interface ClientNewOptions {
   createNew?: boolean;
   storageWorkerUrl?: string;
   prover?: ProverBridge;
+  /** Absolute URL of a prover worker. Used as given: no thread selection. */
   proverWorkerUrl?: string;
+  proverThreads?: ProverThreads;
   bootnodeUrl?: string;
+}
+
+/**
+ * How many threads proofs may use. `true` or omitted: all logical cores when the
+ * SDK build has a threaded prover worker and the page is cross-origin isolated,
+ * otherwise one. `false` or `1`: one thread, on the serial prover worker. A
+ * larger number caps the pool; it is clamped to the logical cores.
+ */
+export type ProverThreads = boolean | number;
+
+/** How a client's proofs run, see {@link Client.proverInfo}. */
+export interface ProverInfo {
+  /**
+   * `serial`: the serial prover worker. `threaded`: the threaded worker, on
+   * `threads` threads. `custom`: a `prover` or `proverWorkerUrl` the caller
+   * supplied, whose thread count is not known (`threads` is null).
+   */
+  mode: 'serial' | 'threaded' | 'custom';
+  threads: number | null;
 }
 
 /** Options for {@link Client.account}. */
@@ -186,6 +207,7 @@ export interface VerifyDisclosureOptions {
   circuitsBaseUrl: string;
   circuitLock: CircuitLockInput;
   proverWorkerUrl?: string;
+  proverThreads?: ProverThreads;
 }
 
 /** Options for {@link bootnodeRequired}. */
@@ -198,6 +220,8 @@ export type Account = WasmAccount;
 
 /** Deployment runtime returned by {@link Client.new}. */
 export interface Client {
+  /** The mode proofs run in, and with how many threads. */
+  proverInfo(): ProverInfo;
   backgroundSync(): Promise<void>;
   stopBackgroundSync(): void;
   sync(): Promise<void>;
