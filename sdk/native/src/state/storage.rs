@@ -8,6 +8,7 @@ use crate::{
         NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem, PortfolioBalance,
         PortfolioPoolEntry, PublicKeyEvent, RecipientLookup, UserNoteSummary, UserOperation,
     },
+    zk::encryption::NoteDecryptor,
 };
 use anyhow::{Context, Result, anyhow, ensure};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params, params_from_iter};
@@ -67,10 +68,21 @@ pub struct DisclaimerState {
     pub accepted: bool,
 }
 
-#[derive(Debug, Clone)]
 pub(crate) struct AccountKeys {
     pub account_id: i64,
     pub keys: StoredPrivateKeys,
+    /// The encryption key prepared once, so the scan expands the X-Wing seed
+    /// once per account and batch instead of once per output. Dropped (and
+    /// wiped) with the batch.
+    pub decryptor: NoteDecryptor,
+}
+
+impl std::fmt::Debug for AccountKeys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AccountKeys")
+            .field("account_id", &self.account_id)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone)]
@@ -1791,9 +1803,9 @@ impl Storage {
             let note_pub: NotePublicKey = row.get(4)?;
             let membership_blinding: Field = row.get(5)?;
 
-            Ok(AccountKeys {
+            Ok((
                 account_id,
-                keys: StoredPrivateKeys {
+                StoredPrivateKeys {
                     note_keypair: NoteKeyPair {
                         private: note_priv,
                         public: note_pub,
@@ -1804,12 +1816,18 @@ impl Storage {
                     },
                     membership_blinding,
                 },
-            })
+            ))
         })?;
 
         let mut out = Vec::new();
         for r in rows {
-            out.push(r?);
+            let (account_id, keys) = r?;
+            let decryptor = NoteDecryptor::new(&keys.encryption_keypair.private)?;
+            out.push(AccountKeys {
+                account_id,
+                keys,
+                decryptor,
+            });
         }
         Ok(out)
     }
@@ -2377,7 +2395,7 @@ mod tests {
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
                 &account.keys.note_keypair,
-                &account.keys.encryption_keypair.private,
+                &account.decryptor,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2500,7 +2518,7 @@ mod tests {
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
                 &account.keys.note_keypair,
-                &account.keys.encryption_keypair.private,
+                &account.decryptor,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -2772,7 +2790,7 @@ mod tests {
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
                 &account.keys.note_keypair,
-                &account.keys.encryption_keypair.private,
+                &account.decryptor,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -3191,7 +3209,7 @@ mod tests {
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
                 &account.keys.note_keypair,
-                &account.keys.encryption_keypair.private,
+                &account.decryptor,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -3268,7 +3286,7 @@ mod tests {
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
                 &account.keys.note_keypair,
-                &account.keys.encryption_keypair.private,
+                &account.decryptor,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,
@@ -3573,7 +3591,7 @@ mod tests {
          -> Result<Option<DerivedUserNoteRow>> {
             let opt = crate::zk::notes::try_decrypt_and_derive_user_note(
                 &account.keys.note_keypair,
-                &account.keys.encryption_keypair.private,
+                &account.decryptor,
                 &row.commitment,
                 row.leaf_index,
                 &row.encrypted_output,

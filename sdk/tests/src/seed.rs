@@ -417,6 +417,7 @@ pub fn apply_proved_step(
         ),
     ];
 
+    let decryptor = encryption::NoteDecryptor::new(&encryption_keypair.private)?;
     for (commitment, encrypted_output) in outputs {
         if commitment.is_zero() || encrypted_output.is_empty() {
             continue;
@@ -424,7 +425,7 @@ pub fn apply_proved_step(
 
         let Some(derived) = notes::try_decrypt_and_derive_user_note(
             &note_keypair,
-            &encryption_keypair.private,
+            &decryptor,
             &commitment,
             leaf_index,
             encrypted_output,

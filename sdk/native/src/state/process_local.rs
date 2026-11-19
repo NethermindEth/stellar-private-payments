@@ -28,7 +28,7 @@ fn derive_user_note(
 ) -> anyhow::Result<Option<DerivedUserNoteRow>> {
     let opt = try_decrypt_and_derive_user_note(
         &account.keys.note_keypair,
-        &account.keys.encryption_keypair.private,
+        &account.decryptor,
         &row.commitment,
         row.leaf_index,
         &row.encrypted_output,

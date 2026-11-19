@@ -378,6 +378,9 @@ pub fn encrypt_output_note(
 /// key or does not hold a well-formed note. The output is chosen by whoever
 /// submits the transaction, so malformed contents must not fail the scan.
 ///
+/// This builds the X-Wing key on every call. To try many outputs with the same
+/// key, build a [`NoteDecryptor`] once instead.
+///
 /// Expected plaintext format: `amount (16 bytes LE) || blinding (32 bytes LE)`.
 pub fn decrypt_output_note(
     recipient_privkey: &EncryptionPrivateKey,
@@ -386,8 +389,50 @@ pub fn decrypt_output_note(
     let Some(plaintext) = decrypt_note_data(recipient_privkey.as_ref(), encrypted_output)? else {
         return Ok(None);
     };
+    Ok(note_from_plaintext(&plaintext))
+}
+
+/// A recipient key prepared once, for trying many outputs.
+///
+/// Building the X-Wing key expands its 32-byte seed (SHAKE, ML-KEM keygen,
+/// X25519), which costs about as much as a quarter of one decryption attempt.
+/// The key is the same for every output of an account, so scanning builds this
+/// once per account and reuses it
+///
+/// The seed inside is wiped when this is dropped: hpke builds `x-wing` with its
+/// `zeroize` feature. It is neither `Clone` nor printable, so no copy of the
+/// key is made.
+pub struct NoteDecryptor {
+    secret: <XWing as KemTrait>::PrivateKey,
+}
+
+impl NoteDecryptor {
+    /// Prepares `private_key` (the one seed expansion).
+    pub fn new(private_key: &EncryptionPrivateKey) -> Result<Self> {
+        Ok(Self {
+            secret: parse_private_key(private_key.as_ref())?,
+        })
+    }
+
+    /// Decrypting a note without rebuilding the key.
+    /// `None` means the output is not addressed to this key or is malformed.
+    pub fn decrypt_output_note(&self, encrypted_output: &[u8]) -> Option<(NoteAmount, Field)> {
+        let (enc, ciphertext) = split_output(encrypted_output)?;
+        let plaintext = open(&self.secret, &enc, ciphertext)?;
+        note_from_plaintext(&plaintext)
+    }
+}
+
+impl core::fmt::Debug for NoteDecryptor {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("NoteDecryptor(<redacted>)")
+    }
+}
+
+/// `amount (16 bytes LE) || blinding (32 bytes LE)`; `None` for anything else.
+fn note_from_plaintext(plaintext: &[u8]) -> Option<(NoteAmount, Field)> {
     if plaintext.len() != 48 {
-        return Ok(None);
+        return None;
     }
 
     let mut amount_le = [0u8; 16];
@@ -396,11 +441,9 @@ pub fn decrypt_output_note(
 
     let mut blinding_le = [0u8; 32];
     blinding_le.copy_from_slice(&plaintext[16..]);
-    let Ok(blinding) = Field::try_from_le_bytes(blinding_le) else {
-        return Ok(None);
-    };
+    let blinding = Field::try_from_le_bytes(blinding_le).ok()?;
 
-    Ok(Some((amount, blinding)))
+    Some((amount, blinding))
 }
 
 /// Randomness for HPKE from the platform source (`getrandom` works on native
@@ -495,28 +538,47 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
     // ML-KEM keygen, X25519), which is far too costly to spend on an output
     // that cannot be ours. A bad key length is reported only for outputs of
     // the right length; the key comes from the account, not from the chain.
-    if encrypted_data.len() != ENCRYPTED_OUTPUT_LEN {
-        return Ok(None);
-    }
-    let (enc, ciphertext) = encrypted_data.split_at(XWING_ENC_LEN);
-    let Ok(enc) = <XWing as KemTrait>::EncappedKey::from_bytes(enc) else {
+    let Some((enc, ciphertext)) = split_output(encrypted_data) else {
         return Ok(None);
     };
+    let secret = parse_private_key(private_key_bytes)?;
+    Ok(open(&secret, &enc, ciphertext))
+}
 
-    let secret = <XWing as KemTrait>::PrivateKey::from_bytes(private_key_bytes)
-        .map_err(|_| anyhow!("Private key must be 32 bytes"))?;
+/// Splits an on-chain output into its encapsulated key and AEAD ciphertext.
+/// `None` for the wrong length or an encapsulated key of the wrong shape. Needs
+/// no private key.
+fn split_output(encrypted_data: &[u8]) -> Option<(<XWing as KemTrait>::EncappedKey, &[u8])> {
+    if encrypted_data.len() != ENCRYPTED_OUTPUT_LEN {
+        return None;
+    }
+    let (enc, ciphertext) = encrypted_data.split_at(XWING_ENC_LEN);
+    let enc = <XWing as KemTrait>::EncappedKey::from_bytes(enc).ok()?;
+    Some((enc, ciphertext))
+}
 
-    Ok(
-        hpke::single_shot_open::<ChaCha20Poly1305, HkdfSha256, XWing>(
-            &OpModeR::Base,
-            &secret,
-            &enc,
-            NOTE_ENCRYPTION_INFO,
-            ciphertext,
-            &[],
-        )
-        .ok(),
+/// Parses the 32-byte seed into an X-Wing key. This is the expensive step: it
+/// expands the seed.
+fn parse_private_key(private_key_bytes: &[u8]) -> Result<<XWing as KemTrait>::PrivateKey> {
+    <XWing as KemTrait>::PrivateKey::from_bytes(private_key_bytes)
+        .map_err(|_| anyhow!("Private key must be 32 bytes"))
+}
+
+/// HPKE-opens one output. `None` when it is not addressed to `secret`.
+fn open(
+    secret: &<XWing as KemTrait>::PrivateKey,
+    enc: &<XWing as KemTrait>::EncappedKey,
+    ciphertext: &[u8],
+) -> Option<Vec<u8>> {
+    hpke::single_shot_open::<ChaCha20Poly1305, HkdfSha256, XWing>(
+        &OpModeR::Base,
+        secret,
+        enc,
+        NOTE_ENCRYPTION_INFO,
+        ciphertext,
+        &[],
     )
+    .ok()
 }
 
 #[cfg(test)]
@@ -926,6 +988,16 @@ mod registration_tests {
 mod known_answer_tests {
     use super::*;
 
+    /// The seed of the X-Wing key must be wiped when the key is dropped, which
+    /// a `NoteDecryptor` now keeps alive for a whole scan batch. hpke enables
+    /// x-wing's `zeroize` feature itself; this stops compiling if it ever
+    /// stops.
+    #[test]
+    fn the_xwing_key_is_wiped_on_drop() {
+        fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+        assert_zeroize_on_drop::<x_wing::DecapsulationKey>();
+    }
+
     #[test]
     fn wrong_length_outputs_are_skipped_before_the_key_is_built() {
         // A 31-byte key would be an error if it were parsed, so `Ok(None)`
@@ -1009,6 +1081,56 @@ mod known_answer_tests {
                 .expect("blinding")
                 .to_le_bytes()
         );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn a_prepared_key_decrypts_like_the_free_function() {
+        let (_, enc) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
+        let decryptor = NoteDecryptor::new(&enc.private).expect("key");
+        let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
+
+        let (amount, blinding) = decryptor
+            .decrypt_output_note(&ciphertext)
+            .expect("note addressed to this key");
+        assert_eq!(amount, NoteAmount::from(NOTE_AMOUNT));
+        let (free_amount, free_blinding) = decrypt_output_note(&enc.private, &ciphertext)
+            .expect("decrypt")
+            .expect("note");
+        assert_eq!(amount, free_amount);
+        assert_eq!(blinding.to_le_bytes(), free_blinding.to_le_bytes());
+
+        // The same prepared key keeps working for further outputs.
+        assert!(decryptor.decrypt_output_note(&ciphertext).is_some());
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn a_prepared_key_skips_what_is_not_addressed_to_it() {
+        let other = KeyDerivationSignature(vec![1u8; 64]);
+        let (_, enc) = derive_encryption_and_note_keypairs(other).expect("derivation");
+        let decryptor = NoteDecryptor::new(&enc.private).expect("key");
+        let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
+        assert!(decryptor.decrypt_output_note(&ciphertext).is_none());
+
+        let mut tampered = ciphertext.clone();
+        tampered[ENCRYPTED_OUTPUT_LEN - 1] ^= 1;
+        let (_, mine) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
+        let mine = NoteDecryptor::new(&mine.private).expect("key");
+        assert!(mine.decrypt_output_note(&tampered).is_none());
+        for len in [0, 1, ENCRYPTED_OUTPUT_LEN - 1, ENCRYPTED_OUTPUT_LEN + 1] {
+            assert!(mine.decrypt_output_note(&vec![7u8; len]).is_none(), "{len}");
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn a_prepared_key_does_not_print() {
+        let (_, enc) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
+        let decryptor = NoteDecryptor::new(&enc.private).expect("key");
+        let printed = format!("{decryptor:?}");
+        assert_eq!(printed, "NoteDecryptor(<redacted>)");
+        assert!(!printed.contains(&hex::encode(enc.private.0)));
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), test)]
