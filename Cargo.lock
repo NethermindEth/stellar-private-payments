@@ -5288,6 +5288,7 @@ version = "0.4.0"
 dependencies = [
  "anyhow",
  "ark-bn254 0.6.0",
+ "ark-ec 0.6.0",
  "ark-ff 0.6.0",
  "ark-groth16",
  "ark-poly 0.6.0",

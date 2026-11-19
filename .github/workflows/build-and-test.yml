@@ -38,3 +38,9 @@ jobs:
         run: cargo test --workspace --no-run
       - name: Run tests
         run: cargo test --workspace
+      # The workspace build has `parallel` on, which takes precedence over
+      # `parallel-chunked-msm`. Test the chunked-MSM proof assembly the way a
+      # threaded wasm32 build uses it, including the ignored test that needs
+      # the circuit artifacts provided above.
+      - name: Test the chunked-MSM prover
+        run: cargo test -p stellar-private-payments --lib --features parallel-chunked-msm -- --include-ignored chunked_msm proofs_from_every_entry_point

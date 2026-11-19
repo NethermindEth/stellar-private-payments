@@ -3,9 +3,10 @@
 //! Implements the witness map used by snarkjs rather than arkworks' default
 //! `LibsnarkReduction`: Circom prepares powers-of-tau in Lagrange form over a
 //! doubled domain, and the H contribution is taken as the odd coefficients of
-//! `(AB − C)` in that domain.  Vendored (the `parallel` feature swaps `rayon`
-//! for serial loops when off) so upgrades to `circom-compat` / ark-groth16 can
-//! be re-audited against a pinned upstream source.
+//! `(AB − C)` in that domain.  Vendored (the loops use `rayon` with the
+//! `parallel` or `parallel-chunked-msm` feature and are serial otherwise) so
+//! upgrades to `circom-compat` / ark-groth16 can be re-audited against a pinned
+//! upstream source.
 //!
 //! Upstream reference (`arkworks-rs/circom-compat` @ `7344c75`):
 //!   - `src/circom/qap.rs` (`CircomReduction`)
@@ -15,7 +16,7 @@ use ark_groth16::r1cs_to_qap::{LibsnarkReduction, R1CSToQAP, evaluate_constraint
 use ark_poly::EvaluationDomain;
 use ark_relations::gr1cs::{ConstraintSystemRef, SynthesisError};
 use ark_std::{vec, vec::Vec};
-#[cfg(feature = "parallel")]
+#[cfg(any(feature = "parallel", feature = "parallel-chunked-msm"))]
 use rayon::prelude::*;
 
 /// Implements the witness map used by snarkjs. The arkworks witness map
@@ -26,8 +27,11 @@ use rayon::prelude::*;
 /// in that domain. This serves as HZ when computing the C proof element.
 pub struct CircomReduction;
 
-// With the `parallel` feature, use `rayon` parallel iterators.
-// Otherwise (including all wasm32 builds), use the equivalent serial loops.
+// With the `parallel` or `parallel-chunked-msm` feature, use `rayon` parallel
+// iterators. Otherwise, use the equivalent serial loops. These loops only use
+// the current pool, so they also run in a wasm32 thread pool; that is the
+// `parallel-chunked-msm` build, because the MSMs of `parallel` cannot run
+// there (see `chunked_msm.rs`).
 impl R1CSToQAP for CircomReduction {
     #[allow(clippy::type_complexity)]
     fn instance_map_with_evaluation<F: PrimeField, D: EvaluationDomain<F>>(
@@ -52,7 +56,7 @@ impl R1CSToQAP for CircomReduction {
         let mut a = vec![zero; domain_size];
         let mut b = vec![zero; domain_size];
 
-        #[cfg(feature = "parallel")]
+        #[cfg(any(feature = "parallel", feature = "parallel-chunked-msm"))]
         {
             a[..num_constraints]
                 .par_iter_mut()
@@ -64,7 +68,7 @@ impl R1CSToQAP for CircomReduction {
                     *b_i = evaluate_constraint(bt_i, full_assignment);
                 });
         }
-        #[cfg(not(feature = "parallel"))]
+        #[cfg(not(any(feature = "parallel", feature = "parallel-chunked-msm")))]
         {
             for (((a_i, b_i), at_i), bt_i) in a[..num_constraints]
                 .iter_mut()
@@ -84,7 +88,7 @@ impl R1CSToQAP for CircomReduction {
         }
 
         let mut c = vec![zero; domain_size];
-        #[cfg(feature = "parallel")]
+        #[cfg(any(feature = "parallel", feature = "parallel-chunked-msm"))]
         {
             c[..num_constraints]
                 .par_iter_mut()
@@ -94,7 +98,7 @@ impl R1CSToQAP for CircomReduction {
                     *c_i = a_i * b_i;
                 });
         }
-        #[cfg(not(feature = "parallel"))]
+        #[cfg(not(any(feature = "parallel", feature = "parallel-chunked-msm")))]
         {
             for ((c_i, &a_i), &b_i) in c[..num_constraints].iter_mut().zip(&a).zip(&b) {
                 *c_i = a_i * b_i;
@@ -124,13 +128,13 @@ impl R1CSToQAP for CircomReduction {
         D::distribute_powers_and_mul_by_const(&mut c, root_of_unity, F::one());
         domain.fft_in_place(&mut c);
 
-        #[cfg(feature = "parallel")]
+        #[cfg(any(feature = "parallel", feature = "parallel-chunked-msm"))]
         {
             ab.par_iter_mut()
                 .zip(c)
                 .for_each(|(ab_i, c_i)| *ab_i -= &c_i);
         }
-        #[cfg(not(feature = "parallel"))]
+        #[cfg(not(any(feature = "parallel", feature = "parallel-chunked-msm")))]
         {
             for (ab_i, c_i) in ab.iter_mut().zip(c) {
                 *ab_i -= &c_i;
@@ -150,12 +154,12 @@ impl R1CSToQAP for CircomReduction {
     ) -> Result<Vec<F>, SynthesisError> {
         // the usual H query has domain-1 powers. Z has domain powers. So HZ has
         // 2*domain-1 powers.
-        #[cfg(feature = "parallel")]
+        #[cfg(any(feature = "parallel", feature = "parallel-chunked-msm"))]
         let mut scalars = (0..2 * max_power + 1)
             .into_par_iter()
             .map(|i| delta_inverse * t.pow([i as u64]))
             .collect::<Vec<_>>();
-        #[cfg(not(feature = "parallel"))]
+        #[cfg(not(any(feature = "parallel", feature = "parallel-chunked-msm")))]
         let mut scalars = (0..2 * max_power + 1)
             .map(|i| delta_inverse * t.pow([i as u64]))
             .collect::<Vec<_>>();
@@ -165,11 +169,11 @@ impl R1CSToQAP for CircomReduction {
         // generate the lagrange coefficients
         domain.ifft_in_place(&mut scalars);
 
-        #[cfg(feature = "parallel")]
+        #[cfg(any(feature = "parallel", feature = "parallel-chunked-msm"))]
         {
             Ok(scalars.into_par_iter().skip(1).step_by(2).collect())
         }
-        #[cfg(not(feature = "parallel"))]
+        #[cfg(not(any(feature = "parallel", feature = "parallel-chunked-msm")))]
         {
             Ok(scalars.into_iter().skip(1).step_by(2).collect())
         }
