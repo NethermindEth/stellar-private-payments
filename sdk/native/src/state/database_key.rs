@@ -90,12 +90,13 @@ pub(crate) fn open(path: &Path, key: &DatabaseKey, purpose: OpenPurpose) -> Resu
     if matches!(purpose, OpenPurpose::OpenExisting) {
         validate_read_only(path, key)?;
     }
+    // Release the reservation before SQLite opens the path. On macOS its flock
+    // conflicts with SQLite's fcntl locks, even in this process, and closing a
+    // second descriptor would drop the process's fcntl locks on every platform.
     #[cfg(not(target_arch = "wasm32"))]
-    let _reservation = if matches!(purpose, OpenPurpose::CreateNew) {
-        Some(reserve_creation(path)?)
-    } else {
-        None
-    };
+    if matches!(purpose, OpenPurpose::CreateNew) {
+        drop(reserve_creation(path)?);
+    }
     connect(path, key, purpose)
 }
 
@@ -138,8 +139,9 @@ fn reserve_creation(path: &Path) -> Result<std::fs::File> {
         }
         Err(error) => return Err(error.into()),
     };
-    // Serialize creators that encounter the same empty reservation. The owner
-    // must still serialize database use, as for every encrypted open.
+    // Refuse an empty reservation another creator holds right now. open()
+    // releases this lock before SQLite opens the path, so the owner must still
+    // serialize creation and use, as for every encrypted open.
     lock_creation(&file)?;
     ensure!(file.metadata()?.len() == 0, "database is no longer empty");
     #[cfg(unix)]
