@@ -473,7 +473,7 @@ const EXPECTED: &[Pinned] = expected! {
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
     "asp-non-membership insert_leaves, three keys into nine" => 28, 23, 2748, 12, 5_200_586_292;
-    "public-key-registry register, first registration" => 6, 3, 1872, 2, 3_259_697_628;
+    "public-key-registry register, first registration" => 6, 3, 628, 2, 680_140_472;
 };
 
 /// Rows that read entries from disk, and how many. An account authorizer's
