@@ -24,7 +24,7 @@ case "${1:-}" in
     # RUSTC_BOOTSTRAP and a std rebuilt from the pinned toolchain's sources;
     # neither is part of the MSRV promise, so build.sh's threaded build is not
     # repeated here. The `threads` feature without atomics, which carries the
-    # SDK's `parallel-chunked-msm`, must still compile on the minimum compiler.
+    # SDK's `parallel`, must still compile on the minimum compiler.
     cargo check --locked --target wasm32-unknown-unknown -p stellar-private-payments-web --bins --features threads
     cargo check --locked --target wasm32-unknown-unknown -p stellar-private-payments --tests
     # The e2e suite embeds this file at compile time. These checks never run

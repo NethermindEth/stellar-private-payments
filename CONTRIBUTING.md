@@ -190,7 +190,7 @@ use the pinned development toolchain for that operation.
 `ark-circom` is [patched](https://github.com/NethermindEth/circom-compat/commits/wasm-no-parallel/) 
 (`Cargo.toml` is cleaned up from hardcoded `parallel` features) to allow running 
 in a single-threaded WASM. The browser SDK does not use `ark-circom`: it proves multi-threaded with the
-SDK's `parallel-chunked-msm` feature in a separate prover worker, on cross-origin isolated (COOP/COEP)
+SDK's `parallel` feature in a separate prover worker, on cross-origin isolated (COOP/COEP)
 pages only (see [`sdk/web/README.md`](sdk/web/README.md#multi-threaded-proving)).
 Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
 `vendor/cranelift-control` is patched - the single dependency `arbitrary` is fixed at the same version as in

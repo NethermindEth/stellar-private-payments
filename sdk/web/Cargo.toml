@@ -43,13 +43,11 @@ unencrypted-storage = ["stellar-private-payments/unencrypted-storage"]
 # chunked-MSM proof assembly on a rayon pool whose threads are Web Workers
 # sharing one wasm memory. The pool needs atomics and a std rebuilt with them,
 # which `scripts/build.sh` sets up (unless `SPP_WEB_THREADS=0`); without atomics
-# the feature still compiles but starts no pool. Never enable
-# `stellar-private-payments/parallel` here: `ark-ec`'s parallel MSM spawns a
-# thread pool of its own and panics on wasm32.
+# the feature still compiles but starts no pool.
 threads = [
     "dep:rayon",
     "dep:wasm-bindgen-rayon",
-    "stellar-private-payments/parallel-chunked-msm",
+    "stellar-private-payments/parallel",
     "web-sys/WorkerNavigator",
 ]
 # The `prover-driver` binary, which the prover browser test and benchmark

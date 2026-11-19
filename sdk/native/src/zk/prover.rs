@@ -9,8 +9,8 @@
 //! 3. Accepts pre-computed witness bytes
 //! 4. Replays constraints and generates proofs using `ark-groth16` with a
 //!    Circom-compatible R1CS→QAP reduction (see `circom_reduction.rs`). With
-//!    the `parallel-chunked-msm` feature (and without `parallel`) the proof is
-//!    assembled by `chunked_msm.rs` instead, which gives the same proofs
+//!    the `parallel` feature the proof is assembled by `chunked_msm.rs`
+//!    instead, which gives the same proofs
 
 use crate::{
     types::correlation_id_or_new,
@@ -241,23 +241,21 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
 /// Creates a zero-knowledge Groth16 proof for `circuit`, with `r` and `s`
 /// sampled from `rng`.
 ///
-/// This is `ark-groth16`'s prover, except in a build with the
-/// `parallel-chunked-msm` feature and without `parallel`: there the proof is
-/// assembled by `chunked_msm.rs`, which samples `r` and `s` the same way and
-/// returns the same proof for the same randomness. When both features are on,
-/// `parallel` wins.
+/// This is `ark-groth16`'s prover, except with the `parallel` feature: there
+/// the proof is assembled by `chunked_msm.rs`, which samples `r` and `s` the
+/// same way and returns the same proof for the same randomness.
 fn create_random_proof(
     pk: &ProvingKey<Bn254>,
     circuit: R1CSCircuit,
     rng: &mut OsRng,
 ) -> Result<Proof<Bn254>, SynthesisError> {
-    #[cfg(all(feature = "parallel-chunked-msm", not(feature = "parallel")))]
+    #[cfg(feature = "parallel")]
     {
         crate::zk::chunked_msm::create_random_proof::<Bn254, CircomReduction, _, _>(
             pk, circuit, rng,
         )
     }
-    #[cfg(not(all(feature = "parallel-chunked-msm", not(feature = "parallel"))))]
+    #[cfg(not(feature = "parallel"))]
     {
         <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(pk, circuit, rng)
     }
@@ -908,7 +906,7 @@ mod tests {
     /// Ignored by default because the `.r1cs` is a build output that a fresh
     /// checkout does not have: `make circuits`, or the CI circuits action,
     /// puts it in `target/circuits-artifacts`.
-    #[cfg(all(feature = "parallel-chunked-msm", not(target_arch = "wasm32")))]
+    #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
     #[test]
     #[ignore = "needs target/circuits-artifacts/keyOwnership.r1cs (make circuits)"]
     fn chunked_msm_assembly_equals_ark_groth16_on_key_ownership() {
