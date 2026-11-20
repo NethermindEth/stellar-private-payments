@@ -67,17 +67,15 @@ impl<S: ContractDataStorage> Indexer<S> {
     /// A full page (`PAGE_SIZE` events) always continues, even at the tip
     /// ledger, because more events may share that ledger.
     pub async fn fetch_contract_events(&self) -> Result<bool, IndexerError> {
-        let network_tip = self.client.get_latest_ledger().await?.sequence;
         let (start_ledger, mut cursor) =
             pass_start(&self.config, &self.storage.get_sync_state().await?)?;
-        let start_ledger = start_ledger.min(network_tip);
 
         let mut may_have_more = false;
         let mut progress_ledger = start_ledger;
 
         for page in 0..MAX_PAGES_PER_ROUND {
             tracing::trace!(
-                "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
+                "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, cursor={cursor:?}"
             );
 
             let prev_cursor = cursor.clone();
@@ -98,6 +96,11 @@ impl<S: ContractDataStorage> Indexer<S> {
                 }
                 Err(e) => return Err(e.into()),
             };
+
+            tracing::trace!(
+                "[INDEXER] page {page} returned {} events, network_tip={latest_ledger}",
+                events.len()
+            );
 
             let new_cursor =
                 new_cursor.ok_or_else(|| anyhow!("cursor is not found in the events response"))?;
@@ -291,6 +294,125 @@ mod tests {
             cursor: "CURSOR".to_string(),
             last_indexed_ledger,
             last_fully_indexed_ledger: 0,
+        }
+    }
+
+    /// Needs `tokio` and `wiremock`, which wasm32 test builds lack.
+    #[cfg(not(target_arch = "wasm32"))]
+    mod rpc {
+        use super::*;
+
+        #[derive(Clone, Default)]
+        struct MemStorage {
+            sync: std::sync::Arc<std::sync::Mutex<Vec<SyncMetadata>>>,
+        }
+
+        #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+        #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+        impl ContractDataStorage for MemStorage {
+            async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
+                Ok(self.sync.lock().expect("lock poisoned").clone())
+            }
+
+            async fn save_events_batch(&self, _batch: ContractsEventData) -> anyhow::Result<()> {
+                Ok(())
+            }
+
+            async fn save_sync_progress(
+                &self,
+                metadata: Vec<SyncMetadata>,
+                _fully_indexed: bool,
+            ) -> anyhow::Result<()> {
+                *self.sync.lock().expect("lock poisoned") = metadata;
+                Ok(())
+            }
+        }
+
+        /// Storage that has indexed every contract of [`config`] to ledger
+        /// 5,000, resuming from `cursor`.
+        fn resumed_storage(cursor: &str) -> MemStorage {
+            let sync = ["CPOOL_A", "CPOOL_B", "CMEMBERSHIP", "CADDED", "CREGISTRY"].map(|id| {
+                let mut meta = progress(id, 5_000);
+                meta.cursor = cursor.to_string();
+                meta
+            });
+            MemStorage {
+                sync: std::sync::Arc::new(std::sync::Mutex::new(sync.to_vec())),
+            }
+        }
+
+        async fn latest_ledger_requests(server: &wiremock::MockServer) -> usize {
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .iter()
+                .filter(|request| {
+                    String::from_utf8_lossy(&request.body).contains("getLatestLedger")
+                })
+                .count()
+        }
+
+        #[tokio::test]
+        async fn a_caught_up_round_takes_the_tip_from_get_events() -> Result<()> {
+            use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "events": [],
+                        "cursor": "CURSOR",
+                        "latestLedger": 6_000,
+                        "latestLedgerCloseTime": "2024-01-01T00:00:00Z",
+                        "oldestLedger": 1,
+                        "oldestLedgerCloseTime": "2024-01-01T00:00:00Z",
+                    },
+                })))
+                .mount(&server)
+                .await;
+
+            let storage = resumed_storage("CURSOR");
+            let indexer =
+                Indexer::init(Client::new(&server.uri())?, storage.clone(), &config()?).await?;
+            assert!(!indexer.fetch_contract_events().await?);
+
+            assert_eq!(latest_ledger_requests(&server).await, 0);
+            let sync = storage.get_sync_state().await?;
+            assert!(sync.iter().all(|meta| meta.last_indexed_ledger == 6_000));
+            Ok(())
+        }
+
+        #[tokio::test]
+        async fn a_start_ahead_of_the_rpc_idles_without_losing_progress() -> Result<()> {
+            use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "error": {
+                        "code": -32602,
+                        "message": "startLedger must be within the ledger range: 100 - 3000",
+                    },
+                })))
+                .mount(&server)
+                .await;
+
+            // No cursor: the request starts at ledger 5,000, past the RPC's
+            // 3,000.
+            let storage = resumed_storage("");
+            let indexer =
+                Indexer::init(Client::new(&server.uri())?, storage.clone(), &config()?).await?;
+            assert!(!indexer.fetch_contract_events().await?);
+
+            assert_eq!(latest_ledger_requests(&server).await, 0);
+            let sync = storage.get_sync_state().await?;
+            assert!(sync.iter().all(|meta| meta.last_indexed_ledger == 5_000));
+            Ok(())
         }
     }
 
