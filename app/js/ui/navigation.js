@@ -527,6 +527,11 @@ export const Wallet = {
                 await initializeRuntime(rpcUrl);
                 App.state.wallet.signers = await loadPrivateSigners(client().storage(), address);
                 await client().backgroundSync();
+                // Decompress the pools' proving keys while the user goes
+                // through onboarding, so the first proof does not wait for it.
+                void client().prepareProvers().catch(error => {
+                    console.warn('Preparing proving keys failed:', error);
+                });
 
                 await runOnboardingWizard({
                     address,

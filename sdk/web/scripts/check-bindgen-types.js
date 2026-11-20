@@ -188,6 +188,7 @@ const internalWasmExports = new Set([
   'StorageHandle',
   'registerTelemetrySinks',
   'SinkRegistration',
+  'circuitsToPrepare',
 ]);
 
 function isInternalWasmExport(name) {

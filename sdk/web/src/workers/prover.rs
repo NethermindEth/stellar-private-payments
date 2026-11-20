@@ -1,5 +1,8 @@
 use crate::{
-    circuits::{fetch_circuit_artifact, get_or_derive_uncompressed},
+    circuits::{
+        fetch_circuit_artifact, get_or_derive_uncompressed, has_configured_uncompressed,
+        has_uncompressed,
+    },
     telemetry::WorkerTelemetryConfig,
     workers::{CorrelatedRequest, ProverHandle},
 };
@@ -51,6 +54,7 @@ pub(crate) enum ProverWorkerRequest {
     ConfigureCircuitsBase(String, String),
     ConfigureTelemetry(WorkerTelemetryConfig),
     DumpLogs,
+    PrepareCircuit(String),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -191,34 +195,57 @@ async fn build_prover_from_compressed(
     init_prover(stem, &compressed, graph_bytes, r1cs_bytes)
 }
 
-async fn uncompressed_pk_bytes(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
+/// File name and expected SHA-256 of `stem`'s compressed proving key, which
+/// identify its uncompressed copy in the cache.
+fn proving_key_id(stem: &str) -> Result<(String, [u8; 32]), JsError> {
     let lock = crate::circuits::circuit_lock()?;
-    let pk_name = CircuitLockfile::artifact_file_name(stem, "proving_key.bin");
     let pk_sha256 = lock
         .artifact_sha256(stem, "proving_key.bin")
         .map_err(circuit_err)?;
-    let pk_name_for_log = pk_name.clone();
-    let stem_owned = stem.to_owned();
-    let r1cs_bytes = r1cs_bytes.to_vec();
-    get_or_derive_uncompressed(&pk_name, pk_sha256, move || {
-        let stem = stem_owned.clone();
-        let r1cs_bytes = r1cs_bytes.clone();
-        let pk_name = pk_name_for_log.clone();
-        async move {
-            let compressed = fetch_circuit_artifact(&stem, "proving_key.bin").await?;
-            let tmp = Groth16Prover::new(&compressed, &r1cs_bytes).map_err(|e| {
-                JsError::new(&format!(
-                    "failed to build prover for uncompressed export ({pk_name}): {e:#}"
-                ))
-            })?;
-            tmp.get_uncompressed_proving_key().map_err(|e| {
-                JsError::new(&format!(
-                    "failed to export uncompressed proving key ({pk_name}): {e:#}"
-                ))
-            })
-        }
+    Ok((
+        CircuitLockfile::artifact_file_name(stem, "proving_key.bin"),
+        pk_sha256,
+    ))
+}
+
+/// Fetch `stem`'s compressed proving key and export it uncompressed. This is
+/// the slow step: it decompresses every curve point of the key.
+async fn decompress_proving_key(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
+    let pk_name = CircuitLockfile::artifact_file_name(stem, "proving_key.bin");
+    let compressed = fetch_circuit_artifact(stem, "proving_key.bin").await?;
+    let tmp = Groth16Prover::new(&compressed, r1cs_bytes).map_err(|e| {
+        JsError::new(&format!(
+            "failed to build prover for uncompressed export ({pk_name}): {e:#}"
+        ))
+    })?;
+    tmp.get_uncompressed_proving_key().map_err(|e| {
+        JsError::new(&format!(
+            "failed to export uncompressed proving key ({pk_name}): {e:#}"
+        ))
+    })
+}
+
+async fn uncompressed_pk_bytes(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
+    let (pk_name, pk_sha256) = proving_key_id(stem)?;
+    get_or_derive_uncompressed(&pk_name, pk_sha256, || {
+        decompress_proving_key(stem, r1cs_bytes)
     })
     .await
+}
+
+/// Make sure the cache holds `stem`'s uncompressed proving key, decompressing
+/// it if it is missing. The R1CS is fetched only then.
+async fn prepare_circuit(stem: &str) -> Result<(), JsError> {
+    let (pk_name, pk_sha256) = proving_key_id(stem)?;
+    if has_configured_uncompressed(&pk_name, pk_sha256).await {
+        return Ok(());
+    }
+    get_or_derive_uncompressed(&pk_name, pk_sha256, || async move {
+        let r1cs_bytes = fetch_circuit_artifact(stem, "r1cs").await?;
+        decompress_proving_key(stem, &r1cs_bytes).await
+    })
+    .await
+    .map(drop)
 }
 
 async fn ensure_prover(stem: &str) -> Result<(), JsError> {
@@ -310,6 +337,13 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
         ProverWorkerRequest::ConfigureCircuitsBase(base_url, lock_json) => {
             crate::circuits::configure_circuits(base_url, &lock_json)?;
+            ProverWorkerResponse::Saved
+        }
+        ProverWorkerRequest::PrepareCircuit(stem) => {
+            tracing::debug!("[{WORKER_NAME}] prepare {stem}");
+            prepare_circuit(&stem)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
             ProverWorkerResponse::Saved
         }
         ProverWorkerRequest::Transact(params) => {
@@ -493,7 +527,43 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
     Ok(resp)
 }
 
+/// Circuits of the deployment's enabled pools and of key registration whose
+/// proving keys are not yet decompressed in the cache. Runs on the page, so
+/// `prepareProvers` starts no worker when there is nothing to do.
+#[wasm_bindgen(js_name = circuitsToPrepare)]
+pub async fn circuits_to_prepare(
+    contract_config: JsValue,
+    circuits_base_url: String,
+    circuit_lock: String,
+) -> Result<Vec<String>, JsError> {
+    let config = crate::deployment::parse_contract_config(contract_config)?;
+    let base = crate::deployment::require_circuits_base_url(circuits_base_url)?;
+    let lock = stellar_private_payments::circuit_lock(&circuit_lock).map_err(circuit_err)?;
+    let stems = config
+        .enabled_pool_circuits()
+        .into_iter()
+        .map(|stem| stem.to_string())
+        .chain([KEY_OWNERSHIP_CIRCUIT.to_owned()]);
+    let mut missing = Vec::new();
+    for stem in stems {
+        // A circuit the lock does not know is left to the worker, which
+        // reports the error.
+        let cached = match lock.artifact_sha256(&stem, "proving_key.bin") {
+            Ok(sha) => {
+                let name = CircuitLockfile::artifact_file_name(&stem, "proving_key.bin");
+                has_uncompressed(&base, &name, sha).await
+            }
+            Err(_) => false,
+        };
+        if !cached {
+            missing.push(stem);
+        }
+    }
+    Ok(missing)
+}
+
 const PROVE_TIMEOUT_MS: u32 = 30_000;
+const PREPARE_TIMEOUT_MS: u32 = 60_000;
 
 /// Prover worker bridge — main-thread ↔ worker I/O for Groth16 proving.
 #[wasm_bindgen]
@@ -547,6 +617,28 @@ impl ProverBridge {
     pub async fn ping_js(&self) -> Result<(), JsError> {
         self.ping().await.map_err(|e| JsError::new(&e.to_string()))
     }
+
+    /// Decompress the proving keys of `stems` into the shared cache, one
+    /// circuit at a time. A failed circuit does not stop the others; the error
+    /// names every circuit that failed and why.
+    #[wasm_bindgen(js_name = prepareCircuits)]
+    pub async fn prepare_circuits_js(&self, stems: Vec<String>) -> Result<(), JsError> {
+        let mut failed = Vec::new();
+        for stem in stems {
+            if let Err(e) = self.prepare_circuit(stem.clone()).await {
+                tracing::warn!("[{WORKER_NAME}] preparing {stem} failed: {e:#}");
+                failed.push(format!("{stem}: {e:#}"));
+            }
+        }
+        if failed.is_empty() {
+            Ok(())
+        } else {
+            Err(JsError::new(&format!(
+                "failed to prepare circuits: {}",
+                failed.join("; ")
+            )))
+        }
+    }
 }
 
 impl ProverBridge {
@@ -589,6 +681,19 @@ impl ProverBridge {
             .await?
         {
             ProverWorkerResponse::Pong => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    pub(crate) async fn prepare_circuit(&self, stem: String) -> anyhow::Result<()> {
+        match self
+            .call(
+                ProverWorkerRequest::PrepareCircuit(stem),
+                PREPARE_TIMEOUT_MS,
+            )
+            .await?
+        {
+            ProverWorkerResponse::Saved => Ok(()),
             other => Err(anyhow!("unexpected response: {other:?}")),
         }
     }
