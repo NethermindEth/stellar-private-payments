@@ -1056,16 +1056,6 @@ mod tests {
         let config = test_config();
 
         Mock::given(method("POST"))
-            .and(body_string_contains("getLatestLedger"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json_rpc_ok(json!({
-                "id": "latest",
-                "protocolVersion": 22,
-                "sequence": 3_000_000u32,
-            }))))
-            .mount(&bootnode)
-            .await;
-
-        Mock::given(method("POST"))
             .and(body_string_contains("getEvents"))
             .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
                 "bootnode-cursor",
@@ -1248,15 +1238,6 @@ mod tests {
                     .unwrap_or_default();
                 ResponseTemplate::new(200).set_body_json(response)
             })
-            .mount(server)
-            .await;
-        Mock::given(method("POST"))
-            .and(body_string_contains("getLatestLedger"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json_rpc_ok(json!({
-                "id": "latest",
-                "protocolVersion": 22,
-                "sequence": 3_000_000u32,
-            }))))
             .mount(server)
             .await;
     }
