@@ -1,4 +1,4 @@
-import { checkLegacyPlaintextStorage, deleteLegacyStorage, ensureStorage, isStorageUnlocked, lockStorage, manageStorageBackup, STORAGE_STATE_EVENT } from '../wasm-facade.js';
+import { ensureStorage, isStorageUnlocked, lockStorage, manageStorageBackup, STORAGE_STATE_EVENT } from '../wasm-facade.js';
 import { autoLockMinutes, setAutoLockMinutes } from '../storage-timeout.js';
 import { rememberedNoteOwner } from '../account-session.js';
 import { getConnectedAddress, walletErrorToastOptions } from '../wallet.js';
@@ -7,7 +7,6 @@ import { Toast } from './core.js';
 import { confirmAction } from './confirm.js';
 import { el } from './dom.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
-import { SIGNER_MIGRATION_WARNING_EVENT } from '../private-signers.js';
 
 // Set across the reload that follows an import, so the restored storage unlocks next.
 const UNLOCK_AFTER_IMPORT_KEY = 'spp.unlockAfterImport';
@@ -38,12 +37,6 @@ export const LocalData = {
     },
 
     init() {
-        let warnedAboutSigners = false;
-        window.addEventListener(SIGNER_MIGRATION_WARNING_EVENT, event => {
-            if (warnedAboutSigners) return;
-            warnedAboutSigners = true;
-            Toast.show(event.detail, 'info', 10000);
-        });
         const button = document.getElementById('storage-lock-btn');
         const select = document.getElementById('settings-auto-lock');
         let savingTimeout = false;
@@ -53,10 +46,6 @@ export const LocalData = {
             document.getElementById('storage-export').disabled = busy;
             document.getElementById('storage-import').disabled = busy;
             document.getElementById('storage-reset').disabled = busy;
-            const legacyNotice = document.getElementById('storage-legacy-notice');
-            if (legacyNotice) legacyNotice.hidden = document.body.dataset.legacyStorage !== 'present';
-            const deleteLegacy = document.getElementById('storage-delete-legacy');
-            if (deleteLegacy) deleteLegacy.disabled = busy;
             if (document.body.dataset.storageRecovery === 'required') {
                 document.getElementById('storage-recovery-message').textContent = 'Your encrypted data is still here, but its unlocking record is missing. Import a matching backup, or reset local storage to start again. The wallet signature alone cannot recover the missing key.';
             }
@@ -71,16 +60,6 @@ export const LocalData = {
         };
         window.addEventListener(STORAGE_STATE_EVENT, render);
         render();
-        void checkLegacyPlaintextStorage().catch(() => {});
-        document.getElementById('storage-delete-legacy')?.addEventListener('click', async () => {
-            if (!(await confirmAction({ message: 'Permanently delete legacy unencrypted browser storage (.opfs-sahpool)? Make sure you do not need any unmigrated local operation history or settings from the older version.', confirmLabel: 'Delete legacy data', danger: true }))) return;
-            try {
-                await deleteLegacyStorage();
-                Toast.show('Deleted legacy unencrypted browser storage.', 'info');
-            } catch (error) {
-                Toast.show(`Could not delete legacy storage: ${error.message}`, 'error');
-            }
-        });
         // Unlocking goes through the account button; this one only locks.
         button.addEventListener('click', async () => {
             if (isStorageUnlocked()) await lockStorage();

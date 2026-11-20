@@ -37,7 +37,6 @@ Arguments:
 Options:
   --deployer NAME       Stellar identity or secret key used to deploy (required)
   --admin ADDRESS       Admin address (G... or C...). Defaults to deployer address
-  --token ADDRESS       Legacy single-pool native XLM contract address (cannot be mixed with --pool)
   --pool SPEC           Pool spec (repeatable). Optional prefixes per pool:
                         [policy:][gvk-mode:]<ASSET-SPEC>
                         policy: none | allowlist | blocklist | allowlist-blocklist
@@ -132,7 +131,7 @@ Notes:
   - Per-pool policyFlags / gvkMode are written to deployments/<network>/deployments.json.
   - Provide --vk-file/--vk-json only for ceremony allowlist-blocklist (AB) keys; other VKs
     are taken from deployments/<network>/circuit_keys/ automatically.
-  - If neither --token nor --pool is provided, one native XLM pool is deployed by default.
+  - If no --pool is provided, one native XLM pool is deployed by default.
 USAGE
   exit 2
 }
@@ -146,7 +145,6 @@ shift || true
 
 DEPLOYER=""
 ADMIN=""
-TOKEN=""
 POOL_SPECS=()
 ASP_LEVELS=""
 POOL_LEVELS=""
@@ -470,7 +468,6 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --deployer) DEPLOYER="$2"; shift 2 ;;
     --admin) ADMIN="$2"; shift 2 ;;
-    --token) TOKEN="$2"; shift 2 ;;
     --pool) POOL_SPECS+=("$(strip_surrounding_quotes "$2")"); shift 2 ;;
     --asp-levels) ASP_LEVELS="$2"; shift 2 ;;
     --pool-levels) POOL_LEVELS="$2"; shift 2 ;;
@@ -544,13 +541,6 @@ if [[ "$IS_MAINNET" == "true" ]]; then
   fi
 fi
 
-if [[ -n "$TOKEN" && ${#POOL_SPECS[@]} -gt 0 ]]; then
-  die "cannot mix --token with --pool"
-fi
-
-if [[ -n "$TOKEN" ]]; then
-  POOL_SPECS+=("native:$TOKEN")
-fi
 if [[ ${#POOL_SPECS[@]} -eq 0 ]]; then
   NATIVE_TOKEN_ID="$(stellar contract id asset --asset native --network "$NETWORK" 2>/dev/null || true)"
   NATIVE_TOKEN_ID="$(strip_surrounding_quotes "$NATIVE_TOKEN_ID")"

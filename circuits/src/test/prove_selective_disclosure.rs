@@ -20,8 +20,8 @@ mod tests {
     /// result, or a panic from the WASM witness calculator) counts as a
     /// rejection and yields `false`, so negative tests can assert on this
     /// uniformly regardless of which layer trips first.
-    /// Needed because ark-circom / arkworks may panic or return `Err`
-    /// depending on which layer hits the bad input.
+    /// Needed because the witness calculator / arkworks may panic or return
+    /// `Err` depending on which layer hits the bad input.
     fn proof_verifies(
         wasm: impl AsRef<Path>,
         r1cs: impl AsRef<Path>,
@@ -126,7 +126,7 @@ mod tests {
     fn run_valid_note_test(n_notes: usize) -> Result<()> {
         let circuit = format!("selectiveDisclosure_{n_notes}");
         let (wasm, r1cs) = load_artifacts(&circuit).expect("Cannot find {circuit} artifacts");
-        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+        let keys = generate_keys(&r1cs).expect("Groth16 key generation failed");
 
         let notes = distinct_notes(n_notes);
         let mut leaves = sample_leaves(&notes);
@@ -164,7 +164,7 @@ mod tests {
     #[allow(clippy::arithmetic_side_effects)]
     fn run_repeated_note_test(n_notes: usize) -> Result<()> {
         let (wasm, r1cs) = load_artifacts(&format!("selectiveDisclosure_{n_notes}"))?;
-        let keys = generate_keys(&wasm, &r1cs)?;
+        let keys = generate_keys(&r1cs)?;
 
         for i in 0..n_notes {
             for j in i + 1..n_notes {
@@ -204,7 +204,7 @@ mod tests {
     #[ignore]
     fn test_selective_disclosure_2_same_commitment_at_two_leaves_verifies() -> Result<()> {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_2")?;
-        let keys = generate_keys(&wasm, &r1cs)?;
+        let keys = generate_keys(&r1cs)?;
 
         let notes = [
             sample_note(7, 4242, 5151, 17),
@@ -226,7 +226,7 @@ mod tests {
     fn test_selective_disclosure_1_wrong_private_key_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
-        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+        let keys = generate_keys(&r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(14, 4242, 5151, 17);
         let mut leaves = sample_leaves(std::slice::from_ref(&note));
@@ -249,7 +249,7 @@ mod tests {
     fn test_selective_disclosure_1_wrong_amount_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
-        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+        let keys = generate_keys(&r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(18, 4242, 5151, 17);
         let mut leaves = sample_leaves(std::slice::from_ref(&note));
@@ -272,7 +272,7 @@ mod tests {
     fn test_selective_disclosure_1_wrong_blinding_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
-        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+        let keys = generate_keys(&r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(25, 4242, 5151, 17);
         let mut leaves = sample_leaves(std::slice::from_ref(&note));
@@ -295,7 +295,7 @@ mod tests {
     fn test_selective_disclosure_1_wrong_path_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
-        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+        let keys = generate_keys(&r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(21, 4242, 5151, 17);
         let mut leaves = sample_leaves(std::slice::from_ref(&note));
@@ -319,7 +319,7 @@ mod tests {
     fn test_selective_disclosure_1_wrong_root_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
-        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+        let keys = generate_keys(&r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(28, 4242, 5151, 17);
         let mut leaves = sample_leaves(std::slice::from_ref(&note));
@@ -342,7 +342,7 @@ mod tests {
     fn test_selective_disclosure_1_wrong_note_commitment_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
-        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+        let keys = generate_keys(&r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(35, 4242, 5151, 17);
         let mut leaves = sample_leaves(std::slice::from_ref(&note));
@@ -368,7 +368,7 @@ mod tests {
     fn test_selective_disclosure_1_wrong_nullifier_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
-        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+        let keys = generate_keys(&r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(42, 4242, 5151, 17);
         let mut leaves = sample_leaves(std::slice::from_ref(&note));

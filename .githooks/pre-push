@@ -33,7 +33,7 @@ fi
 
 # Formatting check
 if ! cargo +nightly fmt --all -- --check --config-path rustfmt.toml; then
-    echo "❌ Formatting issues (run 'cargo +nightly fmt --all')"
+    echo "❌ Formatting issues (run 'cargo +nightly fmt --all -- --config-path rustfmt.toml')"
     exit 3
 fi
 

@@ -18,11 +18,15 @@ circuit-keys.workspace = true
 # external
 anyhow.workspace = true
 ark-bn254.workspace = true
-ark-circom.workspace = true
+ark-ff.workspace = true
 ark-groth16.workspace = true
+ark-relations.workspace = true
 ark-serialize.workspace = true
+ark-std.workspace = true
+byteorder = "1.4"
 clap.workspace = true
 getrandom.workspace = true
+num-traits = "0.2"
 shlex = "2.0.1"
 zeroize.workspace = true
 

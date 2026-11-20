@@ -249,7 +249,7 @@ fn truncate_hex(field: &Field) -> String {
 fn format_note_line(note: Option<&GvkAuditedNote>) -> String {
     match note.and_then(|note| note.note.amount().ok().map(|amount| (note, amount))) {
         Some((note, amount)) => format!(
-            "pk={} amount={amount} stroops verified_commitment={}",
+            "pk={} amount={amount} base units verified_commitment={}",
             truncate_hex(&note.note.pk),
             truncate_hex(&note.commitment),
         ),

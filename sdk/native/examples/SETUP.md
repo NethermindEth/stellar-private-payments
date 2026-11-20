@@ -131,7 +131,7 @@ What `spp onboard` does:
 3. When privacy keys are missing, signs the key-derivation message with
    `stellar message sign` under the account alias, so the Stellar secret key
    never enters the `spp` process. The message is
-   `Privacy Pool Key Derivation [v3] (<kdf_domain>)`, and its second line warns
+   `Privacy Pool Key Derivation [v1] (<kdf_domain>)`, and its second line warns
    that the signature gives full control of the account's private funds.
 4. Strictly verifies the SEP-53 signature against the account's own public key,
    then derives and stores the privacy note/encryption keys and ASP blinding.
@@ -266,15 +266,14 @@ required by most examples; everything else has a sensible default.
 | `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
 | `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
 | `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
-| `SPP_AMOUNT_STROOPS` | `10000000` token base units | `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
+| `SPP_TOKEN_AMOUNT_BASE_UNITS` | `10000000` token base units | `estimate`, `deposit`, `transfer`, `withdraw`, `plan` |
 | `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | all examples |
 | `SPP_NETWORK_PASSPHRASE` | derived from `network` in `deployments.json` | account/pool/transact examples |
 | `SPP_RECIPIENT_ADDRESS` | — for `transfer`; the wallet's own address for `withdraw`/`plan` | `transfer` (or use `SPP_RECIPIENT_NOTE_KEY` + `SPP_RECIPIENT_ENCRYPTION_KEY`); **also read by `withdraw` and `plan`** |
 | `SPP_REGISTER` | unset | `account_pool` (set to `1` to call `register_public_keys`) |
 
-`SPP_AMOUNT_STROOPS` is a legacy variable name: its value is in the selected
-pool token's base units. The human-readable amount depends on that token's
-decimals; `10000000` base units equals 1 token only when decimals are 7.
+`SPP_TOKEN_AMOUNT_BASE_UNITS` is in the selected pool token's base units;
+`10000000` equals 1 token only when the token has 7 decimals.
 
 > **Wallet encryption and `sync` / `gvk-audit`:** `common::open_storage`
 > unlocks `SPP_WALLET_PATH` via `SPP_STORAGE_ACCOUNT` first, then
@@ -328,16 +327,16 @@ cargo run --release --example sync
 # Transaction-count estimation.
 cargo run --release --example estimate
 
-# Deposit SPP_AMOUNT_STROOPS token base units into the selected pool (default: 10000000).
+# Deposit SPP_TOKEN_AMOUNT_BASE_UNITS token base units into the selected pool (default: 10000000).
 cargo run --release --example deposit
 
 # Transfer one deposit less the pool fee privately to Bob's registered address.
-SPP_AMOUNT_STROOPS=9000000 SPP_RECIPIENT_ADDRESS="<BOB_ADDRESS>" cargo run --release --example transfer
+SPP_TOKEN_AMOUNT_BASE_UNITS=9000000 SPP_RECIPIENT_ADDRESS="<BOB_ADDRESS>" cargo run --release --example transfer
 
 # Withdraw one deposit less the pool fee to the wallet's public address.
 # `env -u` clears the recipient exported for `transfer` above, which
 # `withdraw` would otherwise use as the withdrawal destination.
-SPP_AMOUNT_STROOPS=9000000 env -u SPP_RECIPIENT_ADDRESS cargo run --release --example withdraw
+SPP_TOKEN_AMOUNT_BASE_UNITS=9000000 env -u SPP_RECIPIENT_ADDRESS cargo run --release --example withdraw
 
 # Lower-level prepare_*/PreparedTransactionPlan walkthrough (deposits its own
 # 4 notes, then withdraws all of them step by step).
@@ -355,7 +354,7 @@ Run order for a full demo:
 7. `plan` for the lower-level `prepare_*` API (deposits and withdraws its own notes).
 
 > **Each spend pays the pool fee from the notes it spends.** One `deposit`
-> creates one note of `SPP_AMOUNT_STROOPS` and sends the fee on top, so a
+> creates one note of `SPP_TOKEN_AMOUNT_BASE_UNITS` and sends the fee on top, so a
 > spend of the same amount needs more than the note holds. The commands above
 > spend 9000000 token base units, the 10000000 default less testnet's 1000000
 > (0.1 XLM) pool fee, so `transfer` and `withdraw` each spend exactly one note.

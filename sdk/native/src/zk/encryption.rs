@@ -16,14 +16,14 @@
 //! ```text
 //! Varial Wallet (Ed25519)
 //!        │
-//!        └── signMessage("Privacy Pool Key Derivation [v3] (<kdf_domain>)
+//!        └── signMessage("Privacy Pool Key Derivation [v1] (<kdf_domain>)
 //!                         WARNING: signing this gives full control of …")
 //!                   │
-//!                   ├── SHA-256("privacy-pool/note-key/v2" || <sig>)
+//!                   ├── SHA-256("privacy-pool/note-key/v1" || <sig>)
 //!                   │          └── BN254 Note Private Key → Poseidon2 → Note Public Key
 //!                   │
-//!                   └── SHA-256("privacy-pool/encryption-key/v2" || <sig>)
-//!                              └── X25519 Encryption Keypair
+//!                   └── SHA-256("privacy-pool/encryption-key/v1" || <sig>)
+//!                              └── X-Wing (X25519 + ML-KEM-768) Encryption Keypair
 //! ```
 //! Note: the original scheme had separate signatures for spending and
 //! encryption keys. To improve UX we reduced to a single signature derivation
@@ -41,14 +41,16 @@ use anyhow::{Result, anyhow};
 use ark_bn254::Fr;
 use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
-use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
-use ed25519_dalek::{
-    Signature as DalekSignature, VerifyingKey,
-    hazmat::{ExpandedSecretKey, raw_sign},
+use ed25519_dalek::{Signature as DalekSignature, VerifyingKey};
+use hpke::{
+    Deserializable, Kem as KemTrait, OpModeR, OpModeS, Serializable, aead::ChaCha20Poly1305,
+    kdf::HkdfSha256, kem::XWing,
 };
-use sha2::{Digest, Sha256, Sha512};
-use x25519_dalek::{PublicKey, StaticSecret};
-use zeroize::{Zeroize, Zeroizing};
+use sha2::{
+    Digest, Sha256,
+    digest::{Output, array::Array},
+};
+use zeroize::Zeroizing;
 
 // Key derivation constants.
 // These MUST remain constant for backwards compatibility.
@@ -62,7 +64,7 @@ use zeroize::{Zeroize, Zeroizing};
 /// `kdf_domain` is trimmed, so stray whitespace does not derive other keys.
 pub fn key_derivation_message(kdf_domain: &str) -> String {
     format!(
-        "Privacy Pool Key Derivation [v3] ({})\n{KEY_DERIVATION_WARNING}",
+        "Privacy Pool Key Derivation [v1] ({})\n{KEY_DERIVATION_WARNING}",
         kdf_domain.trim()
     )
 }
@@ -117,11 +119,28 @@ pub fn verify_owner_signature(
         .map_err(|_| anyhow!("the signature was not made by the note owner's key"))
 }
 
-const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v2";
-const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v2";
-const MEMBERSHIP_BLINDING_DOMAIN: &[u8] = b"privacy-pool/asp-secret/v2";
+const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v1";
+const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v1";
 
-/// Keypairs derivation
+/// HPKE `info` of a note ciphertext.
+const NOTE_ENCRYPTION_INFO: &[u8] = b"privacy-pool/note/v1";
+/// Length of the KEM output (`enc`) of X-Wing.
+const XWING_ENC_LEN: usize = 1120;
+/// Length of an encrypted note: `enc (1120) || ciphertext (48) || tag (16)`.
+pub const ENCRYPTED_OUTPUT_LEN: usize = XWING_ENC_LEN + 48 + 16;
+const MEMBERSHIP_BLINDING_DOMAIN: &[u8] = b"privacy-pool/asp-secret/v1";
+
+/// Caveat for everything that derives or handles the privacy keys.
+pub const MEMORY_PROTECTION_WARNING: &str = "Privacy keys are derived from a wallet signature and \
+protected only on a best-effort basis by zeroizing memory after use. Protection against \
+side-channel or timing attacks, a weak system random number generator, or other memory \
+disclosure cannot be guaranteed.";
+
+/// Keypairs derivation.
+///
+/// # Security
+/// Secret material is wiped from memory on a best-effort basis only (see
+/// [`MEMORY_PROTECTION_WARNING`]).
 pub fn derive_encryption_and_note_keypairs(
     signature: KeyDerivationSignature,
 ) -> Result<(NoteKeyPair, EncryptionKeyPair)> {
@@ -156,7 +175,7 @@ pub fn derive_membership_blinding(
         MEMBERSHIP_BLINDING_DOMAIN,
         network_context.as_bytes(),
     );
-    let field = Fr::from_le_bytes_mod_order(&key);
+    let field = Fr::from_le_bytes_mod_order(&*key);
 
     let mut result = [0u8; 32];
     field
@@ -165,17 +184,17 @@ pub fn derive_membership_blinding(
     Field::try_from_le_bytes(result)
 }
 
-/// Encryption key derivation (X25519). Used for off-chain note
-/// encryption/decryption Derive X25519 encryption keypair deterministically
-/// from a Varial signature.
+/// Encryption key derivation (X-Wing). Used for off-chain note
+/// encryption/decryption. Derives the keypair deterministically from the wallet
+/// signature.
 ///
-/// This keypair is used for encrypting note data (amount, blinding) so that
-/// only the recipient can decrypt it. The encryption scheme is
-/// X25519-XSalsa20-Poly1305.
+/// The keypair encrypts note data (amount, blinding) so that only the
+/// recipient can decrypt it. X-Wing combines X25519 and ML-KEM-768, so notes
+/// stay confidential against harvest-now-decrypt-later if either holds.
 ///
 /// # Derivation
 /// ```text
-/// signature (64 bytes) → SHA-256 → 32-byte seed → X25519 keypair
+/// signature (64 bytes) → SHA-256 → 32-byte IKM → HPKE DeriveKeyPair → X-Wing keypair
 /// ```
 ///
 /// # Arguments
@@ -183,28 +202,28 @@ pub fn derive_membership_blinding(
 ///   [`key_derivation_message`]
 ///
 /// # Returns
-/// 64 bytes: `[public_key (32), private_key (32)]`
+/// The 32-byte X-Wing secret key and the 1216-byte public key.
 fn derive_keypair_from_signature(signature: &KeyDerivationSignature) -> Result<EncryptionKeyPair> {
     let KeyDerivationSignature(signature) = signature;
     if signature.len() != 64 {
         return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
     }
 
-    let seed = hash_signature_with_domain(signature, ENCRYPTION_KEY_DOMAIN);
+    // HPKE `DeriveKeyPair(ikm)`: the SHA-256 output carries 256 bits of
+    // entropy, as many as the 32-byte secret key, as RFC 9180 asks of `ikm`.
+    let ikm = hash_signature_with_domain(signature, ENCRYPTION_KEY_DOMAIN);
+    let (secret, public) = XWing::derive_keypair(&*ikm);
 
-    // Generate X25519 keypair from seed
-    let mut secret_bytes = [0u8; 32];
-    secret_bytes.copy_from_slice(&seed[..]);
-
-    let secret = StaticSecret::from(secret_bytes);
-    let public = PublicKey::from(&secret);
-
-    let keypair = EncryptionKeyPair {
-        private: EncryptionPrivateKey(secret.to_bytes()),
-        public: EncryptionPublicKey(public.to_bytes()),
-    };
-
-    Ok(keypair)
+    // The private key is the derived secret key, so scanning does not derive it
+    // again for every output it tries.
+    // Written straight into the key's own storage: no intermediate array is
+    // made, so there is no extra copy to wipe.
+    let mut private = EncryptionPrivateKey([0u8; 32]);
+    secret.write_exact(&mut private.0);
+    Ok(EncryptionKeyPair {
+        private,
+        public: EncryptionPublicKey::try_from(public.to_bytes().to_vec())?,
+    })
 }
 
 /// Derive private key (BN254 scalar) deterministically from a Varial
@@ -238,61 +257,64 @@ fn derive_note_private_key(signature: &KeyDerivationSignature) -> Result<NotePri
     let field = Fr::from_le_bytes_mod_order(&key[..]);
 
     // Serialize into bytes
-    let mut result = [0u8; 32];
+    // Serialized in place into the key's own storage, for the same reason.
+    let mut private = NotePrivateKey([0u8; 32]);
     field
-        .serialize_compressed(&mut result[..])
+        .serialize_compressed(&mut private.0[..])
         .expect("Serialization failed");
-
-    Ok(NotePrivateKey(result))
+    Ok(private)
 }
 
-fn hash_signature_with_domain(signature: &[u8], domain: &[u8]) -> [u8; 32] {
+/// Finishes `hasher` straight into a buffer that is wiped on drop. `finalize()`
+/// would return the digest by value, leaving an unwiped temporary behind.
+fn finalize_wiped(hasher: Sha256) -> Zeroizing<[u8; 32]> {
+    let mut out = Zeroizing::new([0u8; 32]);
+    let view: &mut Output<Sha256> = Array::cast_from_core_mut(&mut out);
+    hasher.finalize_into(view);
+    out
+}
+
+/// The hash is secret key material, so it is wiped on drop.
+fn hash_signature_with_domain(signature: &[u8], domain: &[u8]) -> Zeroizing<[u8; 32]> {
     let mut hasher = Sha256::new();
     hasher.update(domain);
     hasher.update(signature);
-    hasher.finalize().into()
+    finalize_wiped(hasher)
 }
 
 fn hash_signature_with_domain_and_context(
     signature: &[u8],
     domain: &[u8],
     context: &[u8],
-) -> [u8; 32] {
+) -> Zeroizing<[u8; 32]> {
     let mut hasher = Sha256::new();
     hasher.update(domain);
     hasher.update([0u8]);
     hasher.update(context);
     hasher.update([0u8]);
     hasher.update(signature);
-    hasher.finalize().into()
+    finalize_wiped(hasher)
 }
-
-/// Tag of the registry's encryption key challenge. Matches the registry's
-/// `ENCRYPTION_KEY_TAG`.
-const REGISTRY_ENCRYPTION_KEY_TAG: &[u8] = b"privacy-pool/registry/encryption-key/v1";
-/// Domain of the Ed25519 nonce prefix derived from the X25519 secret.
-const ENCRYPTION_SIGNING_NONCE_DOMAIN: &[u8] = b"privacy-pool/encryption-key/nonce/v1";
 
 /// Message the owner signs (SEP-53) to register keys with `registry`.
 ///
-/// Byte-identical to the registry's `registration_message`. `encryption_key`
-/// is the Edwards encoding from [`encryption_edwards_key`].
+/// Byte-identical to the registry's `registration_message`.
 pub fn registration_message(
     registry: &str,
     owner: &str,
     note_key: &NotePublicKey,
-    encryption_key: &[u8; 32],
+    encryption_key: &EncryptionPublicKey,
 ) -> String {
     format!(
         "Privacy Pool Key Registration [v1]\nRegistry: {registry}\nAccount: {owner}\nNote key: \
-         0x{}\nEncryption key (Ed25519): 0x{}",
+         0x{}\nEncryption key: 0x{}",
         hex::encode(note_key.0),
-        hex::encode(encryption_key),
+        hex::encode(&encryption_key.0),
     )
 }
 
-/// SEP-53 digest `D` of a registration message, which the owner signature,
-/// the encryption key signature and the `keyOwnership` proof all cover.
+/// SEP-53 digest `D` of a registration message, which the owner signature and
+/// the `keyOwnership` proof both cover.
 pub fn registration_digest(message: &str) -> [u8; 32] {
     sep53_digest(message)
 }
@@ -303,43 +325,6 @@ pub fn registration_hash(digest: &[u8; 32]) -> Field {
     let mut le = *digest;
     le.reverse();
     Field::from_le_bytes_mod_order(le)
-}
-
-/// Ed25519 signing key of the X25519 secret.
-///
-/// The scalar is the clamped X25519 secret, so the verifying key is the
-/// Edwards form of the X25519 public key. The nonce prefix is derived from the
-/// secret under its own domain.
-fn encryption_signing_key(secret: &EncryptionPrivateKey) -> ExpandedSecretKey {
-    let mut prefix: [u8; 64] = Sha512::new()
-        .chain_update(ENCRYPTION_SIGNING_NONCE_DOMAIN)
-        .chain_update(secret.0)
-        .finalize()
-        .into();
-    let mut bytes = Zeroizing::new([0u8; 64]);
-    bytes[..32].copy_from_slice(&secret.0);
-    bytes[32..].copy_from_slice(&prefix[..32]);
-    prefix.zeroize();
-    ExpandedSecretKey::from_bytes(&bytes)
-}
-
-/// Edwards encoding of the X25519 public key of `secret`, the form the
-/// registry stores.
-pub fn encryption_edwards_key(secret: &EncryptionPrivateKey) -> [u8; 32] {
-    VerifyingKey::from(&encryption_signing_key(secret)).to_bytes()
-}
-
-/// The registry's proof that the registrant holds the X25519 secret: an
-/// Ed25519 signature over `sha256(REGISTRY_ENCRYPTION_KEY_TAG || digest)`.
-pub fn sign_encryption_key_ownership(secret: &EncryptionPrivateKey, digest: &[u8; 32]) -> [u8; 64] {
-    let signing_key = encryption_signing_key(secret);
-    let verifying_key = VerifyingKey::from(&signing_key);
-    let challenge: [u8; 32] = Sha256::new()
-        .chain_update(REGISTRY_ENCRYPTION_KEY_TAG)
-        .chain_update(digest)
-        .finalize()
-        .into();
-    raw_sign::<Sha512>(&signing_key, &challenge, &verifying_key).to_bytes()
 }
 
 /// Generate a cryptographically random blinding factor for a note.
@@ -384,25 +369,59 @@ pub fn encrypt_output_note(
     let mut plaintext = [0u8; 48];
     plaintext[..16].copy_from_slice(&amount.to_le_bytes());
     plaintext[16..].copy_from_slice(&blinding.to_le_bytes());
-    encrypt_note_data(recipient_pubkey.as_ref(), &plaintext)
+    encrypt_note_data(recipient_pubkey, &plaintext)
 }
 
-/// Decrypt output note data from on-chain storage.
+/// A recipient key prepared once, for trying many outputs.
 ///
-/// Returns `Ok(None)` if the ciphertext is not addressed to the given private
-/// key or does not hold a well-formed note. The output is chosen by whoever
-/// submits the transaction, so malformed contents must not fail the scan.
+/// Scanning builds the HPKE key once per account per batch, when it first
+/// encounters an output of the expected length. This saves the seed expansion
+/// during HPKE key construction. X-Wing still expands the seed for each
+/// decapsulation.
 ///
-/// Expected plaintext format: `amount (16 bytes LE) || blinding (32 bytes LE)`.
-pub fn decrypt_output_note(
-    recipient_privkey: &EncryptionPrivateKey,
-    encrypted_output: &[u8],
-) -> Result<Option<(NoteAmount, Field)>> {
-    let Some(plaintext) = decrypt_note_data(recipient_privkey.as_ref(), encrypted_output)? else {
-        return Ok(None);
-    };
+/// The seed inside is wiped when this is dropped: hpke builds `x-wing` with its
+/// `zeroize` feature. The wrapper does not implement `Clone`, and its
+/// `Debug` output redacts the key.
+pub struct NoteDecryptor {
+    secret: <XWing as KemTrait>::PrivateKey,
+}
+
+impl NoteDecryptor {
+    /// Prepares `private_key` (the one seed expansion).
+    pub fn new(private_key: &EncryptionPrivateKey) -> Result<Self> {
+        Ok(Self {
+            secret: parse_private_key(private_key.as_ref())?,
+        })
+    }
+
+    /// Decrypts an output from on-chain storage without rebuilding the key.
+    ///
+    /// Expected plaintext: `amount (16 bytes LE) || blinding (32 bytes LE)`.
+    /// `None` means the output is not addressed to this key or does not hold a
+    /// well-formed note. The output is chosen by whoever submits the
+    /// transaction, so malformed contents must not fail the scan.
+    pub fn decrypt_output_note(&self, encrypted_output: &[u8]) -> Option<(NoteAmount, Field)> {
+        note_from_plaintext(&self.open_output(encrypted_output)?)
+    }
+
+    /// HPKE-opens an output to its raw plaintext, before it is parsed as a
+    /// note. Outputs of the wrong shape are rejected before any decryption.
+    fn open_output(&self, encrypted_output: &[u8]) -> Option<Vec<u8>> {
+        let (enc, ciphertext) = split_output(encrypted_output)?;
+        open(&self.secret, &enc, ciphertext)
+    }
+}
+
+impl core::fmt::Debug for NoteDecryptor {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("NoteDecryptor(<redacted>)")
+    }
+}
+
+/// `amount (16 bytes LE) || blinding (32 bytes LE)`; `None` for anything else.
+fn note_from_plaintext(plaintext: &[u8]) -> Option<(NoteAmount, Field)> {
     if plaintext.len() != 48 {
-        return Ok(None);
+        return None;
     }
 
     let mut amount_le = [0u8; 16];
@@ -411,35 +430,62 @@ pub fn decrypt_output_note(
 
     let mut blinding_le = [0u8; 32];
     blinding_le.copy_from_slice(&plaintext[16..]);
-    let Ok(blinding) = Field::try_from_le_bytes(blinding_le) else {
-        return Ok(None);
-    };
+    let blinding = Field::try_from_le_bytes(blinding_le).ok()?;
 
-    Ok(Some((amount, blinding)))
+    Some((amount, blinding))
 }
 
-/// Encrypt note data using X25519-XSalsa20-Poly1305 (NaCl crypto_box).
+/// Randomness for HPKE from the platform source (`getrandom` works on native
+/// and in the browser).
+struct SysRng;
+
+impl hpke::rand_core::TryRng for SysRng {
+    type Error = core::convert::Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        let mut bytes = [0u8; 4];
+        self.try_fill_bytes(&mut bytes)?;
+        Ok(u32::from_le_bytes(bytes))
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        let mut bytes = [0u8; 8];
+        self.try_fill_bytes(&mut bytes)?;
+        Ok(u64::from_le_bytes(bytes))
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Self::Error> {
+        // Like the rest of the stack, a failing system RNG is unrecoverable.
+        getrandom::getrandom(dest).expect("system randomness unavailable");
+        Ok(())
+    }
+}
+
+impl hpke::rand_core::TryCryptoRng for SysRng {}
+
+/// Encrypt note data with HPKE (base mode): X-Wing (X25519 + ML-KEM-768),
+/// HKDF-SHA256, ChaCha20-Poly1305.
 ///
 /// When sending a note to someone, we encrypt the sensitive data (amount and
-/// blinding) with their X25519 public key. Only they can decrypt it.
+/// blinding) with their X-Wing public key. Only they can decrypt it.
 ///
 /// # Output Format
 /// ```text
-/// [ephemeral_pubkey (32)] [nonce (24)] [ciphertext (48) + tag (16)]
-/// Total: 120 bytes minimum
+/// [enc (1120)] [ciphertext (48) + tag (16)]
+/// Total: 1184 bytes
 /// ```
 ///
 /// # Arguments
-/// * `recipient_pubkey_bytes` - Recipient's X25519 encryption public key (32
-///   bytes)
+/// * `recipient_pubkey_bytes` - Recipient's X-Wing public key (1216 bytes)
 /// * `plaintext` - Note data: `[amount (16 bytes LE)] [blinding (32 bytes)]` =
 ///   48 bytes
-///
-/// # Returns
-/// Encrypted data (120 bytes)
-fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
-    if recipient_pubkey_bytes.len() != 32 {
-        return Err(anyhow!("Recipient public key must be 32 bytes"));
+fn encrypt_note_data(recipient_pubkey: &EncryptionPublicKey, plaintext: &[u8]) -> Result<Vec<u8>> {
+    let recipient_pubkey_bytes = recipient_pubkey.as_ref();
+    if recipient_pubkey_bytes.len() != EncryptionPublicKey::LEN {
+        return Err(anyhow!(
+            "Recipient public key must be {} bytes",
+            EncryptionPublicKey::LEN
+        ));
     }
     if plaintext.len() != 48 {
         return Err(anyhow!(
@@ -447,98 +493,57 @@ fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<
         ));
     }
 
-    // Generate ephemeral secret key using getrandom directly
-    let mut ephemeral_bytes = [0u8; 32];
-    getrandom::getrandom(&mut ephemeral_bytes)
-        .map_err(|e| anyhow!("Failed to generate ephemeral key: {}", e))?;
+    let recipient = <XWing as KemTrait>::PublicKey::from_bytes(recipient_pubkey_bytes)
+        .map_err(|e| anyhow!("Invalid recipient public key: {e}"))?;
+    let (enc, ciphertext) = hpke::single_shot_seal_with_rng::<ChaCha20Poly1305, HkdfSha256, XWing>(
+        &OpModeS::Base,
+        &recipient,
+        NOTE_ENCRYPTION_INFO,
+        plaintext,
+        &[],
+        &mut SysRng,
+    )
+    .map_err(|e| anyhow!("Encryption failed: {e}"))?;
 
-    let ephemeral_secret = StaticSecret::from(ephemeral_bytes);
-    let ephemeral_public = PublicKey::from(&ephemeral_secret);
-
-    // ECDH: derive shared secret
-    let recipient_public = PublicKey::from(
-        *<&[u8; 32]>::try_from(recipient_pubkey_bytes)
-            .map_err(|_| anyhow!("Invalid recipient public key"))?,
-    );
-    let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public);
-
-    // Setup XSalsa20Poly1305 cipher with shared secret
-    let cipher = XSalsa20Poly1305::new(shared_secret.as_bytes().into());
-
-    // Generate random nonce (24 bytes for XSalsa20) using getrandom
-    let mut nonce_bytes = [0u8; 24];
-    getrandom::getrandom(&mut nonce_bytes)
-        .map_err(|e| anyhow!("Failed to generate nonce: {}", e))?;
-    let nonce = Nonce::from(nonce_bytes);
-
-    // Encrypt plaintext
-    let ciphertext = cipher
-        .encrypt(&nonce, plaintext)
-        .map_err(|e| anyhow!("Encryption failed: {:?}", e))?;
-
-    // Pack: [ephemeral_pubkey (32)] [nonce (24)] [ciphertext + tag]
-    // 32 (pubkey) + 24 (nonce) = 56 bytes overhead
-    let capacity = ciphertext
-        .len()
-        .checked_add(56)
-        .expect("Integer overflow on encryption output size");
-    let mut result = Vec::with_capacity(capacity);
-    result.extend_from_slice(ephemeral_public.as_bytes());
-    result.extend_from_slice(&nonce_bytes);
+    let mut result = enc.to_bytes().to_vec();
     result.extend_from_slice(&ciphertext);
-
     Ok(result)
 }
 
-/// Decrypt note data using X25519-XSalsa20-Poly1305.
-///
-/// When scanning for notes addressed to us, we try to decrypt each encrypted
-/// output. If decryption succeeds, the note was sent to us.
-///
-/// # Arguments
-/// * `private_key_bytes` - Our X25519 encryption private key (32 bytes)
-/// * `encrypted_data` - Encrypted data from on-chain event (120+ bytes)
-///
-/// # Returns
-/// - Success: the decrypted plaintext
-/// - `None`: the data is too short or the note was not addressed to us
-fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Option<Vec<u8>>> {
-    if private_key_bytes.len() != 32 {
-        return Err(anyhow!("Private key must be 32 bytes"));
+/// Splits an on-chain output into its encapsulated key and AEAD ciphertext.
+/// `None` for the wrong length or an encapsulated key of the wrong shape. Needs
+/// no private key.
+fn split_output(encrypted_data: &[u8]) -> Option<(<XWing as KemTrait>::EncappedKey, &[u8])> {
+    if encrypted_data.len() != ENCRYPTED_OUTPUT_LEN {
+        return None;
     }
+    let (enc, ciphertext) = encrypted_data.split_at(XWING_ENC_LEN);
+    let enc = <XWing as KemTrait>::EncappedKey::from_bytes(enc).ok()?;
+    Some((enc, ciphertext))
+}
 
-    // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (48) +
-    // tag (16) = 120
-    if encrypted_data.len() < 120 {
-        return Ok(None);
-    }
+/// Parses the 32-byte seed into an X-Wing key. This is the expensive step: it
+/// expands the seed.
+fn parse_private_key(private_key_bytes: &[u8]) -> Result<<XWing as KemTrait>::PrivateKey> {
+    <XWing as KemTrait>::PrivateKey::from_bytes(private_key_bytes)
+        .map_err(|_| anyhow!("Private key must be 32 bytes"))
+}
 
-    // Extract components
-    let ephemeral_pubkey = &encrypted_data[0..32];
-    let nonce_bytes = &encrypted_data[32..56];
-    let ciphertext_with_tag = &encrypted_data[56..];
-
-    // Setup our private key
-    let our_secret = StaticSecret::from(
-        *<&[u8; 32]>::try_from(private_key_bytes).map_err(|_| anyhow!("Invalid private key"))?,
-    );
-
-    // ECDH: derive shared secret
-    let ephemeral_public = PublicKey::from(
-        *<&[u8; 32]>::try_from(ephemeral_pubkey)
-            .map_err(|_| anyhow!("Invalid ephemeral public key"))?,
-    );
-    let shared_secret = our_secret.diffie_hellman(&ephemeral_public);
-
-    // Setup XSalsa20Poly1305 cipher
-    let cipher = XSalsa20Poly1305::new(shared_secret.as_bytes().into());
-
-    // Create nonce from bytes (convert to array first)
-    let mut nonce_array = [0u8; 24];
-    nonce_array.copy_from_slice(nonce_bytes);
-    let nonce = Nonce::from(nonce_array);
-
-    Ok(cipher.decrypt(&nonce, ciphertext_with_tag).ok())
+/// HPKE-opens one output. `None` when it is not addressed to `secret`.
+fn open(
+    secret: &<XWing as KemTrait>::PrivateKey,
+    enc: &<XWing as KemTrait>::EncappedKey,
+    ciphertext: &[u8],
+) -> Option<Vec<u8>> {
+    hpke::single_shot_open::<ChaCha20Poly1305, HkdfSha256, XWing>(
+        &OpModeR::Base,
+        secret,
+        enc,
+        NOTE_ENCRYPTION_INFO,
+        ciphertext,
+        &[],
+    )
+    .ok()
 }
 
 #[cfg(test)]
@@ -572,7 +577,7 @@ mod owner_signature_tests {
     fn key_derivation_message_is_fixed() {
         assert_eq!(
             key_derivation_message("tests"),
-            "Privacy Pool Key Derivation [v3] (tests)\nWARNING: signing this gives full control \
+            "Privacy Pool Key Derivation [v1] (tests)\nWARNING: signing this gives full control \
              of your private funds. Only sign in the Stellar Private Payments app or CLI."
         );
     }
@@ -682,7 +687,7 @@ mod tests {
         assert_eq!(keys1.private.0, keys2.private.0);
         assert_eq!(keys1.public.0, keys2.public.0);
         assert_eq!(keys1.private.0.len(), 32);
-        assert_eq!(keys1.public.0.len(), 32);
+        assert_eq!(keys1.public.0.len(), EncryptionPublicKey::LEN);
     }
 
     #[test]
@@ -723,8 +728,8 @@ mod tests {
     fn test_encryption_roundtrip() {
         let recipient_sig = KeyDerivationSignature(vec![2u8; 64]);
         let recip_keys = derive_keypair_from_signature(&recipient_sig).expect("Derivation failed");
-        let pub_key = recip_keys.public.as_ref();
-        let priv_key = recip_keys.private.as_ref();
+        let pub_key = &recip_keys.public;
+        let decryptor = NoteDecryptor::new(&recip_keys.private).expect("key");
 
         // 16 bytes amount + 32 bytes blinding = 48 bytes
         let amount = [10u8; 16];
@@ -734,10 +739,10 @@ mod tests {
         plaintext.extend_from_slice(&blinding);
 
         let encrypted = encrypt_note_data(pub_key, &plaintext).expect("Encryption failed");
-        assert!(encrypted.len() >= 112);
+        assert_eq!(encrypted.len(), ENCRYPTED_OUTPUT_LEN);
 
-        let decrypted = decrypt_note_data(priv_key, &encrypted)
-            .expect("Decryption failed")
+        let decrypted = decryptor
+            .open_output(&encrypted)
             .expect("note should be addressed to the recipient");
         assert_eq!(decrypted, plaintext);
     }
@@ -751,16 +756,13 @@ mod tests {
         let bob_keys = derive_keypair_from_signature(&bob_sig).expect("Derivation failed");
 
         // Encrypt for Alice.
-        let alice_pub = alice_keys.public.as_ref();
+        let alice_pub = &alice_keys.public;
         let plaintext = [0u8; 48];
         let encrypted = encrypt_note_data(alice_pub, &plaintext).expect("Encryption failed");
 
         // Bob tries to decrypt.
-        let bob_priv = bob_keys.private.as_ref();
-        let decrypted = decrypt_note_data(bob_priv, &encrypted)
-            .expect("Decryption should handle failure gracefully");
-
-        assert!(decrypted.is_none());
+        let bob = NoteDecryptor::new(&bob_keys.private).expect("key");
+        assert!(bob.open_output(&encrypted).is_none());
     }
 
     #[test]
@@ -768,14 +770,17 @@ mod tests {
         let sig = KeyDerivationSignature(vec![5u8; 64]);
         let keys = derive_keypair_from_signature(&sig)
             .expect("Derivation failed in test_invalid_input_lengths");
-        let pub_key = keys.public.as_ref();
+        let pub_key = &keys.public;
 
         // Invalid plaintext length
         let res = encrypt_note_data(pub_key, &[0u8; 39]);
         assert!(res.is_err());
 
         // Invalid pubkey length
-        let res = encrypt_note_data(&[0u8; 31], &[0u8; 48]);
+        let res = encrypt_note_data(
+            &EncryptionPublicKey(vec![0u8; EncryptionPublicKey::LEN - 1].into_boxed_slice()),
+            &[0u8; 48],
+        );
         assert!(res.is_err());
     }
 
@@ -790,7 +795,8 @@ mod tests {
         let blinding = Field::try_from_le_bytes(blind_le)?;
 
         let encrypted = encrypt_output_note(&recip_keys.public, amount, &blinding)?;
-        let got = decrypt_output_note(&recip_keys.private, &encrypted)?
+        let got = NoteDecryptor::new(&recip_keys.private)?
+            .decrypt_output_note(&encrypted)
             .expect("should decrypt for recipient key");
 
         assert_eq!(got.0, amount);
@@ -801,15 +807,19 @@ mod tests {
     /// Seals an arbitrary plaintext with the note wire format, bypassing the
     /// 48-byte check of `encrypt_note_data`.
     fn seal_raw(recipient: &EncryptionPublicKey, plaintext: &[u8]) -> Vec<u8> {
-        let ephemeral_secret = StaticSecret::from([11u8; 32]);
-        let ephemeral_public = PublicKey::from(&ephemeral_secret);
-        let shared = ephemeral_secret.diffie_hellman(&PublicKey::from(recipient.0));
-        let nonce_bytes = [12u8; 24];
-        let ciphertext = XSalsa20Poly1305::new(shared.as_bytes().into())
-            .encrypt(&Nonce::from(nonce_bytes), plaintext)
+        let recipient =
+            <XWing as KemTrait>::PublicKey::from_bytes(&recipient.0).expect("valid public key");
+        let (enc, ciphertext) =
+            hpke::single_shot_seal_with_rng::<ChaCha20Poly1305, HkdfSha256, XWing>(
+                &OpModeS::Base,
+                &recipient,
+                NOTE_ENCRYPTION_INFO,
+                plaintext,
+                &[],
+                &mut SysRng,
+            )
             .expect("encryption failed");
-        let mut out = ephemeral_public.as_bytes().to_vec();
-        out.extend_from_slice(&nonce_bytes);
+        let mut out = enc.to_bytes().to_vec();
         out.extend_from_slice(&ciphertext);
         out
     }
@@ -817,18 +827,51 @@ mod tests {
     #[test]
     fn test_decrypt_output_note_ignores_malformed_outputs() -> Result<()> {
         let keys = derive_keypair_from_signature(&KeyDerivationSignature(vec![6u8; 64]))?;
+        let decryptor = NoteDecryptor::new(&keys.private)?;
 
-        assert!(decrypt_output_note(&keys.private, &[]).is_ok_and(|n| n.is_none()));
-        assert!(decrypt_output_note(&keys.private, &[1, 2, 3]).is_ok_and(|n| n.is_none()));
+        assert!(decryptor.decrypt_output_note(&[]).is_none());
+        assert!(decryptor.decrypt_output_note(&[1, 2, 3]).is_none());
 
         let wrong_length = seal_raw(&keys.public, &[0u8; 49]);
-        assert!(decrypt_output_note(&keys.private, &wrong_length).is_ok_and(|n| n.is_none()));
+        assert!(decryptor.decrypt_output_note(&wrong_length).is_none());
+
+        let mut tampered = seal_raw(&keys.public, &[0u8; 48]);
+        assert_eq!(tampered.len(), ENCRYPTED_OUTPUT_LEN);
+        tampered[ENCRYPTED_OUTPUT_LEN - 1] ^= 1;
+        assert!(decryptor.decrypt_output_note(&tampered).is_none());
 
         let mut non_canonical_blinding = [0xffu8; 48];
         non_canonical_blinding[..16].copy_from_slice(&5u128.to_le_bytes());
         let non_canonical = seal_raw(&keys.public, &non_canonical_blinding);
-        assert!(decrypt_output_note(&keys.private, &non_canonical).is_ok_and(|n| n.is_none()));
+        assert!(decryptor.decrypt_output_note(&non_canonical).is_none());
         Ok(())
+    }
+}
+
+/// The note encryption runs in the browser, so it is exercised under wasm too.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    fn note_roundtrip_with_derived_xwing_keys() {
+        let keys = derive_keypair_from_signature(&KeyDerivationSignature(vec![5u8; 64]))
+            .expect("derivation");
+        let mut blinding = [0u8; 32];
+        blinding[0] = 1;
+        let blinding = Field::try_from_le_bytes(blinding).expect("field");
+
+        let encrypted =
+            encrypt_output_note(&keys.public, NoteAmount::from(42), &blinding).expect("encrypt");
+        assert_eq!(encrypted.len(), ENCRYPTED_OUTPUT_LEN);
+
+        let (amount, got) = NoteDecryptor::new(&keys.private)
+            .expect("key")
+            .decrypt_output_note(&encrypted)
+            .expect("addressed to the key");
+        assert_eq!(amount, NoteAmount::from(42));
+        assert_eq!(got.to_le_bytes(), blinding.to_le_bytes());
     }
 }
 
@@ -867,10 +910,10 @@ mod registration_tests {
             0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
             0x1d, 0x1e, 0x1f, 0x20,
         ]);
-        let encryption_key = encryption_edwards_key(&derived_encryption_keys()[0].private);
+        let encryption_key = derived_encryption_keys().remove(0).public;
         let account = public_key_registry::Account {
             owner: Address::from_str(&env, OWNER),
-            encryption_key: Bytes::from_array(&env, &encryption_key),
+            encryption_key: Bytes::from_slice(&env, &encryption_key.0),
             note_key: Bytes::from_array(&env, &note_key.0),
         };
 
@@ -884,8 +927,8 @@ mod registration_tests {
             digest
         );
         assert_eq!(
-            REGISTRY_ENCRYPTION_KEY_TAG,
-            public_key_registry::ENCRYPTION_KEY_TAG
+            u32::try_from(encryption_key.0.len()).expect("fits"),
+            public_key_registry::ENCRYPTION_KEY_LEN
         );
 
         // [0xff; 32] is above r, so it checks the reduction as well.
@@ -897,64 +940,216 @@ mod registration_tests {
             );
         }
     }
+}
 
+/// Known-answer tests. Everything here is derived from a fixed signature and
+/// pinned, so a change in key derivation, X-Wing or the HPKE wire format (for
+/// example from an `hpke` upgrade) fails here instead of making existing
+/// accounts unable to recover their keys or read their notes.
+///
+/// Changing any value below means every user's keys or notes change. Do not
+/// update a vector to make a test pass without a migration plan.
+#[cfg(test)]
+mod known_answer_tests {
+    use super::*;
+
+    /// The seed of the X-Wing key must be wiped when the key is dropped, which
+    /// a `NoteDecryptor` now keeps alive for a whole scan batch. hpke enables
+    /// x-wing's `zeroize` feature itself; this stops compiling if it ever
+    /// stops.
     #[test]
-    fn edwards_key_is_the_x25519_public_key() {
-        for keys in derived_encryption_keys() {
-            let edwards = VerifyingKey::from_bytes(&encryption_edwards_key(&keys.private))
-                .expect("a valid point");
-            assert_eq!(edwards.to_montgomery().to_bytes(), keys.public.0);
+    fn the_xwing_key_is_wiped_on_drop() {
+        fn assert_zeroize_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+        assert_zeroize_on_drop::<x_wing::DecapsulationKey>();
+    }
+
+    use std::vec;
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    /// Not a real signature: bytes `0..64`.
+    fn signature() -> KeyDerivationSignature {
+        KeyDerivationSignature((0u8..64).collect::<vec::Vec<u8>>())
+    }
+
+    const NOTE_PRIVATE_KEY: &str =
+        "93cffddaf98d0ce3c510f565f085bcc61ec42855dd2defb559dbe466bc1af52f";
+    const NOTE_PUBLIC_KEY: &str =
+        "efbecb60293baa5cf5900a6ea8a72f03b77dfbbb2b12f3dbcaf38983dcca5223";
+    const ENCRYPTION_PRIVATE_KEY: &str =
+        "fcf5e5865468219941ccc3d53bc582ae19438f441fd1673bdc01f4e561b70ed2";
+    /// First 32 bytes of the 1216-byte public key; the hash below covers all of
+    /// it.
+    const ENCRYPTION_PUBLIC_KEY_HEAD: &str =
+        "2e0909419c9707d9269883a4222b433a8ca83c1c6e10981e4c75a2d8267a50d2";
+    const ENCRYPTION_PUBLIC_KEY_SHA256: &str =
+        "3d8177da5d142a790ac7ca4cf3643942039229cd44e03e603268c8a59f64c131";
+    const MEMBERSHIP_BLINDING_TESTNET: &str =
+        "6f376451fe6b541ef08331b62ca9d092d64fe71a9b9ad0785ff4cedad2a79820";
+    /// A 1184-byte note ciphertext produced once for the keys above with
+    /// amount 1234567 and blinding `[9; 32]`.
+    const NOTE_CIPHERTEXT: &str = include_str!("testdata/note_ciphertext.hex");
+    const NOTE_AMOUNT: u128 = 1_234_567;
+    const NOTE_BLINDING: [u8; 32] = [9; 32];
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn keys_derived_from_a_fixed_signature_are_pinned() {
+        let (note, enc) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
+        assert_eq!(hex::encode(note.private.0), NOTE_PRIVATE_KEY);
+        assert_eq!(hex::encode(note.public.0), NOTE_PUBLIC_KEY);
+        assert_eq!(hex::encode(enc.private.0), ENCRYPTION_PRIVATE_KEY);
+        assert_eq!(enc.public.0.len(), EncryptionPublicKey::LEN);
+        assert_eq!(hex::encode(&enc.public.0[..32]), ENCRYPTION_PUBLIC_KEY_HEAD);
+        assert_eq!(
+            hex::encode(Sha256::digest(&enc.public.0)),
+            ENCRYPTION_PUBLIC_KEY_SHA256
+        );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn membership_blinding_from_a_fixed_signature_is_pinned() {
+        let blinding = derive_membership_blinding(&signature(), "testnet").expect("derivation");
+        assert_eq!(
+            hex::encode(blinding.to_le_bytes()),
+            MEMBERSHIP_BLINDING_TESTNET
+        );
+    }
+
+    /// Decapsulation and decryption of a stored ciphertext must keep working:
+    /// notes already on chain were encrypted by an earlier build.
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn a_pinned_ciphertext_still_decrypts() {
+        let (_, enc) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
+        let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
+        assert_eq!(ciphertext.len(), 1184);
+        let (amount, blinding) = NoteDecryptor::new(&enc.private)
+            .expect("key")
+            .decrypt_output_note(&ciphertext)
+            .expect("note addressed to this key");
+        assert_eq!(amount, NoteAmount::from(NOTE_AMOUNT));
+        assert_eq!(
+            blinding.to_le_bytes(),
+            Field::try_from_le_bytes(NOTE_BLINDING)
+                .expect("blinding")
+                .to_le_bytes()
+        );
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn a_prepared_key_decrypts_many_outputs() {
+        let (_, enc) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
+        let decryptor = NoteDecryptor::new(&enc.private).expect("key");
+        let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
+
+        // The same prepared key keeps working for further outputs.
+        for _ in 0..2 {
+            let (amount, blinding) = decryptor
+                .decrypt_output_note(&ciphertext)
+                .expect("note addressed to this key");
+            assert_eq!(amount, NoteAmount::from(NOTE_AMOUNT));
+            assert_eq!(
+                blinding.to_le_bytes(),
+                Field::try_from_le_bytes(NOTE_BLINDING)
+                    .expect("blinding")
+                    .to_le_bytes()
+            );
         }
     }
 
-    /// Write-once compares key bytes, so the encoding must not change.
-    #[test]
-    fn edwards_key_encoding_is_pinned() {
-        let secret = EncryptionPrivateKey([0x42; 32]);
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn a_prepared_key_skips_what_is_not_addressed_to_it() {
+        let other = KeyDerivationSignature(vec![1u8; 64]);
+        let (_, enc) = derive_encryption_and_note_keypairs(other).expect("derivation");
+        let decryptor = NoteDecryptor::new(&enc.private).expect("key");
+        let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
+        assert!(decryptor.decrypt_output_note(&ciphertext).is_none());
+
+        let mut tampered = ciphertext.clone();
+        tampered[ENCRYPTED_OUTPUT_LEN - 1] ^= 1;
+        let (_, mine) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
+        let mine = NoteDecryptor::new(&mine.private).expect("key");
+        assert!(mine.decrypt_output_note(&tampered).is_none());
+        for len in [0, 1, ENCRYPTED_OUTPUT_LEN - 1, ENCRYPTED_OUTPUT_LEN + 1] {
+            assert!(mine.decrypt_output_note(&vec![7u8; len]).is_none(), "{len}");
+        }
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn a_prepared_key_does_not_print() {
+        let (_, enc) = derive_encryption_and_note_keypairs(signature()).expect("derivation");
+        let decryptor = NoteDecryptor::new(&enc.private).expect("key");
+        let printed = format!("{decryptor:?}");
+        assert_eq!(printed, "NoteDecryptor(<redacted>)");
+        assert!(!printed.contains(&hex::encode(enc.private.0)));
+    }
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn a_pinned_ciphertext_is_not_readable_by_another_key() {
+        let other = KeyDerivationSignature(vec![1u8; 64]);
+        let (_, enc) = derive_encryption_and_note_keypairs(other).expect("derivation");
+        let ciphertext = hex::decode(NOTE_CIPHERTEXT.trim()).expect("hex");
+        let decryptor = NoteDecryptor::new(&enc.private).expect("key");
+        assert!(decryptor.decrypt_output_note(&ciphertext).is_none());
+    }
+
+    /// Signature of the real `stellar message sign` vector in
+    /// `signer::local` (a genuine 64-byte Ed25519 SEP-53 signature).
+    const CLI_SIGNATURE_B64: &str =
+        "sVN7t6f95HnWra/b23AqHVVhEXlS2wEBd2Sng7yqHjRKoieWbmbGNnFQST+L08ON4YrUYp9NMaJhdMT0w6jHDg==";
+
+    /// Starts from a real wallet signature, so the derivation is pinned from
+    /// what a signer actually returns, not from made-up bytes.
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn keys_derived_from_a_real_wallet_signature_are_pinned() {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        let bytes = STANDARD.decode(CLI_SIGNATURE_B64).expect("base64");
+        let (note, enc) =
+            derive_encryption_and_note_keypairs(KeyDerivationSignature(bytes)).expect("keys");
         assert_eq!(
-            hex::encode(encryption_edwards_key(&secret)),
-            "ef75b20e7540e3dff77404193652ba2bd13df99c1508eee1515e27ae25f28076"
+            hex::encode(note.private.0),
+            "427ef402c9f0a1acfce1a241ef21941fd06d5702c01cd91a77ba25b441bac029"
+        );
+        assert_eq!(
+            hex::encode(note.public.0),
+            "2c7cd526dbb6490b01ec386b8cf663737c6172b57413e7ee28c2e55128cafd23"
+        );
+        assert_eq!(
+            hex::encode(enc.private.0),
+            "21209c6ef67311ee14c73275a229848b682817e8929ec937f1f4b2ae416fe314"
+        );
+        assert_eq!(
+            hex::encode(Sha256::digest(&enc.public.0)),
+            "3ed452037a37054da3a15456cedea2a6ecf42a1fb78ba940098cbdefa943531f"
         );
     }
 
-    #[test]
-    fn encryption_key_signature_verifies_strictly_over_the_tagged_challenge() {
-        let keys = &derived_encryption_keys()[1];
-        let digest = [0x5a; 32];
-        let signature =
-            DalekSignature::from_bytes(&sign_encryption_key_ownership(&keys.private, &digest));
-        let key = VerifyingKey::from_bytes(&encryption_edwards_key(&keys.private))
-            .expect("a valid point");
-        let challenge = |digest: &[u8; 32]| -> [u8; 32] {
-            Sha256::digest(
-                [
-                    b"privacy-pool/registry/encryption-key/v1".as_slice(),
-                    digest,
-                ]
-                .concat(),
-            )
-            .into()
-        };
-
-        assert!(key.verify_strict(&challenge(&digest), &signature).is_ok());
-        assert!(
-            key.verify_strict(&challenge(&[0x5b; 32]), &signature)
-                .is_err()
+    /// Shared with `contracts/public-key-registry` (`registration_vector`),
+    /// so the wallet and the registry cannot drift apart.
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
+    fn the_registration_digest_and_hash_are_pinned() {
+        let message = registration_message(
+            "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPP4V",
+            &NotePublicKey([0x11; 32]),
+            &EncryptionPublicKey::try_from(vec![0x22u8; EncryptionPublicKey::LEN]).expect("key"),
         );
-        assert!(key.verify_strict(&digest, &signature).is_err());
-    }
-
-    #[test]
-    fn encryption_key_signature_is_deterministic() {
-        let keys = &derived_encryption_keys()[2];
-        let first = sign_encryption_key_ownership(&keys.private, &[0x5a; 32]);
+        let digest = registration_digest(&message);
         assert_eq!(
-            first,
-            sign_encryption_key_ownership(&keys.private, &[0x5a; 32])
+            hex::encode(digest),
+            "a39ca7d52271b2b022415282ca44544ffd86fea8c982bd3178c7415f0fb1631c"
         );
-        assert_ne!(
-            first,
-            sign_encryption_key_ownership(&keys.private, &[0x5b; 32])
+        assert_eq!(
+            hex::encode(registration_hash(&digest).to_le_bytes()),
+            "1963b13fa36021ad7d6b565ccf45eb84384bc0455f8150f932d2dc7e7cbc6f12"
         );
     }
 }

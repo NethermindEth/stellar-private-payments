@@ -12,7 +12,6 @@ use crate::{
     zk::encryption::{registration_message, verify_owner_signature},
 };
 use anyhow::{Result, anyhow};
-use ed25519_dalek::VerifyingKey;
 
 /// Field name emitted by `contracts/pool-gvk`'s pool events, carrying the
 /// admin-decryptable ciphertext of the note.
@@ -153,7 +152,7 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
 //     /// Address of the account owner
 //     #[topic]
 //     pub owner: Address,
-//     /// Edwards encoding of the X25519 encryption public key
+//     /// Public key notes are encrypted to
 //     pub encryption_key: Bytes,
 //     /// BN254 note public key
 //     pub note_key: Bytes,
@@ -164,11 +163,10 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
 // An event is indexed only after its owner signature verifies over the
 // registration message built from the emitting contract, the owner and both
 // keys, so a lying RPC or bootnode cannot substitute keys the owner did not
-// sign. The encryption key is stored in its X25519 form. The registry
+// sign. The encryption key is stored as registered. The registry
 // guarantees the event's shape, so a malformed field can only come from a
-// lying source: it skips the event, like a missing or invalid signature or a
-// key that is not a curve point, since a parse error stops all later
-// processing.
+// lying source: it skips the event, like a missing or invalid signature, since
+// a parse error stops all later processing.
 fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<Option<PublicKeyEvent>> {
     let ParsedContractEvent {
         id,
@@ -184,12 +182,12 @@ fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<Option<PublicKe
         tracing::warn!(%id, "skipping a registration without an owner address");
         return Ok(None);
     };
-    let Some(edwards) = values
+    let Some(encryption_key) = values
         .get("encryption_key")
         .and_then(|key| scval_to_bytes(key).ok())
-        .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+        .and_then(|bytes| EncryptionPublicKey::try_from(bytes).ok())
     else {
-        tracing::warn!(%id, "skipping a registration without a 32-byte encryption key");
+        tracing::warn!(%id, "skipping a registration without a valid encryption key");
         return Ok(None);
     };
     let Some(note_key) = values
@@ -212,7 +210,7 @@ fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<Option<PublicKe
         tracing::warn!(%id, "skipping a registration whose owner signature is not 64 bytes");
         return Ok(None);
     };
-    let message = registration_message(&contract_id, &owner, &note_key, &edwards);
+    let message = registration_message(&contract_id, &owner, &note_key, &encryption_key);
     if verify_owner_signature(
         &owner,
         &message,
@@ -223,14 +221,10 @@ fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<Option<PublicKe
         tracing::warn!(%id, "skipping a registration whose owner signature is invalid");
         return Ok(None);
     }
-    let Ok(encryption_key) = VerifyingKey::from_bytes(&edwards) else {
-        tracing::warn!(%id, "skipping a registration whose encryption key is not a curve point");
-        return Ok(None);
-    };
     Ok(Some(PublicKeyEvent {
         id,
         owner,
-        encryption_key: EncryptionPublicKey(encryption_key.to_montgomery().to_bytes()),
+        encryption_key,
         note_key,
     }))
 }

@@ -48,7 +48,6 @@ fn creates_encrypted_storage_and_unlocks_after_restart() -> Result<()> {
     })?;
     assert_eq!(calls, 2);
     open(&f.db(), &key)?.set_setting_json("test", &"private marker")?;
-    assert!(!encrypted_migration::is_plaintext_file(&f.db())?);
     assert!(
         !fs::read(f.db())?
             .windows(14)
@@ -112,41 +111,6 @@ fn interrupted_creation_reuses_record_for_missing_and_empty_database() -> Result
         drop(open(&f.0.join("backup.db"), &recovered)?);
         fs::remove_file(f.db())?;
     }
-    Ok(())
-}
-#[test]
-fn failed_migration_preserves_plaintext_and_retries_with_saved_record() -> Result<()> {
-    let f = Fixture::new()?;
-    let legacy = rusqlite::Connection::open(f.db())?;
-    legacy.execute_batch(include_str!("schema.sql"))?;
-    legacy.execute(
-        "INSERT INTO app_settings (key, value) VALUES ('test', ?1)",
-        ["\"preserved\""],
-    )?;
-    legacy.pragma_update(None, "user_version", 1)?;
-    drop(legacy);
-    // Simulate a filesystem failure before the staging database can be created.
-    fs::create_dir(f.0.join("spp.db.encrypting"))?;
-    let plaintext = fs::read(f.db())?;
-    assert!(unlock_with(&f.db(), &address(), &mut sign).is_err());
-    assert_eq!(plaintext, fs::read(f.db())?);
-    let record = fs::read(record_path(&f.db()))?;
-    let context = wallet_vault::context(&record_path(&f.db()))?
-        .expect("failed migration retains wallet context");
-    let saved = wallet_vault::unlock(
-        &record_path(&f.db()),
-        &context,
-        &secret(&context, &mut sign)?,
-    )?;
-    fs::remove_dir(f.0.join("spp.db.encrypting"))?;
-    let recovered = unlock_with(&f.db(), &address(), &mut sign)?;
-    assert_eq!(*saved, *recovered);
-    assert_eq!(record, fs::read(record_path(&f.db()))?);
-    assert_eq!(
-        open(&f.db(), &recovered)?.get_setting_json::<String>("test")?,
-        Some("preserved".into())
-    );
-    assert!(!encrypted_migration::is_plaintext_file(&f.db())?);
     Ok(())
 }
 #[test]

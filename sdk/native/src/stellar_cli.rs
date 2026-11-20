@@ -80,10 +80,12 @@ fn run(args: &[String], config_dir: Option<&Path>) -> Result<Zeroizing<String>> 
             stderr.trim()
         );
     }
-    let stdout = Zeroizing::new(
-        String::from_utf8(output.stdout).context("stellar CLI produced non-UTF-8 output")?,
-    );
-    Ok(Zeroizing::new(stdout.trim().to_string()))
+    // The output can be the privacy-key signature. `String::from_utf8` would
+    // keep the raw bytes inside its error, out of reach of the wipe, so decode
+    // from a borrowed, wiped buffer instead.
+    let stdout = Zeroizing::new(output.stdout);
+    let text = std::str::from_utf8(&stdout).context("stellar CLI produced non-UTF-8 output")?;
+    Ok(Zeroizing::new(text.trim().to_string()))
 }
 
 /// Resolve an alias to its Stellar address (`G…`) via `stellar keys

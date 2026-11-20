@@ -524,6 +524,7 @@ fn validate_beacon_hash(value: &str) -> Result<()> {
 }
 
 mod export_deployment;
+mod zkey;
 
 /// Prints contributor guidance after a ceremony step.
 fn print_next_steps(zkey_path: &Path, actions: &[&str]) {

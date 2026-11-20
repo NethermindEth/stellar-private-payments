@@ -1,10 +1,10 @@
 use super::*;
 use ark_bn254::{Bn254, Fr as ArkFr};
-use ark_circom::CircomReduction;
 use ark_ff::{BigInteger, Field, PrimeField};
 use ark_groth16::{Groth16, Proof};
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable};
 use ark_std::rand::{SeedableRng, rngs::StdRng};
+use circuits::circom_compat::CircomReduction;
 use contract_types::PROOF_SIZE;
 use soroban_sdk::{Bytes, BytesN, Env, U256, Vec};
 use soroban_utils::{

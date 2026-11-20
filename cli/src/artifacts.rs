@@ -306,7 +306,9 @@ mod tests {
         let pool = &config.deployment.pools[0];
         let proof = engine.prove_transact(TransactParams {
             priv_key: NotePrivateKey([1; 32]),
-            encryption_pubkey: EncryptionPublicKey([2; 32]),
+            encryption_pubkey: EncryptionPublicKey(
+                vec![2; EncryptionPublicKey::LEN].into_boxed_slice(),
+            ),
             pool_root: Field::ZERO,
             pool_address: pool.pool_contract_id.clone(),
             token_address: pool.token_contract_id.clone(),

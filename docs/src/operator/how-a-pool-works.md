@@ -100,7 +100,7 @@ signs the message below, where `KDF_DOMAIN` is the deployment's KDF domain, and 
 table comes from that one signature:
 
 ```text
-Privacy Pool Key Derivation [v3] (KDF_DOMAIN)
+Privacy Pool Key Derivation [v1] (KDF_DOMAIN)
 WARNING: signing this gives full control of your private funds. Only sign in the Stellar Private Payments app or CLI.
 ```
 
