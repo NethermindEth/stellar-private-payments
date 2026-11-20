@@ -30,7 +30,7 @@ jobs:
       CC_x86_64_unknown_linux_musl: musl-gcc
       AR_x86_64_unknown_linux_musl: ar
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install target compiler
         if: matrix.target == 'x86_64-unknown-linux-musl'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
@@ -74,12 +74,12 @@ jobs:
       CC_wasm32_unknown_unknown: clang-18
       AR_wasm32_unknown_unknown: llvm-ar-18
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install repository Rust toolchain
         run: rustup show active-toolchain
       # No Rust cache: a hit saves about 3.5 minutes on a job off the critical
       # path, and its ~600 MB entry evicts caches the longer test jobs need.
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
           cache: npm
@@ -119,14 +119,14 @@ jobs:
         # rebuild artifacts after the browser tests.
         run: node sdk/web/scripts/check-sqlite3mc-package.js --output-directory target/sqlite3mc-package
       - name: Upload verified encrypted package
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sqlite3mc-web-sdk-${{ github.sha }}
           path: target/sqlite3mc-package/*
           if-no-files-found: error
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sqlite3mc-browser-checks-${{ github.sha }}
           path: |
