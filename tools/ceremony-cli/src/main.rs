@@ -35,16 +35,31 @@ enum Commands {
     ExportDeployment(ExportDeploymentArgs),
 }
 
-/// Shared init arguments.
-#[derive(Debug, clap::Args)]
-struct CeremonyArgs {
-    /// Path to the `.r1cs` file. If omitted, auto-discovers
+/// Circuit and Powers of Tau a zkey is built from and verified against.
+#[derive(Clone, Debug, clap::Args)]
+struct SetupArgs {
+    /// Path to the `.r1cs` file. If omitted, auto-discovers the compiled
     /// `policy_tx_2_2_AB.r1cs` from the Cargo build output directory.
     #[arg(short = 'c', long = "circuit")]
     circuits: Option<PathBuf>,
-    /// Input Powers of Tau file.
+    /// Powers of Tau file.
     #[arg(short = 'p', long = "ptau")]
     ptau: PathBuf,
+}
+
+impl SetupArgs {
+    /// Checks the ptau file exists and resolves the circuit path.
+    fn resolve(&self) -> Result<PathBuf> {
+        assert_readable_file(&self.ptau, "ptau")?;
+        resolve_circuits(&self.circuits)
+    }
+}
+
+/// Shared init arguments.
+#[derive(Debug, clap::Args)]
+struct CeremonyArgs {
+    #[command(flatten)]
+    setup: SetupArgs,
     /// Output zkey path.
     #[arg(short = 'o', long = "output")]
     output: PathBuf,
@@ -59,13 +74,8 @@ struct ContributeArgs {
     /// Input zkey to contribute to.
     #[arg(short = 'z', long = "zkey")]
     zkey: PathBuf,
-    /// Path to the `.r1cs` file. If omitted, auto-discovers the compiled
-    /// `policy_tx_2_2_AB.r1cs` from the Cargo build output directory.
-    #[arg(short = 'c', long = "circuit")]
-    circuits: Option<PathBuf>,
-    /// Input Powers of Tau file.
-    #[arg(short = 'p', long = "ptau")]
-    ptau: PathBuf,
+    #[command(flatten)]
+    setup: SetupArgs,
     /// Output zkey path with your contribution.
     #[arg(short = 'o', long = "output")]
     output: PathBuf,
@@ -83,13 +93,8 @@ struct FinalizeArgs {
     /// Input zkey to finalize.
     #[arg(short = 'z', long = "zkey")]
     zkey: PathBuf,
-    /// Path to the `.r1cs` file. If omitted, auto-discovers the compiled
-    /// `policy_tx_2_2_AB.r1cs` from the Cargo build output directory.
-    #[arg(short = 'c', long = "circuit")]
-    circuits: Option<PathBuf>,
-    /// Input Powers of Tau file.
-    #[arg(short = 'p', long = "ptau")]
-    ptau: PathBuf,
+    #[command(flatten)]
+    setup: SetupArgs,
     /// Beacon hash in hex.
     #[arg(long = "beacon-hash")]
     beacon_hash: String,
@@ -113,14 +118,8 @@ struct ExportDeploymentArgs {
     /// Final ceremony zkey.
     #[arg(short = 'z', long = "zkey")]
     zkey: PathBuf,
-    /// Path to the `.r1cs` file the zkey is verified against. If omitted,
-    /// auto-discovers the compiled `policy_tx_2_2_AB.r1cs` from the Cargo
-    /// build output directory.
-    #[arg(short = 'c', long = "circuit")]
-    circuits: Option<PathBuf>,
-    /// Powers of Tau file the zkey is verified against.
-    #[arg(short = 'p', long = "ptau")]
-    ptau: PathBuf,
+    #[command(flatten)]
+    setup: SetupArgs,
     /// Output directory for generated files.
     #[arg(short = 'o', long = "out-dir")]
     out_dir: PathBuf,
@@ -194,22 +193,20 @@ fn execute(cli: Cli, runner: &dyn CommandRunner) -> Result<()> {
 
 /// Runs setup initialization for the selected circuit.
 fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
-    assert_readable_file(&args.ptau, "ptau")?;
+    let circuit = args.setup.resolve()?;
     assert_output_allowed(&args.output, args.force)?;
-
-    let circuit = resolve_circuits(&args.circuits)?;
 
     let cmd = vec![
         OsString::from("groth16"),
         OsString::from("setup"),
         circuit.as_os_str().to_owned(),
-        args.ptau.as_os_str().to_owned(),
+        args.setup.ptau.as_os_str().to_owned(),
         args.output.as_os_str().to_owned(),
     ];
     runner.run("snarkjs", &cmd)?;
     print_file_size(&args.output)?;
 
-    verify_zkey(runner, &circuit, &args.ptau, &args.output)?;
+    verify_zkey(runner, &circuit, &args.setup.ptau, &args.output)?;
 
     print_next_steps(
         &args.output,
@@ -222,10 +219,9 @@ fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
 /// Runs contribution and immediate verification.
 fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
     assert_readable_file(&args.zkey, "input zkey")?;
-    assert_readable_file(&args.ptau, "ptau")?;
-    let circuit = resolve_circuits(&args.circuits)?;
+    let circuit = args.setup.resolve()?;
 
-    verify_zkey(runner, &circuit, &args.ptau, &args.zkey)?;
+    verify_zkey(runner, &circuit, &args.setup.ptau, &args.zkey)?;
 
     assert_output_allowed(&args.output, args.force)?;
 
@@ -247,7 +243,7 @@ fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
     drop(entropy_flag);
     drop(entropy);
 
-    verify_zkey(runner, &circuit, &args.ptau, &args.output)?;
+    verify_zkey(runner, &circuit, &args.setup.ptau, &args.output)?;
 
     print_next_steps(
         &args.output,
@@ -263,9 +259,8 @@ fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
 /// Finalizes ceremony artifacts in one compact command.
 fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
     assert_readable_file(&args.zkey, "input zkey")?;
-    assert_readable_file(&args.ptau, "ptau")?;
     assert_dir_exists(&args.out_dir)?;
-    let circuit = resolve_circuits(&args.circuits)?;
+    let circuit = args.setup.resolve()?;
 
     let final_zkey = args.out_dir.join(format!("{}_final.zkey", args.basename));
     let vkey_json = args
@@ -288,7 +283,7 @@ fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
     runner.run("snarkjs", &beacon_cmd)?;
     print_file_size(&final_zkey)?;
 
-    verify_zkey(runner, &circuit, &args.ptau, &final_zkey)?;
+    verify_zkey(runner, &circuit, &args.setup.ptau, &final_zkey)?;
 
     let export_vkey_cmd = vec![
         OsString::from("zkey"),
@@ -464,7 +459,7 @@ fn discover_r1cs(name: &str) -> Result<PathBuf> {
 
     bail!(
         "no compiled circuit `{name}` found.\n\
-         Run `make circuits` first, or pass --circuits <path> explicitly."
+         Run `make circuits` first, or pass --circuit <path> explicitly."
     )
 }
 
@@ -562,6 +557,16 @@ mod tests {
         fail_verify: bool,
     }
 
+    impl MockRunner {
+        fn calls(&self) -> Result<Vec<String>> {
+            Ok(self
+                .calls
+                .lock()
+                .map_err(|_| anyhow!("failed to lock mock calls"))?
+                .clone())
+        }
+    }
+
     impl CommandRunner for MockRunner {
         fn run(&self, program: &str, args: &[OsString]) -> Result<()> {
             let entry = format_command(program, args);
@@ -591,25 +596,34 @@ mod tests {
         }
     }
 
-    #[test]
-    fn ceremony_e2e_flow() -> Result<()> {
-        let temp = temp_dir()?;
+    /// Creates placeholder circuit and ptau files plus an empty output dir.
+    fn setup_files(temp: &Path) -> Result<(SetupArgs, PathBuf)> {
         let circuit = temp.join("circuit.r1cs");
         let ptau = temp.join("powers.ptau");
-        let zkey0 = temp.join("init.zkey");
-        let zkey1 = temp.join("contrib.zkey");
         let out_dir = temp.join("out");
         fs::create_dir_all(&out_dir)?;
         fs::write(&circuit, "circuit")?;
         fs::write(&ptau, "ptau")?;
+        let setup = SetupArgs {
+            circuits: Some(circuit),
+            ptau,
+        };
+        Ok((setup, out_dir))
+    }
+
+    #[test]
+    fn ceremony_e2e_flow() -> Result<()> {
+        let temp = temp_dir()?;
+        let (setup, out_dir) = setup_files(&temp)?;
+        let zkey0 = temp.join("init.zkey");
+        let zkey1 = temp.join("contrib.zkey");
 
         let runner = MockRunner::default();
 
         execute(
             Cli {
                 command: Commands::Init(CeremonyArgs {
-                    circuits: Some(circuit.clone()),
-                    ptau: ptau.clone(),
+                    setup: setup.clone(),
                     output: zkey0.clone(),
                     force: false,
                 }),
@@ -621,8 +635,7 @@ mod tests {
             Cli {
                 command: Commands::Contribute(ContributeArgs {
                     zkey: zkey0.clone(),
-                    circuits: Some(circuit.clone()),
-                    ptau: ptau.clone(),
+                    setup: setup.clone(),
                     output: zkey1.clone(),
                     name: String::from("alice"),
                     force: false,
@@ -635,8 +648,7 @@ mod tests {
             Cli {
                 command: Commands::Finalize(FinalizeArgs {
                     zkey: zkey1.clone(),
-                    circuits: Some(circuit.clone()),
-                    ptau: ptau.clone(),
+                    setup,
                     beacon_hash: String::from("0123456789abcdef0123456789abcdef"),
                     beacon_power: 10,
                     out_dir: out_dir.clone(),
@@ -647,11 +659,7 @@ mod tests {
             &runner,
         )?;
 
-        let calls = runner
-            .calls
-            .lock()
-            .map_err(|_| anyhow!("failed to lock mock calls"))?
-            .clone();
+        let calls = runner.calls()?;
 
         assert!(calls.iter().any(|line| line.contains("groth16 setup")));
         assert!(calls.iter().any(|line| line.contains("zkey contribute")));
@@ -676,70 +684,76 @@ mod tests {
         Ok(())
     }
 
-    fn export_args(temp: &Path) -> Result<(ExportDeploymentArgs, PathBuf)> {
-        let circuit = temp.join("circuit.r1cs");
-        let ptau = temp.join("powers.ptau");
+    /// Runs `export-deployment` on a zkey with the given contents and returns
+    /// the result, the runner calls, and the number of files written.
+    fn run_export(
+        zkey_bytes: &[u8],
+        runner: &MockRunner,
+    ) -> Result<(Result<()>, Vec<String>, usize)> {
+        let temp = temp_dir()?;
+        let (setup, out_dir) = setup_files(&temp)?;
         let zkey = temp.join("final.zkey");
-        let out_dir = temp.join("out");
-        fs::create_dir_all(&out_dir)?;
-        fs::write(&circuit, "circuit")?;
-        fs::write(&ptau, "ptau")?;
-        fs::write(&zkey, "mock-zkey-content")?;
+        fs::write(&zkey, zkey_bytes)?;
 
-        let args = ExportDeploymentArgs {
-            zkey,
-            circuits: Some(circuit),
-            ptau,
-            out_dir: out_dir.clone(),
-            basename: String::from("demo"),
-            force: false,
-        };
-        Ok((args, out_dir))
+        let result = execute(
+            Cli {
+                command: Commands::ExportDeployment(ExportDeploymentArgs {
+                    zkey,
+                    setup,
+                    out_dir: out_dir.clone(),
+                    basename: String::from("demo"),
+                    force: false,
+                }),
+            },
+            runner,
+        );
+        let written = fs::read_dir(&out_dir)?.count();
+
+        fs::remove_dir_all(&temp)?;
+        Ok((result, runner.calls()?, written))
+    }
+
+    fn valid_zkey() -> Vec<u8> {
+        let g = ark_bn254::G1Affine::new_unchecked(
+            ark_bn254::g1::G1_GENERATOR_X,
+            ark_bn254::g1::G1_GENERATOR_Y,
+        );
+        zkey::tests::minimal_zkey(&g)
+    }
+
+    #[test]
+    fn export_deployment_writes_verified_zkey() -> Result<()> {
+        let (result, calls, written) = run_export(&valid_zkey(), &MockRunner::default())?;
+
+        result?;
+        assert!(calls.iter().any(|line| line.contains("zkey verify")));
+        assert_eq!(written, 4);
+        Ok(())
     }
 
     #[test]
     fn export_deployment_requires_verified_zkey() -> Result<()> {
-        let temp = temp_dir()?;
-        let (args, out_dir) = export_args(&temp)?;
         let runner = MockRunner {
             fail_verify: true,
             ..MockRunner::default()
         };
-
-        let result = execute(
-            Cli {
-                command: Commands::ExportDeployment(args),
-            },
-            &runner,
-        );
+        let (result, _, written) = run_export(&valid_zkey(), &runner)?;
 
         assert!(result.is_err());
-        assert_eq!(fs::read_dir(&out_dir)?.count(), 0);
-
-        fs::remove_dir_all(&temp)?;
+        assert_eq!(written, 0);
         Ok(())
     }
 
     #[test]
     fn export_deployment_rejects_malformed_zkey() -> Result<()> {
-        let temp = temp_dir()?;
-        let (args, out_dir) = export_args(&temp)?;
-        let runner = MockRunner::default();
-
-        let result = execute(
-            Cli {
-                command: Commands::ExportDeployment(args),
-            },
-            &runner,
-        );
+        let (result, calls, written) = run_export(b"mock-zkey-content", &MockRunner::default())?;
 
         let err = result
             .err()
             .ok_or_else(|| anyhow!("expected parse error"))?;
         assert!(err.to_string().contains("failed to parse snarkjs zkey"));
-        assert_eq!(fs::read_dir(&out_dir)?.count(), 0);
-
-        fs::remove_dir_all(&temp)?;
+        assert!(calls.is_empty());
+        assert_eq!(written, 0);
         Ok(())
     }
 
@@ -754,7 +768,6 @@ mod tests {
     }
 
     fn touch(path: &Path) -> Result<()> {
-        // fs::write(path, "")?;
         fs::write(path, "mock-zkey-content")?;
         Ok(())
     }

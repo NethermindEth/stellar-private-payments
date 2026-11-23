@@ -951,7 +951,6 @@ dependencies = [
  "ark-ff 0.6.0",
  "ark-groth16",
  "ark-serialize 0.6.0",
- "ark-std 0.6.0",
  "byteorder",
  "circuit-keys",
  "clap",
