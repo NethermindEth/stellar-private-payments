@@ -169,4 +169,45 @@ mod tests {
 
         assert_eq!(got, expected);
     }
+
+    /// Pinned outputs for fixed inputs (32-byte little-endian small integers).
+    /// These hashes are what the circuits and contracts recompute, so changing
+    /// one breaks every existing note, nullifier and tree leaf.
+    #[test]
+    fn poseidon_derived_values_are_pinned() {
+        let n = |v: u8| {
+            let mut b = [0u8; 32];
+            b[0] = v;
+            b
+        };
+        let h = |bytes: Vec<u8>| hex::encode(bytes);
+
+        assert_eq!(
+            h(derive_public_key(&n(5)).expect("public key")),
+            "188600ca9158a0d4226526b5d68e3f2d5f480fdeeb13b8127f1ef60a2478b82a"
+        );
+        let commitment = compute_commitment(&n(1), &n(2), &n(3)).expect("commitment");
+        assert_eq!(
+            h(commitment.clone()),
+            "c5276960d78e83fd6a0b9be2e3217cb12924dd9f9833be216529f7a7f123e72b"
+        );
+        let signature = compute_signature(&n(5), &commitment, &n(6)).expect("signature");
+        assert_eq!(
+            h(signature.clone()),
+            "7b9aa2600ada2a07d401c46273c283e8f0d1cd80d5732aa98508bf8c6b858c1b"
+        );
+        assert_eq!(
+            h(compute_nullifier(&commitment, &n(7), &signature).expect("nullifier")),
+            "0a478275d6ef0c2401d834c642eeff4e2f884dcff38f08b646c579881a01f31f"
+        );
+        let leaf = asp_membership_leaf(
+            &NotePublicKey(n(2)),
+            &AppField::try_from_le_bytes(n(3)).expect("blinding"),
+        )
+        .expect("leaf");
+        assert_eq!(
+            hex::encode(leaf.to_le_bytes()),
+            "e9a4889a4597badbe38099747747729bf1f0df550b4907ee07bc0a0551c23016"
+        );
+    }
 }

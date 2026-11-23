@@ -301,10 +301,12 @@ impl Signer for WalletSigner {
     }
 
     async fn sign_message(&self, message: &str) -> Result<KeyDerivationSignature, Error> {
-        let sig = self
-            .sign_message(message)
-            .await
-            .map_err(wallet_sign_error)?;
+        // The reply is the user's privacy secret: wipe our copy once decoded.
+        let sig = zeroize::Zeroizing::new(
+            self.sign_message(message)
+                .await
+                .map_err(wallet_sign_error)?,
+        );
         let bytes = wallet_message_signature_to_bytes(&sig).map_err(wallet_sign_error)?;
         Ok(KeyDerivationSignature(bytes))
     }

@@ -44,7 +44,7 @@ impl PrivatePool {
         self.inner().token_decimals().await.map_err(pool_err)
     }
 
-    /// Balance in stroops (`bigint` in JS).
+    /// Balance in token base units (`bigint` in JS).
     pub async fn balance(&self) -> Result<u128, JsError> {
         let amount = self.inner().balance().await.map_err(pool_err)?;
         Ok(u128::from(amount))
@@ -56,7 +56,8 @@ impl PrivatePool {
         Ok(user_note_summaries(notes))
     }
 
-    /// Fee the pool charges on every transaction, in stroops (`bigint` in JS).
+    /// Fee the pool charges on every transaction, in token base units (`bigint`
+    /// in JS).
     pub async fn fee(&self) -> Result<u128, JsError> {
         let fee = self.inner().fee().await.map_err(pool_err)?;
         Ok(u128::from(fee))
@@ -69,8 +70,8 @@ impl PrivatePool {
         Ok(PoolInfo::from(pool))
     }
 
-    /// Refuses a deposit of `amount` stroops (`bigint` in JS) that the pool
-    /// would refuse, without building it.
+    /// Refuses a deposit of `amount` token base units (`bigint` in JS) that the
+    /// pool would refuse, without building it.
     #[wasm_bindgen(js_name = checkDeposit)]
     pub async fn check_deposit(&self, amount: u128) -> Result<(), JsError> {
         self.inner()
@@ -87,15 +88,15 @@ impl PrivatePool {
     }
 
     /// Most one spend can send after paying the pool fee on every step, in
-    /// stroops (`bigint` in JS).
+    /// token base units (`bigint` in JS).
     #[wasm_bindgen(js_name = maxSpend)]
     pub async fn max_spend(&self) -> Result<u128, JsError> {
         let amount = self.inner().max_spend().await.map_err(pool_err)?;
         Ok(u128::from(amount))
     }
 
-    /// Estimate how many on-chain transactions a spend of `amount` stroops
-    /// would require, and the pool fees they pay.
+    /// Estimate how many on-chain transactions a spend of `amount` token base
+    /// units would require, and the pool fees they pay.
     pub async fn estimate(&self, amount: u128) -> Result<PoolEstimate, JsError> {
         let estimate = self
             .inner()
@@ -105,7 +106,7 @@ impl PrivatePool {
         Ok(PoolEstimate::from(estimate))
     }
 
-    /// Deposit tokens. `amount` is stroops (`bigint` in JS).
+    /// Deposit tokens. `amount` is in token base units (`bigint` in JS).
     pub async fn deposit(&self, amount: u128) -> Result<PoolExecuteResult, JsError> {
         with_correlation_id(new_correlation_id(), async {
             let mut plan = self

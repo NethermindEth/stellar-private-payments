@@ -45,7 +45,6 @@ impl Indexer {
         let mut start_ledger = cursor.is_none().then_some(self.state.min_deployment_ledger);
         let page_size = self.state.cfg.page_size;
         let mut may_have_more = false;
-        // The tip is learned from the first page's `latestLedger`.
         let mut first_page_cutoff = None;
 
         for _page in 0..self.state.cfg.max_pages_per_round {
@@ -60,6 +59,8 @@ impl Indexer {
 
             let tip_sequence = result.latest_ledger;
             gauge!("bootnode_upstream_tip").set(f64::from(tip_sequence));
+            // The cutoff is fixed by the first page's `latestLedger`; later
+            // pages reuse it.
             let cutoff = *first_page_cutoff.get_or_insert_with(|| {
                 tip_sequence.saturating_sub(self.state.cfg.cutoff_ledgers())
             });

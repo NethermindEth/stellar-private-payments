@@ -1,7 +1,9 @@
 use super::general::scalar_to_bigint;
+use crate::circom_compat::{
+    CircomCircuit, CircomReduction, circuit_with_witness, read_r1cs, setup_circuit, witness,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::{Bn254, Fr};
-use ark_circom::{CircomBuilder, CircomCircuit, CircomConfig, CircomReduction};
 use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystem};
 use ark_serialize::CanonicalDeserialize;
@@ -236,17 +238,9 @@ pub struct CircomResult {
 /// Generates Groth16 proving + verifying keys for a Circom circuit.
 /// This operation is expensive and should be done once when testing
 /// many input combinations.
-pub fn generate_keys(
-    wasm_path: impl AsRef<Path>,
-    r1cs_path: impl AsRef<Path>,
-) -> Result<CircuitKeys> {
-    let cfg = CircomConfig::<Fr>::new(wasm_path.as_ref(), r1cs_path.as_ref())
-        .map_err(|e| anyhow!("CircomConfig error: {e}"))?;
-
-    let builder = CircomBuilder::new(cfg);
-
+pub fn generate_keys(r1cs_path: impl AsRef<Path>) -> Result<CircuitKeys> {
     // No inputs: just the empty circuit for setup
-    let empty = builder.setup();
+    let empty = setup_circuit(read_r1cs(r1cs_path)?);
     let mut rng = thread_rng();
 
     // Match Circom's reduction (also used in `tools/circuit-compiler` key
@@ -303,22 +297,14 @@ pub fn build_circuit(
     r1cs_path: impl AsRef<Path>,
     inputs: &Inputs,
 ) -> Result<CircomCircuit<Fr>> {
-    let cfg = CircomConfig::<Fr>::new(wasm_path.as_ref(), r1cs_path.as_ref())
-        .map_err(|e| anyhow!("CircomConfig error: {e}"))?;
-
-    let mut builder = CircomBuilder::new(cfg);
-
-    for (signal, value) in inputs.iter() {
-        push_value(&mut builder, signal, value);
-    }
-
-    builder.build().map_err(|e| anyhow!("build failed: {e}"))
+    let witness = witness::calculate_witness(wasm_path.as_ref(), &inputs.to_witness_json()?)?;
+    Ok(circuit_with_witness(read_r1cs(r1cs_path)?, witness))
 }
 
 /// Returns whether the circuit's witness satisfies every R1CS constraint.
 ///
 /// Fails on a circuit without a witness, such as the one from
-/// `CircomBuilder::setup()`, which assigns one to every wire.
+/// `setup_circuit`, which assigns one to every wire.
 pub fn r1cs_satisfied(circuit: CircomCircuit<Fr>) -> Result<bool> {
     if circuit.witness.is_none() {
         bail!("circuit has no witness; build it with build_circuit");
@@ -335,8 +321,8 @@ pub fn r1cs_satisfied(circuit: CircomCircuit<Fr>) -> Result<bool> {
 /// This is the preferred function when repeated proofs must be generated.
 ///
 /// Steps:
-/// 1. Load Circom config (WASM + R1CS)
-/// 2. Build circuit with provided inputs
+/// 1. Calculate the witness of the compiled circuit (WASM, run by Node)
+/// 2. Build the circuit from the R1CS and the witness
 /// 3. Generate Groth16 proof using precomputed `pk`
 /// 4. Verify the proof using fast `pvk`
 ///
@@ -373,21 +359,6 @@ pub fn prove_and_verify_with_keys(
     })
 }
 
-/// Internal helper for adding input values into the Circom builder.
-/// Arrays are pushed element-by-element.
-fn push_value(builder: &mut CircomBuilder<Fr>, path: &str, value: &InputValue) {
-    match value {
-        InputValue::Single(v) => {
-            builder.push_input(path, v.clone());
-        }
-        InputValue::Array(arr) => {
-            for v in arr.iter() {
-                builder.push_input(path, v.clone())
-            }
-        }
-    }
-}
-
 /// Proves and verifies a Circom circuit, generating keys on each call
 ///
 /// Convenience function that generates Groth16 keys and then proves and
@@ -412,6 +383,6 @@ pub fn prove_and_verify(
     r1cs_path: impl AsRef<Path>,
     inputs: &Inputs,
 ) -> Result<CircomResult> {
-    let keys = generate_keys(&wasm_path, &r1cs_path)?;
+    let keys = generate_keys(&r1cs_path)?;
     prove_and_verify_with_keys(wasm_path, r1cs_path, inputs, &keys)
 }

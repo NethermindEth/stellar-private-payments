@@ -3,7 +3,7 @@
 //! This encapsulates the logic required to turn a pool commitment row into a
 //! `user_notes` row, given an account's keypairs.
 
-use crate::types::{EncryptionPrivateKey, Field, NoteAmount, NoteKeyPair};
+use crate::types::{Field, NoteAmount, NoteKeyPair};
 use anyhow::{Result, anyhow};
 
 use crate::zk::{crypto, encryption};
@@ -30,14 +30,12 @@ pub struct DerivedUserNote {
 /// - the note is a dummy 0-amount output.
 pub fn try_decrypt_and_derive_user_note(
     note_keypair: &NoteKeyPair,
-    encryption_private_key: &EncryptionPrivateKey,
+    decryptor: &encryption::NoteDecryptor,
     commitment: &Field,
     leaf_index: u32,
     encrypted_output: &[u8],
 ) -> Result<Option<DerivedUserNote>> {
-    let Some((amount, blinding)) =
-        encryption::decrypt_output_note(encryption_private_key, encrypted_output)?
-    else {
+    let Some((amount, blinding)) = decryptor.decrypt_output_note(encrypted_output) else {
         return Ok(None);
     };
 
@@ -95,6 +93,7 @@ mod tests {
         let (note_keypair, enc_keypair) =
             encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
         let blinding = Field::from(NoteAmount::from(7u128));
+        let decryptor = encryption::NoteDecryptor::new(&enc_keypair.private)?;
         let derive = |amount: NoteAmount| {
             let commitment: [u8; 32] = crypto::compute_commitment(
                 &Field::from(amount).to_le_bytes(),
@@ -107,7 +106,7 @@ mod tests {
                 encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
             try_decrypt_and_derive_user_note(
                 &note_keypair,
-                &enc_keypair.private,
+                &decryptor,
                 &Field::try_from_le_bytes(commitment)?,
                 0,
                 &encrypted_output,

@@ -205,7 +205,7 @@ CI publishes from `main` when `version` in `package.json` is bumped (see `.githu
 OPFS storage is selected with Cargo features; at least one must be enabled.
 
 - `encrypted-storage` (default): SQLite3MC-encrypted storage in `spp.encrypted.db`, opened with `Storage.open({ keyProvider })`.
-- `unencrypted-storage`: plaintext storage in `spp.db` under `.opfs-sahpool-plaintext`, separate from the legacy `.opfs-sahpool` directory, opened with `Storage.openPlaintext()`. No SQLite3MC is compiled when it is the only storage feature.
+- `unencrypted-storage`: plaintext storage in `spp.db` under `.opfs-sahpool-plaintext`, separate from the encrypted storage directories, opened with `Storage.openPlaintext()`. No SQLite3MC is compiled when it is the only storage feature.
 
 `Storage.openPlaintext()` throws on a build without `unencrypted-storage`, and `Storage.open()` throws before calling `keyProvider` on a build without `encrypted-storage`. In a build with only `unencrypted-storage`, the WASM `Storage.open` opens plaintext storage when no key is supplied. Pass the features to the build through `SPP_WEB_CARGO_FEATURES`:
 
@@ -258,7 +258,7 @@ Because the database key is random and only its wrapped envelope lives in `local
 
 Importing accepts backups from the same origin (`scheme`, `host`, and `port`). Rather than overwriting the live database in place, the app stages the archive into a fresh OPFS directory, asks the enrolled wallet to unlock it, and runs SQLite integrity and foreign-key checks against the staged files. Only after those checks pass does a single `localStorage` write switch the active envelope and directory pointer; if anything fails along the way, the existing storage remains untouched. After a successful import, the reloaded tab asks the wallet to unlock the restored storage. Restoring a backup replaces local state with the snapshot from export time and does not merge later local changes.
 
-If `localStorage` is cleared while encrypted OPFS files remain on disk, signing again with Varial cannot reconstruct the lost random key. In that state, the app stops before enrollment so the user can either import a backup or wipe local storage cleanly. Separately, if an unencrypted `.opfs-sahpool` directory from an earlier build is still on disk, the app warns that legacy plaintext files are present and offers to remove them. **Reset local storage** (confirmed by typing `DELETE` with other app tabs closed) removes this origin's encrypted and legacy OPFS directories, key envelope, and legacy signer associations without affecting on-chain funds. The next wallet connection then enrolls new storage.
+If `localStorage` is cleared while encrypted OPFS files remain on disk, signing again with Varial cannot reconstruct the lost random key. In that state, the app stops before enrollment so the user can either import a backup or wipe local storage cleanly. **Reset local storage** (confirmed by typing `DELETE` with other app tabs closed) removes this origin's encrypted OPFS directories and key envelope without affecting on-chain funds. The next wallet connection then enrolls new storage.
 
 To run the browser backup round-trip test after building the SDK:
 

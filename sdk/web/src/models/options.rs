@@ -71,8 +71,8 @@ impl TransactConfig {
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         let mut output_amounts = [NoteAmount::ZERO; N_OUTPUTS];
-        for (out, stroops) in output_amounts.iter_mut().zip(self.output_amounts) {
-            *out = NoteAmount::from(stroops);
+        for (out, base_units) in output_amounts.iter_mut().zip(self.output_amounts) {
+            *out = NoteAmount::from(base_units);
         }
 
         let mut out_recipient_note_pubkeys: [Option<NotePublicKey>; N_OUTPUTS] = [None, None];

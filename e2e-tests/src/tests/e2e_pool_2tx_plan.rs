@@ -89,10 +89,8 @@ fn transfer_target() -> SpendTarget {
     SpendTarget::transfer(
         NotePublicKey::parse("0x0000000000000000000000000000000000000000000000000000000000000501")
             .expect("test recipient note key"),
-        EncryptionPublicKey::parse(
-            "0x0000000000000000000000000000000000000000000000000000000000000601",
-        )
-        .expect("test recipient enc key"),
+        EncryptionPublicKey::parse(&format!("0x{}", "06".repeat(EncryptionPublicKey::LEN)))
+            .expect("test recipient enc key"),
     )
 }
 

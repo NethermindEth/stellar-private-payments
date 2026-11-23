@@ -20,7 +20,7 @@ jobs:
     outputs:
       pct: ${{ steps.cov.outputs.coverage }}
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
@@ -37,7 +37,7 @@ jobs:
       - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
 
       - name: Upload head coverage artifact (for stacked PRs)
-        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-lcov
           path: lcov.info
@@ -62,7 +62,7 @@ jobs:
       # 1) Try to download base artifact from the base branch
       - name: Download base branch artifact (if present)
         id: dl
-        uses: dawidd6/action-download-artifact@ac66b43f0e6a346234dd65d4d0c8fbb31cb316e5
+        uses: dawidd6/action-download-artifact@a92c7ae74cf1df8810783758581e485ac3aaa309 # v28
         with:
           name: coverage-lcov
           branch: ${{ github.event.pull_request.base.ref }}
@@ -81,7 +81,7 @@ jobs:
       # 2) Fallback: if no artifact, checkout base commit and compute base coverage here
       - name: Checkout base
         if: ${{ steps.base_art.outputs.found == 'false' }}
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
@@ -126,14 +126,14 @@ jobs:
 
       - name: Find existing coverage comment
         id: find_comment
-        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e
+        uses: peter-evans/find-comment@b30e6a3c0ed37e7c023ccd3f1db5c6c0b0c23aad # v4.0.0
         with:
           issue-number: ${{ github.event.pull_request.number }}
           comment-author: "github-actions[bot]"
           body-includes: "<!-- coverage-bot -->"
 
       - name: Comment only if head < base
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const base = parseFloat(`${{ steps.basecov.outputs.coverage }}`);

@@ -66,9 +66,9 @@ mod tests {
             symbol, u256,
         },
         types::{
-            ContractEvent, ContractsEventData, EncryptionPrivateKey, Field, NotePublicKey, U256,
+            ContractEvent, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey, U256,
         },
-        zk::encryption::{encryption_edwards_key, registration_digest, registration_message},
+        zk::encryption::{registration_digest, registration_message},
     };
     use ed25519_dalek::Signer;
     use stellar_xdr as xdr;
@@ -281,11 +281,11 @@ mod tests {
         storage: &SqliteStorage,
         registry: &str,
         owner_seed: u8,
-    ) -> Result<Option<[u8; 32]>> {
+    ) -> Result<Option<Vec<u8>>> {
         let address = crate::chain::scval_to_address_string(&owner(owner_seed))?;
         Ok(storage
             .lookup_public_key_by_address(&address, registry)?
-            .map(|entry| entry.encryption_key.0))
+            .map(|entry| entry.encryption_key.0.to_vec()))
     }
 
     /// A registration event as `registry` emits it, with `encryption_key` as
@@ -294,7 +294,7 @@ mod tests {
         id: &str,
         registry: &str,
         owner_seed: u8,
-        encryption_key: [u8; 32],
+        encryption_key: Vec<u8>,
     ) -> Result<ContractEvent> {
         registration_with_signature(id, registry, owner_seed, encryption_key, Some(owner_seed))
     }
@@ -306,7 +306,7 @@ mod tests {
         id: &str,
         registry: &str,
         owner_seed: u8,
-        encryption_key: [u8; 32],
+        encryption_key: Vec<u8>,
         signer_seed: Option<u8>,
     ) -> Result<ContractEvent> {
         registration_signed_over(
@@ -326,7 +326,7 @@ mod tests {
         registry: &str,
         signed_registry: &str,
         owner_seed: u8,
-        encryption_key: [u8; 32],
+        encryption_key: Vec<u8>,
         signer_seed: Option<u8>,
     ) -> Result<ContractEvent> {
         let bytes = |b: Vec<u8>| -> Result<xdr::ScVal> {
@@ -337,10 +337,11 @@ mod tests {
             0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c,
             0x1d, 0x1e, 0x1f, 0x20,
         ];
+        let encryption_public_key = EncryptionPublicKey::try_from(encryption_key.clone())?;
         let mut entries = vec![
             xdr::ScMapEntry {
                 key: symbol("encryption_key")?,
-                val: bytes(encryption_key.to_vec())?,
+                val: bytes(encryption_key)?,
             },
             xdr::ScMapEntry {
                 key: symbol("note_key")?,
@@ -353,7 +354,7 @@ mod tests {
                 signed_registry,
                 &owner_address,
                 &NotePublicKey(note_key),
-                &encryption_key,
+                &encryption_public_key,
             );
             let signature = signing_key(signer_seed)
                 .sign(&registration_digest(&message))
@@ -373,65 +374,22 @@ mod tests {
         })
     }
 
-    fn edwards_key(secret: u8) -> [u8; 32] {
-        encryption_edwards_key(&EncryptionPrivateKey([secret; 32]))
-    }
-
-    fn x25519_key(secret: u8) -> [u8; 32] {
-        x25519_dalek::PublicKey::from(&x25519_dalek::StaticSecret::from([secret; 32])).to_bytes()
+    /// An encryption key told apart from the others by `secret`.
+    fn key(secret: u8) -> Vec<u8> {
+        vec![secret; EncryptionPublicKey::LEN]
     }
 
     #[test]
     fn a_same_ledger_re_registration_resolves_to_the_later_key() -> Result<()> {
         let mut storage = storage_with(vec![
-            registration(
-                "0000000000000000001-0000000000",
-                REGISTRY,
-                7,
-                edwards_key(1),
-            )?,
-            registration(
-                "0000000000000000001-0000000001",
-                REGISTRY,
-                7,
-                edwards_key(2),
-            )?,
+            registration("0000000000000000001-0000000000", REGISTRY, 7, key(1))?,
+            registration("0000000000000000001-0000000001", REGISTRY, 7, key(2))?,
         ])?;
 
         assert!(process_events(&mut storage, 1)?);
         assert!(process_events(&mut storage, 1)?);
 
-        assert_eq!(registered_key(&storage, REGISTRY, 7)?, Some(x25519_key(2)));
-        Ok(())
-    }
-
-    /// An encoding that is not a curve point is skipped, and the events after
-    /// it are still processed.
-    #[test]
-    fn a_registration_whose_key_is_not_a_point_is_skipped() -> Result<()> {
-        let not_a_point = (2u8..)
-            .map(|y| {
-                let mut key = [0u8; 32];
-                key[0] = y;
-                key
-            })
-            .find(|key| ed25519_dalek::VerifyingKey::from_bytes(key).is_err())
-            .expect("some y is not on the curve");
-        let mut storage = storage_with(vec![
-            registration("0000000000000000001-0000000000", REGISTRY, 7, not_a_point)?,
-            registration(
-                "0000000000000000002-0000000000",
-                REGISTRY,
-                8,
-                edwards_key(1),
-            )?,
-        ])?;
-
-        assert!(process_events(&mut storage, 10)?);
-        assert!(!process_events(&mut storage, 10)?);
-
-        assert_eq!(registered_key(&storage, REGISTRY, 7)?, None);
-        assert_eq!(registered_key(&storage, REGISTRY, 8)?, Some(x25519_key(1)));
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, Some(key(2)));
         Ok(())
     }
 
@@ -442,6 +400,7 @@ mod tests {
         let bytes = |len: usize| -> Result<xdr::ScVal> {
             Ok(xdr::ScVal::Bytes(xdr::ScBytes(vec![1; len].try_into()?)))
         };
+        let key_len = EncryptionPublicKey::LEN;
         let malformed = |id: &str, owner: xdr::ScVal, fields: Vec<(&str, xdr::ScVal)>| {
             let entries = fields
                 .into_iter()
@@ -461,36 +420,40 @@ mod tests {
             malformed(
                 "0000000000000000001-0000000000",
                 u256(1),
-                vec![("encryption_key", bytes(32)?), ("note_key", bytes(32)?)],
+                vec![
+                    ("encryption_key", bytes(key_len)?),
+                    ("note_key", bytes(32)?),
+                ],
             )?,
             malformed(
                 "0000000000000000002-0000000000",
                 owner(7),
-                vec![("encryption_key", bytes(31)?), ("note_key", bytes(32)?)],
+                vec![
+                    ("encryption_key", bytes(key_len - 1)?),
+                    ("note_key", bytes(32)?),
+                ],
             )?,
             malformed(
                 "0000000000000000003-0000000000",
                 owner(7),
-                vec![("encryption_key", bytes(32)?), ("note_key", bytes(31)?)],
+                vec![
+                    ("encryption_key", bytes(key_len)?),
+                    ("note_key", bytes(31)?),
+                ],
             )?,
             malformed(
                 "0000000000000000004-0000000000",
                 owner(7),
-                vec![("encryption_key", bytes(32)?)],
+                vec![("encryption_key", bytes(key_len)?)],
             )?,
-            registration(
-                "0000000000000000005-0000000000",
-                REGISTRY,
-                8,
-                edwards_key(1),
-            )?,
+            registration("0000000000000000005-0000000000", REGISTRY, 8, key(1))?,
         ])?;
 
         assert!(process_events(&mut storage, 10)?);
         assert!(!process_events(&mut storage, 10)?);
 
         assert_eq!(registered_key(&storage, REGISTRY, 7)?, None);
-        assert_eq!(registered_key(&storage, REGISTRY, 8)?, Some(x25519_key(1)));
+        assert_eq!(registered_key(&storage, REGISTRY, 8)?, Some(key(1)));
         Ok(())
     }
 
@@ -499,34 +462,16 @@ mod tests {
     #[test]
     fn lookups_only_read_the_given_registry() -> Result<()> {
         let mut storage = storage_with(vec![
-            registration(
-                "0000000000000000001-0000000000",
-                REGISTRY,
-                7,
-                edwards_key(1),
-            )?,
-            registration(
-                "0000000000000000002-0000000000",
-                OLD_REGISTRY,
-                7,
-                edwards_key(2),
-            )?,
-            registration(
-                "0000000000000000003-0000000000",
-                OLD_REGISTRY,
-                8,
-                edwards_key(3),
-            )?,
+            registration("0000000000000000001-0000000000", REGISTRY, 7, key(1))?,
+            registration("0000000000000000002-0000000000", OLD_REGISTRY, 7, key(2))?,
+            registration("0000000000000000003-0000000000", OLD_REGISTRY, 8, key(3))?,
         ])?;
 
         assert!(process_events(&mut storage, 10)?);
 
-        assert_eq!(registered_key(&storage, REGISTRY, 7)?, Some(x25519_key(1)));
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, Some(key(1)));
         assert_eq!(registered_key(&storage, REGISTRY, 8)?, None);
-        assert_eq!(
-            registered_key(&storage, OLD_REGISTRY, 8)?,
-            Some(x25519_key(3))
-        );
+        assert_eq!(registered_key(&storage, OLD_REGISTRY, 8)?, Some(key(3)));
         Ok(())
     }
 
@@ -536,12 +481,12 @@ mod tests {
             "0000000000000000001-0000000000",
             REGISTRY,
             7,
-            edwards_key(1),
+            key(1),
         )?])?;
 
         assert!(process_events(&mut storage, 10)?);
 
-        assert_eq!(registered_key(&storage, REGISTRY, 7)?, Some(x25519_key(1)));
+        assert_eq!(registered_key(&storage, REGISTRY, 7)?, Some(key(1)));
         Ok(())
     }
 
@@ -551,7 +496,7 @@ mod tests {
             "0000000000000000001-0000000000",
             REGISTRY,
             7,
-            edwards_key(1),
+            key(1),
             None,
         )?])?;
 
@@ -567,7 +512,7 @@ mod tests {
             "0000000000000000001-0000000000",
             REGISTRY,
             7,
-            edwards_key(1),
+            key(1),
             Some(8),
         )?])?;
 
@@ -584,7 +529,7 @@ mod tests {
             REGISTRY,
             OLD_REGISTRY,
             7,
-            edwards_key(1),
+            key(1),
             Some(7),
         )?])?;
 

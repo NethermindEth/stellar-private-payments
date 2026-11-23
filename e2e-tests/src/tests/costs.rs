@@ -58,7 +58,7 @@ use pool_gvk::{
     gvk::{self, BabyJubJubPoint, GvkCiphertext},
 };
 use public_key_registry::{
-    Account, ENCRYPTION_KEY_TAG, KeyOwnershipProof, PublicKeyRegistry, PublicKeyRegistryClient,
+    Account, ENCRYPTION_KEY_LEN, KeyOwnershipProof, PublicKeyRegistry, PublicKeyRegistryClient,
     registration_digest, registration_message,
 };
 use soroban_env_host::{InvocationResources, fees::FeeConfiguration};
@@ -407,26 +407,18 @@ fn registry_row() -> Row {
         (soroban_sdk::String::from_str(&env, "tests"), verifier),
     );
     let owner_key = SigningKey::from_bytes(&[1u8; 32]);
-    let encryption_key = SigningKey::from_bytes(&[2u8; 32]);
     let owner_payload = AddressPayload::AccountIdPublicKeyEd25519(BytesN::from_array(
         &env,
         &owner_key.verifying_key().to_bytes(),
     ));
     let account = Account {
         owner: owner_payload.to_address(&env),
-        encryption_key: Bytes::from_array(&env, &encryption_key.verifying_key().to_bytes()),
+        encryption_key: Bytes::from_slice(&env, &[2u8; ENCRYPTION_KEY_LEN as usize]),
         note_key: Bytes::from_array(&env, &[2u8; 32]),
     };
     let digest = registration_digest(&env, &registration_message(&env, &id, &account));
-    let mut challenge = Bytes::from_slice(&env, ENCRYPTION_KEY_TAG);
-    challenge.append(&digest.clone().into());
-    let challenge = env.crypto().sha256(&challenge).to_bytes().to_array();
     let proof = KeyOwnershipProof {
         note_key_proof: placeholder_groth16_proof(&env),
-        encryption_key_signature: BytesN::from_array(
-            &env,
-            &encryption_key.sign(&challenge).to_bytes(),
-        ),
         owner_signature: BytesN::from_array(&env, &owner_key.sign(&digest.to_array()).to_bytes()),
     };
     PublicKeyRegistryClient::new(&env, &id).register(&account, &proof);
@@ -481,7 +473,7 @@ const EXPECTED: &[Pinned] = expected! {
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
     "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
     "asp-non-membership insert_leaves, three keys into nine" => 28, 23, 2748, 12, 5_200_586_292;
-    "public-key-registry register, first registration" => 6, 3, 688, 2, 804_556_412;
+    "public-key-registry register, first registration" => 6, 3, 628, 2, 680_140_472;
 };
 
 /// Rows that read entries from disk, and how many. An account authorizer's

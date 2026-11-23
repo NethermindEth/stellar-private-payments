@@ -2189,8 +2189,8 @@ function slotToCsvRow(txIndex, tx, side, slot) {
 }
 
 function buildNotesCsvRows() {
-  // CSV keeps the legacy amount_stroops name; all amount columns contain token base units.
-  const header = ['tx_index', 'ledger', 'side', 'note_index', 'amount_stroops', 'pk', 'owner_addresses', 'owner_status', 'commitment', 'nullifier'];
+  // Amount columns hold token base units.
+  const header = ['tx_index', 'ledger', 'side', 'note_index', 'amount_base_units', 'pk', 'owner_addresses', 'owner_status', 'commitment', 'nullifier'];
   const rows = [header];
 
   for (const { tx, index } of state.rows) {
@@ -2220,7 +2220,7 @@ function noteToCsvRow(note) {
 function buildNoteViewCsvRows() {
   const header = [
     'created_tx_index', 'created_ledger', 'spent_tx_index', 'spent_ledger',
-    'pk', 'owner_addresses', 'owner_status', 'amount_stroops', 'commitment', 'status', 'nullifier',
+    'pk', 'owner_addresses', 'owner_status', 'amount_base_units', 'commitment', 'status', 'nullifier',
   ];
   return [header, ...collectNotes(state.rows).map(noteToCsvRow)];
 }
@@ -2229,7 +2229,7 @@ function buildNoteViewCsvRows() {
 function buildPkGraphCsvRows() {
   const header = [
     'kind', 'from_pk', 'from_addresses', 'from_owner_status', 'to_pk', 'to_addresses', 'to_owner_status',
-    'count', 'amount_stroops',
+    'count', 'amount_base_units',
   ];
   const { nodes, edges } = fullPkGraph();
   const rows = [header];

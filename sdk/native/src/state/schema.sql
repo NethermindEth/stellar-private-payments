@@ -49,20 +49,30 @@ CREATE TABLE raw_contract_events (
     contract_id INTEGER NOT NULL,
     topics TEXT NOT NULL,
     value TEXT NOT NULL,
+    -- Each raw event's place in its contract's event chain (`chain::EventChain`):
+    -- the count and running hash after it, in emission order. NULL until the event
+    -- is folded, and for every later event of a contract whose chain an event
+    -- could not extend.
+    chain_count INTEGER,
+    chain_hash BLOB CHECK (chain_hash IS NULL OR length(chain_hash) = 32),
     FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_raw_contract_events_ledger_id ON raw_contract_events(ledger, id);
+-- One contract's raw events, so the registry sync status finds the registry's
+-- unprocessed events without scanning every contract's.
+CREATE INDEX idx_raw_contract_events_contract_id ON raw_contract_events (contract_id, id);
+CREATE UNIQUE INDEX idx_raw_contract_events_chain ON raw_contract_events(contract_id, chain_count);
 
--- User accounts known to this local database (one per Stellar address).
+-- User accounts known to this local database, keyed by (address, kdf_domain): each domain
+-- derives its own keys, so one Stellar address owns a separate set of notes per domain.
 CREATE TABLE accounts (
     id INTEGER PRIMARY KEY,
-    address TEXT NOT NULL UNIQUE
+    address TEXT NOT NULL,
+    kdf_domain TEXT NOT NULL,
+    UNIQUE (address, kdf_domain)
 );
 
--- Derived key material for an account.
---
--- There may be multiple rows per account (e.g. re-derivation); the application typically uses
--- the latest row (max(id)) per account.
+-- Derived key material for an account (one keypair per account).
 CREATE TABLE keypairs (
     id INTEGER PRIMARY KEY,
     encryption_private_key BLOB NOT NULL,
@@ -73,33 +83,44 @@ CREATE TABLE keypairs (
     account_id INTEGER,
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
-CREATE INDEX idx_keypairs_account_id_id ON keypairs(account_id, id);
+CREATE UNIQUE INDEX idx_keypairs_account_id ON keypairs(account_id);
 
 -- Spent nullifiers observed on-chain for the pool contract.
 --
 -- Linked to `raw_contract_events` so entries can be traced back to the originating event.
+-- A nullifier hashes nothing pool-specific, so it can repeat across pools: each event keeps
+-- its own row.
 CREATE TABLE pool_nullifiers (
     id INTEGER PRIMARY KEY,
-    nullifier BLOB NOT NULL UNIQUE CHECK (length(nullifier) = 32),
+    nullifier BLOB NOT NULL CHECK (length(nullifier) = 32),
     -- Foreign key to `raw_contract_events.id` for the event that emitted this nullifier.
     event_id  TEXT NOT NULL UNIQUE,
+    -- Admin audit: JSON-serialized GlobalViewKeyCiphertext from pool-gvk events.
+    gvk_ciphertext TEXT,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
+CREATE INDEX idx_pool_nullifiers_nullifier ON pool_nullifiers (nullifier);
 
 -- Pool Merkle tree commitments observed on-chain.
 --
 -- Each commitment carries:
 -- - `leaf_index`: index in the pool Merkle tree.
 -- - `encrypted_output`: encrypted note output intended for recipients.
+--
+-- A commitment can fill more than one leaf, in one pool or across pools: outputs with the same
+-- amount, key, and blinding hash to one value. Each event keeps its own row.
 CREATE TABLE pool_commitments (
     id INTEGER PRIMARY KEY,
-    commitment BLOB NOT NULL UNIQUE CHECK (length(commitment) = 32),
+    commitment BLOB NOT NULL CHECK (length(commitment) = 32),
     leaf_index INTEGER NOT NULL,
     encrypted_output BLOB NOT NULL,
     -- Foreign key to `raw_contract_events.id` for the event that emitted this commitment.
     event_id  TEXT NOT NULL UNIQUE,
+    -- Admin audit: JSON-serialized GlobalViewKeyCiphertext from pool-gvk events.
+    gvk_ciphertext TEXT,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
+CREATE INDEX idx_pool_commitments_commitment ON pool_commitments (commitment);
 
 -- An address book of registered public keys emitted by the public key registry contract
 --
@@ -114,27 +135,40 @@ CREATE TABLE public_keys (
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_public_keys_owner ON public_keys (owner);
+CREATE INDEX idx_public_keys_owner ON public_keys (owner);
+-- Reverse address book lookup (note public key -> registering addresses), used
+-- to label the owners of GVK-audited notes.
+CREATE INDEX idx_public_keys_note_key ON public_keys (note_key);
 
 -- Leaves of the ASP membership Merkle tree observed on-chain.
 --
--- Used to reconstruct membership proofs locally for proving.
+-- Used to reconstruct membership proofs locally for proving. Keyed by tree and index, so
+-- each allowlist has its own leaf 0.
 CREATE TABLE asp_membership_leaves (
-    leaf_index INTEGER PRIMARY KEY,
+    contract_id INTEGER NOT NULL REFERENCES contracts(contract_id),
+    leaf_index INTEGER NOT NULL,
     leaf BLOB NOT NULL CHECK (length(leaf) = 32),
     root BLOB NOT NULL CHECK (length(root) = 32),
     -- Foreign key to `raw_contract_events.id` for the event that added the leaf.
     event_id  TEXT NOT NULL UNIQUE,
+    PRIMARY KEY (contract_id, leaf_index),
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_asp_membership_leaves_leaf ON asp_membership_leaves (leaf);
 
+-- Every raw event the processor has handled, whether or not it left a row in
+-- another table. get_unprocessed_events skips the events listed here.
+CREATE TABLE processed_events (
+    event_id TEXT PRIMARY KEY,
+    FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
+);
+
 -- Notes derived for a specific local account by scanning/decrypting pool commitments.
 --
--- `commitment_id` links to a pool commitment. When the corresponding on-chain nullifier is
+-- `commitment_id` links to a pool commitment (copies of a commitment share its value, so each
+-- note is keyed by its `pool_commitments` row). When the corresponding on-chain nullifier is
 -- observed, `nullifier_id` is set by reconciliation against `expected_nullifier`.
 CREATE TABLE user_notes (
-    id BLOB NOT NULL PRIMARY KEY CHECK (length(id) = 32),
     account_id INTEGER NOT NULL,
     -- FK to `pool_commitments.id` (unique: one derived note per commitment).
     commitment_id INTEGER NOT NULL UNIQUE,
@@ -175,15 +209,15 @@ CREATE TABLE nullifier_scan_state (
     FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
 
--- Terms & Conditions (disclaimer) acceptances per account and disclaimer hash.
+-- Terms & Conditions (disclaimer) acceptances per address and disclaimer hash. Acceptance
+-- belongs to the address, not to a key derivation domain.
 --
--- When the disclaimer text changes, it yields a new hash and each account must accept again.
+-- When the disclaimer text changes, it yields a new hash and each address must accept again.
 CREATE TABLE disclaimer_acceptances (
-    account_id INTEGER NOT NULL,
+    address TEXT NOT NULL,
     disclaimer_hash TEXT NOT NULL,
     accepted_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-    PRIMARY KEY (account_id, disclaimer_hash),
-    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+    PRIMARY KEY (address, disclaimer_hash)
 );
 CREATE INDEX idx_disclaimer_acceptances_hash ON disclaimer_acceptances(disclaimer_hash);
 

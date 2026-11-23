@@ -30,7 +30,7 @@ jobs:
       # Native test binaries pull in Wasmer/Cranelift; debug symbols dominate disk use.
       CARGO_PROFILE_DEV_DEBUG: 0
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test policy validation
         if: matrix.surface == 'native'
         run: bash scripts/test-msrv.sh

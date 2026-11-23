@@ -86,10 +86,17 @@ pub(crate) struct PrivacyKeys {
     encryption_keypair: PublicEncryptionKeyPair,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AspSecret {
     membership_blinding: Field,
+}
+
+/// The blinding is secret and `Field` prints its value.
+impl std::fmt::Debug for AspSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AspSecret(<redacted>)")
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -324,8 +331,7 @@ const OPFS_LOCK_RETRY_DELAY_MS: u32 = 200;
 async fn init(opening: OpenRequest) -> Result<(), JsError> {
     let directory = match &opening {
         #[cfg(feature = "unencrypted-storage")]
-        // Not `.opfs-sahpool`: the app treats that directory as legacy
-        // plaintext storage and offers to delete it.
+        // Separate from the encrypted storage directories.
         OpenRequest::Plaintext => ".opfs-sahpool-plaintext",
         #[cfg(feature = "encrypted-storage")]
         OpenRequest::Encrypted { directory, .. } => {

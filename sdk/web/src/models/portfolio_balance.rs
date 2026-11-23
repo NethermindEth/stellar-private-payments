@@ -24,7 +24,7 @@ impl PortfolioBalance {
         self.inner.token_label.clone()
     }
 
-    /// Amount in stroops (`bigint` in JS).
+    /// Amount in token base units (`bigint` in JS).
     #[wasm_bindgen(getter)]
     pub fn amount(&self) -> u128 {
         u128::from(self.inner.amount)

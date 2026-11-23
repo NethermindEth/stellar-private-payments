@@ -157,7 +157,7 @@ mod tests {
         let step = |amount: u128| {
             core.deposit_transact_step(
                 NotePublicKey([1; 32]),
-                EncryptionPublicKey([2; 32]),
+                EncryptionPublicKey(vec![2; EncryptionPublicKey::LEN].into_boxed_slice()),
                 NoteAmount::from(amount),
                 NoteAmount::ZERO,
             )
@@ -197,7 +197,7 @@ mod tests {
         let step = core()
             .deposit_transact_step(
                 NotePublicKey([1; 32]),
-                EncryptionPublicKey([2; 32]),
+                EncryptionPublicKey(vec![2; EncryptionPublicKey::LEN].into_boxed_slice()),
                 NoteAmount::from(10),
                 NoteAmount::from(3),
             )
@@ -251,7 +251,7 @@ mod tests {
         let transfer = core.prepare_transfer(
             &[],
             NotePublicKey([1; 32]),
-            EncryptionPublicKey([2; 32]),
+            EncryptionPublicKey(vec![2; EncryptionPublicKey::LEN].into_boxed_slice()),
             NoteAmount::ZERO,
             NoteAmount::ZERO,
         );

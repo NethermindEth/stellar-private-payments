@@ -153,6 +153,10 @@ fn derive_and_save_keys(
     account: &Account,
     storage: &mut SqliteStorage,
 ) -> Result<()> {
+    eprintln!(
+        "warning: {}",
+        stellar_private_payments::zk::encryption::MEMORY_PROTECTION_WARNING
+    );
     let message = key_derivation_message(&config.deployment.kdf_domain);
     let signature = stellar_cli::sign_message(
         &account.alias,
@@ -184,9 +188,11 @@ fn save_owner_keys(
     verify_owner_signature(owner_address, message, &signature)
         .context("check the privacy-key signature against the account")?;
 
-    let (note_keypair, encryption_keypair) = derive_encryption_and_note_keypairs(signature.clone())
-        .context("derive privacy keypairs from wallet signature")?;
+    // The blinding borrows the signature, so derive it first and then hand the
+    // signature itself over: no second copy of the secret is made.
     let membership_blinding = derive_membership_blinding(&signature, network)?;
+    let (note_keypair, encryption_keypair) = derive_encryption_and_note_keypairs(signature)
+        .context("derive privacy keypairs from wallet signature")?;
 
     storage
         .save_encryption_and_note_keypairs(

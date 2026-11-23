@@ -125,7 +125,7 @@ try {
   const untouched = await ctx.snapshot();
   await expectFailure(() => ctx.js("window.storage=await sdk.Storage.open();return true;"), "keyProvider is required");
   assert.deepEqual(await ctx.snapshot(), untouched);
-  ctx.legacy = untouched;
+  ctx.initial = untouched;
   ctx.checks.push("keyless open rejects without modifying OPFS");
   await expectFailure(() => ctx.js("window.storage=await sdk.Storage.openPlaintext();return true;"), "Unencrypted storage requires a build with the unencrypted-storage feature");
   assert.deepEqual(await ctx.snapshot(), untouched);
@@ -183,7 +183,7 @@ try {
     const final = await ctx.snapshot();
     const encryptedFiles = final.filter(file => file.path.startsWith(".opfs-sahpool-encrypted/"));
     assert(encryptedFiles.length && !encryptedFiles.some(file => file.protected));
-    assert.deepEqual(final.filter(file => !file.path.startsWith(".opfs-sahpool-encrypted/")), ctx.legacy);
+    assert.deepEqual(final.filter(file => !file.path.startsWith(".opfs-sahpool-encrypted/")), ctx.initial);
     ctx.checks.push("encrypted artifact scan and no plaintext storage");
   }
   const result = { browser: args.browser, version, checks: ctx.checks, passed: true };

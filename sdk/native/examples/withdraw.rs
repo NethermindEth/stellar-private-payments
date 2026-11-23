@@ -23,7 +23,7 @@
 //!
 //!   SPP_POOL_CONTRACT_ID      default: first enabled pool in deployment config
 //!
-//!   SPP_AMOUNT_STROOPS        default: 10000000 (1 XLM)
+//!   SPP_TOKEN_AMOUNT_BASE_UNITS        default: 10000000 (1 XLM)
 
 mod common;
 
@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Pool:      {}", pool_config.pool_contract_id);
     println!("Asset:     {}", pool_config.token_label());
-    println!("Amount:    {} stroops", u128::from(amount));
+    println!("Amount:    {} base units", u128::from(amount));
     println!("Address:   {}", account.user_address());
     println!();
 
@@ -65,18 +65,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|n| u128::from(n.amount))
         .fold(0u128, u128::saturating_add);
     println!(
-        "Available: {} note(s) totaling {} stroops",
+        "Available: {} note(s) totaling {} base units",
         notes.len(),
         total
     );
     let max_spend = pool.max_spend()?;
     if amount > max_spend {
         println!(
-            "Skipping: requested amount ({} stroops) exceeds the most one spend can send after the pool fees ({} stroops).",
+            "Skipping: requested amount ({} base units) exceeds the most one spend can send after the pool fees ({} base units).",
             u128::from(amount),
             u128::from(max_spend)
         );
-        println!("Lower SPP_AMOUNT_STROOPS or deposit more, then re-run this example.");
+        println!("Lower SPP_TOKEN_AMOUNT_BASE_UNITS or deposit more, then re-run this example.");
         std::process::exit(0);
     }
     println!();
