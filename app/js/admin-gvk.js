@@ -698,9 +698,11 @@ function renderResults() {
   const visibleRows = rows.slice(start, start + BATCH_SIZE);
   renderedPage = { page: state.page, count: visibleRows.length };
   if (!visibleRows.length) {
-    showEmptyResults(state.audit && isFiltersActive(filters)
-      ? 'No transactions match the current filters.'
-      : 'Select a pool, enter the authority key, then run Sync & Audit.');
+    let message = 'Select a pool, enter the authority key, then run Sync & Audit.';
+    if (state.audit && isFiltersActive(filters)) {
+      message = drainPromise ? 'Scanning the pool for matching transactions…' : 'No transactions match the current filters.';
+    }
+    showEmptyResults(message);
     return;
   }
 
@@ -2381,14 +2383,24 @@ function updateStatus() {
 
   const total = matches().length;
   const start = state.page * BATCH_SIZE;
+  const scanned = state.rows.length;
+  const filtering = isFiltersActive(filters);
   if (!total) {
-    setPanelStatus(`No matching transactions (${state.rows.length} scanned).${hint}`, 'info');
+    setPanelStatus(drainPromise
+      ? `Scanning for matching transactions… ${scanned} scanned, none found yet.${hint}`
+      : `No matching transactions (${scanned} scanned).${hint}`, 'info');
     return;
   }
   const range = `Transactions ${start + 1}–${Math.min(total, start + BATCH_SIZE)}`;
-  const count = state.exhausted ? ` of ${total}` : ' · more available';
-  const scanned = isFiltersActive(filters) ? ` (${state.rows.length} scanned)` : '';
-  setPanelStatus(`${range}${count}${scanned}.${hint}`, 'ok');
+  let count;
+  if (drainPromise) {
+    count = filtering
+      ? ` of ${total} found so far (${scanned} scanned, still scanning)`
+      : ` · loading the whole pool (${scanned} scanned)`;
+  } else {
+    count = (state.exhausted ? ` of ${total}` : ' · more available') + (filtering ? ` (${scanned} scanned)` : '');
+  }
+  setPanelStatus(`${range}${count}.${hint}`, 'ok');
 }
 
 function updateViewButtons() {

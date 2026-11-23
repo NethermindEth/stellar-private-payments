@@ -159,11 +159,12 @@ test('GVK filters show matches while the pool scan continues', async (t) => {
   const next = page.locator('#gvkNextBtn');
   await page.evaluate(() => { window.pauses = [30]; });
   await page.locator('#gvkFilterPk').fill('missing');
-  await status('No matching transactions');
+  await status('none found yet');
+  await page.getByText('Scanning the pool for matching transactions…', { exact: true }).waitFor();
 
   await page.locator('#gvkFilterPk').fill('');
   await page.locator('#gvkFilterLedgerFrom').fill('11');
-  await status('Transactions 1–20 · more available (30 scanned)');
+  await status('Transactions 1–20 of 20 found so far (30 scanned, still scanning)');
   assert.equal(await articles.count(), 20);
   assert.equal(await next.isDisabled(), false);
   assert.equal(await page.locator('#gvkExportBtn').isDisabled(), true);
@@ -182,10 +183,10 @@ test('GVK address filters look up the owners of rows found mid-scan', async (t) 
   // The scan checks the clock between batches of 20: skip past its refresh interval while held after ledger 40.
   await page.evaluate(() => { window.pauses = [40, 60]; });
   await page.locator('#gvkFilterPk').fill('bob-address');
-  await status('No matching transactions');
+  await status('none found yet');
   await page.clock.fastForward(1_000);
   await page.evaluate(() => window.resumeScan());
-  await status('Transactions 1–20 · more available (60 scanned)');
+  await status('Transactions 1–20 of 30 found so far (60 scanned, still scanning)');
   await page.evaluate(() => window.resumeScan());
   await status('Transactions 1–20 of 50 (80 scanned)');
   assert.deepEqual(errors, []);
