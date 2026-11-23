@@ -28,7 +28,8 @@ const BATCH_SIZE = 20;
 const poolSelectEl = document.getElementById('gvkPoolSelect');
 const privateKeyEl = document.getElementById('gvkPrivateKey');
 const auditBtnEl = document.getElementById('gvkAuditBtn');
-const loadMoreBtnEl = document.getElementById('gvkLoadMoreBtn');
+const prevBtnEl = document.getElementById('gvkPrevBtn');
+const nextBtnEl = document.getElementById('gvkNextBtn');
 const viewTxBtnEl = document.getElementById('gvkViewTxBtn');
 const viewNoteBtnEl = document.getElementById('gvkViewNoteBtn');
 const viewGraphBtnEl = document.getElementById('gvkViewGraphBtn');
@@ -61,7 +62,7 @@ const state = {
   txCounter: 0,
   exhausted: false,
   notes: createNoteIndex(),
-  filteredVisibleCount: BATCH_SIZE,
+  page: 0,
   view: 'tx',
   selectedNoteId: null,
   graphNotes: null,
@@ -602,6 +603,7 @@ let filterTimer;
 let filterRevision = 0;
 let timeRevision = 0;
 let refreshSelection;
+let fetchingPage = false;
 
 function matches() {
   if (!matchingRows) {
@@ -635,7 +637,9 @@ function renderResults() {
     return;
   }
   const rows = matches();
-  const visibleRows = isFiltersActive(filters) ? rows.slice(0, state.filteredVisibleCount) : rows;
+  state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / BATCH_SIZE) - 1));
+  const start = state.page * BATCH_SIZE;
+  const visibleRows = rows.slice(start, start + BATCH_SIZE);
   if (!visibleRows.length) {
     showEmptyResults(state.audit && isFiltersActive(filters)
       ? 'No transactions match the current filters.'
@@ -2164,11 +2168,9 @@ async function ensureFullyLoaded() {
 
 function syncActionButtons() {
   const valid = !!state.audit && appliedFilters?.valid;
-  const busy = auditBtnEl?.ariaBusy === 'true' || loadMoreBtnEl?.ariaBusy === 'true' || !!drainPromise || !!filterTimer;
-  const hasMore = valid && (isFiltersActive(appliedFilters)
-    ? state.filteredVisibleCount < matches().length
-    : !state.exhausted);
-  loadMoreBtnEl.disabled = !hasMore || busy;
+  const busy = fetchingPage || auditBtnEl?.ariaBusy === 'true' || !!drainPromise || !!filterTimer;
+  prevBtnEl.disabled = !valid || busy || state.page === 0;
+  nextBtnEl.disabled = !valid || busy || (state.exhausted && (state.page + 1) * BATCH_SIZE >= matches().length);
   exportBtnEl.disabled = !valid || busy || exportBtnEl.ariaBusy === 'true';
 }
 
@@ -2286,22 +2288,16 @@ function updateStatus() {
     return;
   }
 
-  if (isFiltersActive(filters)) {
-    const filteredRows = matches();
-    const shown = Math.min(state.filteredVisibleCount, filteredRows.length);
-    const more = shown < filteredRows.length ? ' — more available, click Load more.' : '';
-    setPanelStatus(
-      `Showing ${shown} of ${filteredRows.length} matching transaction(s) (${state.rows.length} scanned).${more}${hint}`,
-      'ok',
-    );
+  const total = matches().length;
+  const start = state.page * BATCH_SIZE;
+  if (!total) {
+    setPanelStatus(`No matching transactions (${state.rows.length} scanned).${hint}`, 'info');
     return;
   }
-
-  if (state.exhausted) {
-    setPanelStatus(`Showing ${state.rows.length} transaction(s). Audit complete.${hint}`, 'ok');
-  } else {
-    setPanelStatus(`Showing ${state.rows.length} transaction(s) — more available, click Load more.${hint}`, 'ok');
-  }
+  const range = `Transactions ${start + 1}–${Math.min(total, start + BATCH_SIZE)}`;
+  const count = state.exhausted ? ` of ${total}` : ' · more available';
+  const scanned = isFiltersActive(filters) ? ` (${state.rows.length} scanned)` : '';
+  setPanelStatus(`${range}${count}${scanned}.${hint}`, 'ok');
 }
 
 function updateViewButtons() {
@@ -2327,7 +2323,7 @@ async function applyFiltersAndRender() {
   const revision = ++filterRevision;
   appliedFilters = readFilters();
   matchingRows = null;
-  state.filteredVisibleCount = BATCH_SIZE;
+  state.page = 0;
   if (appliedFilters.valid && isFiltersActive(appliedFilters) && state.audit && (!state.exhausted || drainPromise)) {
     setPanelStatus('Loading full result set to apply filters…', 'info');
     const loading = ensureFullyLoaded();
@@ -2405,7 +2401,7 @@ function resetAuditState() {
   state.poolFee = 0n;
   state.txCounter = 0;
   state.exhausted = false;
-  state.filteredVisibleCount = BATCH_SIZE;
+  state.page = 0;
   state.selectedNoteId = null;
   state.graphNotes = null;
   state.selectedPk = null;
@@ -2563,31 +2559,31 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     }
   });
 
-  loadMoreBtnEl?.addEventListener('click', async () => {
-    if (!appliedFilters.valid) return;
-    // Filters already forced a full drain, so "load more" just widens the
-    // locally-visible window instead of touching the cursor.
-    if (isFiltersActive(appliedFilters)) {
-      state.filteredVisibleCount += BATCH_SIZE;
-      refreshAuditDisplay();
-      return;
-    }
+  prevBtnEl.addEventListener('click', () => {
+    state.page = Math.max(0, state.page - 1);
+    refreshAuditDisplay();
+  });
 
+  nextBtnEl.addEventListener('click', async () => {
     const audit = state.audit;
-    const originalText = loadMoreBtnEl.textContent;
+    const revision = filterRevision;
+    const nextPage = state.page + 1;
+    fetchingPage = true;
+    syncActionButtons();
     try {
-      loadMoreBtnEl.disabled = true;
-      loadMoreBtnEl.textContent = 'Loading…';
-      loadMoreBtnEl.ariaBusy = true;
-      await fetchBatch(BATCH_SIZE);
-      if (audit === state.audit) refreshAuditDisplay();
+      if (!state.exhausted && isFiltersActive(appliedFilters)) {
+        await ensureFullyLoaded();
+      } else if (!state.exhausted) {
+        const missing = (nextPage + 1) * BATCH_SIZE - matches().length;
+        if (missing > 0) await fetchBatch(missing);
+      }
+      if (audit !== state.audit || revision !== filterRevision) return;
+      if (nextPage * BATCH_SIZE < matches().length) state.page = nextPage;
+      refreshAuditDisplay();
     } catch (err) {
-      if (audit !== state.audit) return;
-      setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
-      showToast?.(`Load more failed: ${err?.message || err}`, 'error');
+      if (audit === state.audit) setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
     } finally {
-      loadMoreBtnEl.textContent = originalText;
-      loadMoreBtnEl.ariaBusy = false;
+      fetchingPage = false;
       syncActionButtons();
     }
   });
