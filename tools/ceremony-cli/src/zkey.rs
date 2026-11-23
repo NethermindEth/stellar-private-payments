@@ -3,8 +3,9 @@
 //   https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/index.rs (`NPIndex`)
 //
 // Local changes: only the proving key is read (the constraint matrices and
-// `NPIndex` are dropped), malformed headers, missing sections, non-canonical
-// field elements and invalid curve points return errors instead of panicking,
+// `NPIndex` are dropped), point sections must match the size implied by the
+// header, malformed headers, missing sections, non-canonical field elements
+// and invalid curve points return errors instead of panicking,
 // and the upstream test module (which needs the upstream test
 // vectors and the wasmer witness calculator) is dropped.
 #![allow(
@@ -62,12 +63,13 @@ type IoResult<T> = Result<T, SerializationError>;
 
 const ZKEY_MAGIC: &[u8; 4] = b"zkey";
 const PROTOCOL_GROTH16: u32 = 1;
+const G1_SIZE: u64 = 64;
+const G2_SIZE: u64 = 128;
 
 #[derive(Clone, Debug)]
 struct Section {
     position: u64,
-    #[allow(dead_code)]
-    size: usize,
+    size: u64,
 }
 
 /// Reads a SnarkJS ZKey file into an Arkworks ProvingKey.
@@ -105,10 +107,12 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
             let section = sections.entry(section_id).or_insert_with(Vec::new);
             section.push(Section {
                 position: reader.stream_position()?,
-                size: section_length as usize,
+                size: section_length,
             });
 
-            reader.seek(SeekFrom::Current(section_length as i64))?;
+            let skip =
+                i64::try_from(section_length).map_err(|_| SerializationError::InvalidData)?;
+            reader.seek(SeekFrom::Current(skip))?;
         }
 
         Ok(Self {
@@ -204,15 +208,30 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
     }
 
     fn g1_section(&mut self, num: usize, section_id: usize) -> IoResult<Vec<G1Affine>> {
-        let section = self.get_section(section_id as u32)?;
-        self.reader.seek(SeekFrom::Start(section.position))?;
-        deserialize_g1_vec(self.reader, num as u32)
+        let num = self.seek_point_section(num, section_id, G1_SIZE)?;
+        deserialize_g1_vec(self.reader, num)
     }
 
     fn g2_section(&mut self, num: usize, section_id: usize) -> IoResult<Vec<G2Affine>> {
+        let num = self.seek_point_section(num, section_id, G2_SIZE)?;
+        deserialize_g2_vec(self.reader, num)
+    }
+
+    /// Seeks to a section holding `num` points of `point_size` bytes each,
+    /// rejecting it unless its length is exactly `num * point_size`.
+    fn seek_point_section(
+        &mut self,
+        num: usize,
+        section_id: usize,
+        point_size: u64,
+    ) -> IoResult<u32> {
         let section = self.get_section(section_id as u32)?;
+        let num = u32::try_from(num).map_err(|_| SerializationError::InvalidData)?;
+        if u64::from(num).checked_mul(point_size) != Some(section.size) {
+            return Err(SerializationError::InvalidData);
+        }
         self.reader.seek(SeekFrom::Start(section.position))?;
-        deserialize_g2_vec(self.reader, num as u32)
+        Ok(num)
     }
 }
 
@@ -430,5 +449,29 @@ mod tests {
         assert!(point.is_on_curve());
         assert!(!point.is_in_correct_subgroup_assuming_on_curve());
         assert!(deserialize_g2(&mut &g2_bytes(&point)[..]).is_err());
+    }
+
+    fn single_section_zkey(section_id: u32, body: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(ZKEY_MAGIC);
+        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&section_id.to_le_bytes());
+        out.extend_from_slice(&(body.len() as u64).to_le_bytes());
+        out.extend_from_slice(body);
+        out
+    }
+
+    #[test]
+    fn point_section_must_match_expected_size() {
+        let bytes = single_section_zkey(5, &[0u8; 2 * 64]);
+        let mut reader = std::io::Cursor::new(bytes);
+        let mut binfile = BinFile::new(&mut reader).unwrap();
+
+        assert_eq!(binfile.g1_section(2, 5).unwrap().len(), 2);
+        assert!(binfile.g1_section(1, 5).is_err());
+        assert!(binfile.g1_section(3, 5).is_err());
+        assert!(binfile.g2_section(1, 5).is_ok());
+        assert!(binfile.g2_section(2, 5).is_err());
     }
 }

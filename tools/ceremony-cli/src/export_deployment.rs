@@ -41,8 +41,8 @@ pub(crate) fn export_deployment(
     // This avoids subtle format/ordering issues (e.g. sparse query vectors).
     let pk = proving_key_from_zkey(&args.zkey)?;
 
-    // Bail on identity IC points, as they drop their public input from the verification
-    // equation, so the verifier would accept any value for it.
+    // Bail on identity IC points, as they drop their public input from the
+    // verification equation, so the verifier would accept any value for it.
     if let Some(i) = pk
         .vk
         .gamma_abc_g1
