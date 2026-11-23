@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { collectNotes, noteLinks, unspentByPk } from '../../../app/js/gvk-notes.js';
+import {
+  amountByPk,
+  collectNotes,
+  createNoteIndex,
+  normalizedOutputs,
+  noteLinks,
+  unspentByPk,
+} from '../../../app/js/gvk-notes.js';
 
 const c = `0x${'c'.repeat(64)}`;
 const note = { note: { pk: 'pk', amount: '5' }, commitment: c };
@@ -78,3 +85,55 @@ test('a spend from two keys credits the recipient once', () => {
   assert.deepEqual(balances(rows), new Map([['c', 90n]]));
 });
 
+test('incremental balances and lifetime receipts match recomputation after each append', () => {
+  const first = pkNote(' A ', 60, 'a1');
+  const second = pkNote('b', 40, 'a1');
+  const change = pkNote('a', 15, 'a2');
+  const recipient = pkNote('c', 80, 'c1');
+  const viewOnly = pkNote('view-only', 25, 'd1');
+  const inputOnly = pkNote('input-only', 99, 'e1');
+  const revealedOnSpend = pkNote('revealed-on-spend', 55, 'f1');
+  const outputSlot = (audited) => ({ commitment: audited.commitment, note: audited });
+  const inputSlot = (audited, nullifier) => ({ nullifier, note: audited });
+  const rows = [
+    row(0, [first, second, viewOnly].map(outputSlot)),
+    row(1, [change, recipient].map(outputSlot), [inputSlot(second, 'n1')]),
+    row(2, [{ commitment: revealedOnSpend.commitment }], [inputSlot(first, 'n2'), { nullifier: 'masked' }]),
+    row(3, [], [
+      inputSlot(first, 'n3'),
+      inputSlot(inputOnly, 'n4'),
+      inputSlot(revealedOnSpend, 'n5'),
+    ]),
+  ];
+  const index = createNoteIndex();
+  const loaded = [];
+  for (const next of rows) {
+    index.append(next);
+    loaded.push(next);
+    const expectedBalances = balances(loaded);
+    const expectedReceipts = amountByPk(loaded.flatMap(({ tx }) => normalizedOutputs(tx)).filter((slot) => slot.audited));
+    for (const pk of ['a', 'b', 'c', 'view-only', 'input-only', 'revealed-on-spend', 'unknown']) {
+      assert.equal(index.balanceOf(` ${pk.toUpperCase()} `), expectedBalances.get(pk) ?? 0n, `balance for ${pk} at row ${next.index}`);
+      assert.equal(index.receivedBy(pk), expectedReceipts.get(pk) ?? 0n, `receipts for ${pk} at row ${next.index}`);
+    }
+  }
+});
+
+test('paging hides off-page events while preserving known spends and note links', () => {
+  const index = createNoteIndex();
+  const deposit = row(1, [output]);
+  const spend = row(21, [], [input]);
+  index.append(deposit);
+  assert.equal(index.visibleNotes([deposit])[0].knownSpent, false);
+  index.append(spend);
+
+  const [first] = index.visibleNotes([deposit]);
+  assert.equal(first.knownSpent, true);
+  assert.equal(first.spentTxIndex, null);
+  assert.equal(first.nullifier, null);
+  const [second] = index.visibleNotes([spend]);
+  assert.equal(second.createdTxIndex, null);
+  assert.equal(second.spentTxIndex, 21);
+  assert.equal(index.links.get(first.noteId), '21:input:0');
+  assert.equal(index.auditedNotes()[0].spentTxIndex, 21);
+});

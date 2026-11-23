@@ -61,11 +61,31 @@ const blank = {
   spentNoteId: null,
 };
 
-function groupNotes(rows) {
+/** Incrementally pairs creation and spend events across the loaded audit. */
+export function createNoteIndex() {
   const notes = [];
   const unspent = new Map();
+  const byTransaction = new Map();
+  const links = new Map();
+  const totals = new Map();
 
-  for (const { tx, index, kind } of rows) {
+  function credit(audited) {
+    const pk = normalizeFieldKey(audited?.note.pk);
+    if (!pk) return null;
+    const amount = parseFieldAmount(audited.note.amount);
+    let total = totals.get(pk);
+    if (!total) {
+      total = { balance: 0n, received: 0n };
+      totals.set(pk, total);
+    }
+    total.balance += amount;
+    total.received += amount;
+    return { total, amount };
+  }
+
+  function append({ tx, index, kind }) {
+    const touched = [];
+    byTransaction.set(index, touched);
     // Inputs before outputs: a tx cannot spend its own outputs.
     for (const slot of normalizedInputs(tx)) {
       const spend = {
@@ -76,27 +96,36 @@ function groupNotes(rows) {
       };
       // The GVK ciphertext carries no leaf index, so guess the oldest unspent copy:
       // the SDK spends a wallet's oldest copy first.
-      const existing = unspent.get(normalizeFieldKey(slot.audited?.commitment))?.shift();
+      const match = unspent.get(normalizeFieldKey(slot.audited?.commitment))?.shift();
 
-      if (existing) {
+      if (match) {
+        const { note: existing, credit } = match;
+        if (credit) credit.total.balance -= credit.amount;
         Object.assign(existing, spend, { spentNoteId: noteRowId(index, 'input', slot.index) });
+        links.set(existing.noteId, existing.spentNoteId);
+        links.set(existing.spentNoteId, existing.noteId);
+        touched.push(existing);
         if (!existing.audited && slot.audited) existing.audited = slot.audited;
         continue;
       }
 
       // Spent, but its creating output isn't in the given rows.
-      notes.push({
+      const note = {
+        order: notes.length,
         ...blank,
         ...spend,
         commitment: slot.audited?.commitment ?? null,
         audited: slot.audited,
         noteId: noteRowId(index, 'input', slot.index),
-      });
+      };
+      notes.push(note);
+      touched.push(note);
     }
 
     for (const slot of normalizedOutputs(tx)) {
       const commitment = slot.audited?.commitment ?? slot.commitment ?? null;
       const note = {
+        order: notes.length,
         ...blank,
         commitment,
         audited: slot.audited,
@@ -106,41 +135,54 @@ function groupNotes(rows) {
         noteId: noteRowId(index, 'output', slot.index),
       };
       notes.push(note);
+      touched.push(note);
+      const credited = credit(slot.audited);
       const key = normalizeFieldKey(commitment);
       if (!key) continue;
       if (!unspent.has(key)) unspent.set(key, []);
-      unspent.get(key).push(note);
+      unspent.get(key).push({ note, credit: credited });
     }
   }
 
-  return notes;
+  // Clip event details to the visible transactions, retaining the known spend status.
+  function visibleNotes(rows) {
+    const shown = new Set(rows.map((row) => row.index));
+    const touched = new Set(rows.flatMap((row) => byTransaction.get(row.index) ?? []));
+    return [...touched].filter((note) => note.audited).sort((a, b) => a.order - b.order).map((record) => {
+      const note = { ...record, knownSpent: record.spentTxIndex != null };
+      if (!shown.has(note.createdTxIndex)) {
+        Object.assign(note, { createdTxIndex: null, createdLedger: null, createdKind: null });
+      }
+      if (!shown.has(note.spentTxIndex)) {
+        Object.assign(note, { spentTxIndex: null, spentLedger: null, spentKind: null, nullifier: null });
+      }
+      return note;
+    });
+  }
+
+  return {
+    append,
+    links,
+    visibleNotes,
+    auditedNotes: () => notes.filter((note) => note.audited),
+    balanceOf: (pk) => totals.get(normalizeFieldKey(pk))?.balance ?? 0n,
+    receivedBy: (pk) => totals.get(normalizeFieldKey(pk))?.received ?? 0n,
+  };
 }
 
-/**
- * Collapses every output/input slot across `rows` into one record per note, so
- * copies of a commitment are separate records and a note created in one tx and
- * spent in another shows up once. Keeps the notes created or spent in `visible`,
- * with the creation or spend fields of a hidden tx set to null.
- */
+function indexRows(rows) {
+  const index = createNoteIndex();
+  rows.forEach(index.append);
+  return index;
+}
+
 export function collectNotes(rows, visible = rows) {
-  const shown = new Set(visible.map((row) => row.index));
-  const notes = groupNotes(rows).filter((note) =>
-    note.audited && (shown.has(note.createdTxIndex) || shown.has(note.spentTxIndex)));
-  for (const note of notes) {
-    if (!shown.has(note.createdTxIndex)) {
-      Object.assign(note, { createdTxIndex: null, createdLedger: null, createdKind: null });
-    }
-    if (!shown.has(note.spentTxIndex)) {
-      Object.assign(note, { spentTxIndex: null, spentLedger: null, spentKind: null, nullifier: null });
-    }
-  }
-  return notes;
+  const index = indexRows(rows);
+  return visible === rows ? index.auditedNotes() : index.visibleNotes(visible);
 }
 
-/** Pairs each note's output id with the input id that spent it. */
 export function noteLinks(rows) {
-  return groupNotes(rows)
-    .filter((note) => note.spentNoteId)
+  return indexRows(rows).auditedNotes().filter((note) => note.spentNoteId)
     .map((note) => [note.noteId, note.spentNoteId]);
 }
 
