@@ -5,20 +5,22 @@
 
 use crate::{
     CommandRunner, ExportDeploymentArgs, assert_dir_exists, assert_output_allowed,
-    assert_readable_file, zkey::read_zkey,
+    assert_readable_file, resolve_circuits, verify_zkey, zkey::read_zkey,
 };
 use anyhow::{Context, Result, anyhow, bail};
-use ark_bn254::Bn254;
+use ark_bn254::{Bn254, G1Affine};
 use ark_groth16::ProvingKey;
 use ark_serialize::CanonicalDeserialize;
 use std::{fs, io::BufReader, path::Path};
 
 pub(crate) fn export_deployment(
     args: ExportDeploymentArgs,
-    _runner: &dyn CommandRunner,
+    runner: &dyn CommandRunner,
 ) -> Result<()> {
     assert_readable_file(&args.zkey, "zkey")?;
+    assert_readable_file(&args.ptau, "ptau")?;
     assert_dir_exists(&args.out_dir)?;
+    let circuit = resolve_circuits(&args.circuits)?;
 
     let pk_path = args
         .out_dir
@@ -33,9 +35,22 @@ pub(crate) fn export_deployment(
         assert_output_allowed(path, args.force)?;
     }
 
+    verify_zkey(runner, &circuit, &args.ptau, &args.zkey)?;
+
     // Prefer parsing the snarkjs `.zkey` directly, without a JSON roundtrip.
     // This avoids subtle format/ordering issues (e.g. sparse query vectors).
     let pk = proving_key_from_zkey(&args.zkey)?;
+
+    // Bail on identity IC points, as they drop their public input from the verification
+    // equation, so the verifier would accept any value for it.
+    if let Some(i) = pk
+        .vk
+        .gamma_abc_g1
+        .iter()
+        .position(|p| *p == G1Affine::identity())
+    {
+        bail!("invalid verification key: IC[{i}] is the point at infinity");
+    }
 
     // Sanity check: proving key bytes must round-trip before writing to disk.
     // This ensures our reconstructed structure matches arkworks' canonical
@@ -55,8 +70,8 @@ pub(crate) fn export_deployment(
     circuit_keys::write_vk_rust_const(&pk.vk, &vk_const_path)?;
 
     // Validate emitted proving key by checking the on-disk verifying key
-    // matches. We deserialize unchecked here because the proving key is
-    // derived from a trusted ceremony.
+    // matches. Unchecked deserialization is enough here: the points were
+    // already validated when parsing the zkey, which passed `zkey verify`.
     let written_pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(
         &fs::read(&pk_path).with_context(|| format!("failed to read {}", pk_path.display()))?[..],
     )
@@ -80,7 +95,7 @@ fn proving_key_from_zkey(zkey_path: &Path) -> Result<ProvingKey<Bn254>> {
     let file = fs::File::open(zkey_path)
         .with_context(|| format!("failed to open {}", zkey_path.display()))?;
     let mut reader = BufReader::new(file);
-    let (pk, _matrices) = read_zkey(&mut reader)
+    let pk = read_zkey(&mut reader)
         .map_err(|e| anyhow!("failed to parse snarkjs zkey {}: {e}", zkey_path.display()))?;
     Ok(pk)
 }

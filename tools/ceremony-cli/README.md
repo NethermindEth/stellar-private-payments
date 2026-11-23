@@ -92,6 +92,7 @@ Each contributor returns a new `.zkey` to pass to the next contributor.
 ```bash
 ceremony-cli finalize \
   --zkey circuit_final_contrib.zkey \
+  --ptau powersOfTau28_hez_final_16.ptau \
   --beacon-hash $BEACON_HASH \
   --beacon-power 10 \
   --out-dir ./artifacts \
@@ -101,6 +102,7 @@ ceremony-cli finalize \
 This executes:
 
 - `snarkjs zkey beacon ...`
+- `snarkjs zkey verify ...` (verifies the final zkey)
 - `snarkjs zkey export verificationkey ...`
 
 Outputs:
@@ -117,6 +119,7 @@ If you want the web prover and deployment files to use the final ceremony key ma
 ```bash
 ceremony-cli export-deployment \
   --zkey ./artifacts/circuit_final.zkey \
+  --ptau powersOfTau28_hez_final_16.ptau \
   --out-dir ./deployments/testnet/circuit_keys \
   --basename policy_tx_2_2_AB \
   --force
@@ -135,7 +138,13 @@ Why this step exists:
 - the app prover also needs `policy_tx_2_2_AB_proving_key.bin`, which is an arkworks-serialized `ProvingKey<Bn254>`, not a `snarkjs` `.zkey`
 - `vk_soroban.bin` and `vk_const.rs` are alternate verifier encodings used by this repo
 
-Internally, the helper exports the `.zkey` to JSON with `snarkjs`, reconstructs the arkworks proving key, writes `proving_key.bin`, and emits the verifier artifacts in the same formats as `tools/circuit-compiler`.
+The helper first runs `snarkjs zkey verify` against the circuit and ptau, and
+refuses to export a zkey that fails it. It then parses the `.zkey` directly,
+rejects verification keys with an identity public-input point, writes
+`proving_key.bin`, and emits the verifier artifacts in the same formats as
+`tools/circuit-compiler`. As with the other commands, `--circuit` defaults to
+the compiled `policy_tx_2_2_AB.r1cs`, pass it explicitly when exporting keys for
+another circuit.
 
 ---
 

@@ -2,8 +2,10 @@
 //   https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/zkey.rs
 //   https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/index.rs (`NPIndex`)
 //
-// Local changes: `NPIndex` is inlined below, and the test module (which needs
-// the upstream test vectors and the wasmer witness calculator) is dropped.
+// Local changes: only the proving key is read (the constraint matrices and
+// `NPIndex` are dropped), malformed headers and missing sections return errors
+// instead of panicking, and the test module (which needs the upstream test
+// vectors and the wasmer witness calculator) is dropped.
 #![allow(
     clippy::arithmetic_side_effects,
     clippy::indexing_slicing,
@@ -57,6 +59,9 @@ use std::{
 
 type IoResult<T> = Result<T, SerializationError>;
 
+const ZKEY_MAGIC: &[u8; 4] = b"zkey";
+const PROTOCOL_GROTH16: u32 = 1;
+
 #[derive(Clone, Debug)]
 struct Section {
     position: u64,
@@ -65,17 +70,14 @@ struct Section {
 }
 
 /// Reads a SnarkJS ZKey file into an Arkworks ProvingKey.
-pub fn read_zkey<R: Read + Seek>(reader: &mut R) -> IoResult<(ProvingKey<Bn254>, NPIndex<Fr>)> {
+pub fn read_zkey<R: Read + Seek>(reader: &mut R) -> IoResult<ProvingKey<Bn254>> {
     let mut binfile = BinFile::new(reader)?;
-    let proving_key = binfile.proving_key()?;
-    let matrices = binfile.matrices()?;
-    Ok((proving_key, matrices))
+    binfile.check_protocol()?;
+    binfile.proving_key()
 }
 
 #[derive(Debug)]
 struct BinFile<'a, R> {
-    #[allow(dead_code)]
-    ftype: String,
     #[allow(dead_code)]
     version: u32,
     sections: HashMap<u32, Vec<Section>>,
@@ -86,6 +88,9 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
     fn new(reader: &'a mut R) -> IoResult<Self> {
         let mut magic = [0u8; 4];
         reader.read_exact(&mut magic)?;
+        if &magic != ZKEY_MAGIC {
+            return Err(SerializationError::InvalidData);
+        }
 
         let version = reader.read_u32::<LittleEndian>()?;
 
@@ -106,21 +111,34 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
         }
 
         Ok(Self {
-            ftype: std::str::from_utf8(&magic[..]).unwrap().to_string(),
             version,
             sections,
             reader,
         })
     }
 
+    fn check_protocol(&mut self) -> IoResult<()> {
+        let section = self.get_section(1)?;
+        self.reader.seek(SeekFrom::Start(section.position))?;
+        if self.reader.read_u32::<LittleEndian>()? != PROTOCOL_GROTH16 {
+            return Err(SerializationError::InvalidData);
+        }
+        Ok(())
+    }
+
     fn proving_key(&mut self) -> IoResult<ProvingKey<Bn254>> {
         let header = self.groth_header()?;
         let ic = self.ic(header.n_public)?;
 
+        let n_private = header
+            .n_vars
+            .checked_sub(header.n_public + 1)
+            .ok_or(SerializationError::InvalidData)?;
+
         let a_query = self.a_query(header.n_vars)?;
         let b_g1_query = self.b_g1_query(header.n_vars)?;
         let b_g2_query = self.b_g2_query(header.n_vars)?;
-        let l_query = self.l_query(header.n_vars - header.n_public - 1)?;
+        let l_query = self.l_query(n_private)?;
         let h_query = self.h_query(header.domain_size as usize)?;
 
         let vk = VerifyingKey::<Bn254> {
@@ -145,12 +163,16 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
         Ok(pk)
     }
 
-    fn get_section(&self, id: u32) -> Section {
-        self.sections.get(&id).unwrap()[0].clone()
+    fn get_section(&self, id: u32) -> IoResult<Section> {
+        self.sections
+            .get(&id)
+            .and_then(|s| s.first())
+            .cloned()
+            .ok_or(SerializationError::InvalidData)
     }
 
     fn groth_header(&mut self) -> IoResult<HeaderGroth> {
-        let section = self.get_section(2);
+        let section = self.get_section(2)?;
         let header = HeaderGroth::new(&mut self.reader, &section)?;
         Ok(header)
     }
@@ -158,54 +180,6 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
     fn ic(&mut self, n_public: usize) -> IoResult<Vec<G1Affine>> {
         // the range is non-inclusive so we do +1 to get all inputs
         self.g1_section(n_public + 1, 3)
-    }
-
-    /// Returns the [`NPIndex`] corresponding to the zkey
-    pub fn matrices(&mut self) -> IoResult<NPIndex<Fr>> {
-        let header = self.groth_header()?;
-
-        let section = self.get_section(4);
-        self.reader.seek(SeekFrom::Start(section.position))?;
-        let num_coeffs: u32 = self.reader.read_u32::<LittleEndian>()?;
-
-        // instantiate AB
-        let mut matrices = vec![vec![vec![]; header.domain_size as usize]; 2];
-        let mut max_constraint_index = 0;
-        for _ in 0..num_coeffs {
-            let matrix: u32 = self.reader.read_u32::<LittleEndian>()?;
-            let constraint: u32 = self.reader.read_u32::<LittleEndian>()?;
-            let signal: u32 = self.reader.read_u32::<LittleEndian>()?;
-
-            let value: Fr = deserialize_field_fr(&mut self.reader)?;
-            max_constraint_index = std::cmp::max(max_constraint_index, constraint);
-            matrices[matrix as usize][constraint as usize].push((value, signal as usize));
-        }
-
-        let num_constraints = max_constraint_index as usize - header.n_public;
-        // Remove the public input constraints, Arkworks adds them later
-        matrices.iter_mut().for_each(|m| {
-            m.truncate(num_constraints);
-        });
-        // This is taken from Arkworks' to_matrices() function
-        let a = matrices[0].clone();
-        let b = matrices[1].clone();
-        let a_num_non_zero: usize = a.iter().map(|lc| lc.len()).sum();
-        let b_num_non_zero: usize = b.iter().map(|lc| lc.len()).sum();
-        let matrices = NPIndex {
-            num_instance_variables: header.n_public + 1,
-            num_witness_variables: header.n_vars - header.n_public,
-            num_constraints,
-
-            a_num_non_zero,
-            b_num_non_zero,
-            c_num_non_zero: 0,
-
-            a,
-            b,
-            c: vec![],
-        };
-
-        Ok(matrices)
     }
 
     fn a_query(&mut self, n_vars: usize) -> IoResult<Vec<G1Affine>> {
@@ -229,13 +203,13 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
     }
 
     fn g1_section(&mut self, num: usize, section_id: usize) -> IoResult<Vec<G1Affine>> {
-        let section = self.get_section(section_id as u32);
+        let section = self.get_section(section_id as u32)?;
         self.reader.seek(SeekFrom::Start(section.position))?;
         deserialize_g1_vec(self.reader, num as u32)
     }
 
     fn g2_section(&mut self, num: usize, section_id: usize) -> IoResult<Vec<G2Affine>> {
-        let section = self.get_section(section_id as u32);
+        let section = self.get_section(section_id as u32)?;
         self.reader.seek(SeekFrom::Start(section.position))?;
         deserialize_g2_vec(self.reader, num as u32)
     }
@@ -307,6 +281,9 @@ impl HeaderGroth {
         let n8r: u32 = u32::deserialize_uncompressed(&mut reader)?;
         // Prime field modulus
         let r = BigInteger256::deserialize_uncompressed(&mut reader)?;
+        if n8q != 32 || n8r != 32 || q != Fq::MODULUS || r != Fr::MODULUS {
+            return Err(SerializationError::InvalidData);
+        }
 
         let n_vars = u32::deserialize_uncompressed(&mut reader)? as usize;
         let n_public = u32::deserialize_uncompressed(&mut reader)? as usize;
@@ -328,13 +305,6 @@ impl HeaderGroth {
             verifying_key,
         })
     }
-}
-
-// need to divide by R, since snarkjs outputs the zkey with coefficients
-// multiplieid by R^2
-fn deserialize_field_fr<R: Read>(reader: &mut R) -> IoResult<Fr> {
-    let bigint = BigInteger256::deserialize_uncompressed(reader)?;
-    Ok(Fr::new_unchecked(Fr::new_unchecked(bigint).into_bigint()))
 }
 
 // skips the multiplication by R because Circom points are already in Montgomery
@@ -379,38 +349,4 @@ fn deserialize_g1_vec<R: Read>(reader: &mut R, n_vars: u32) -> IoResult<Vec<G1Af
 
 fn deserialize_g2_vec<R: Read>(reader: &mut R, n_vars: u32) -> IoResult<Vec<G2Affine>> {
     (0..n_vars).map(|_| deserialize_g2(reader)).collect()
-}
-
-use ark_ff::Field;
-use ark_relations::utils::matrix::Matrix;
-
-/// The A, B and C matrices of a Rank-One `ConstraintSystem`.
-/// Also contains metadata on the structure of the constraint system
-/// and the matrices.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NPIndex<F: Field> {
-    /// The number of variables that are "public instances" to the constraint
-    /// system.
-    pub num_instance_variables: usize,
-    /// The number of variables that are "private witnesses" to the constraint
-    /// system.
-    pub num_witness_variables: usize,
-    /// The number of constraints in the constraint system.
-    pub num_constraints: usize,
-    /// The number of non_zero entries in the A matrix.
-    pub a_num_non_zero: usize,
-    /// The number of non_zero entries in the B matrix.
-    pub b_num_non_zero: usize,
-    /// The number of non_zero entries in the C matrix.
-    pub c_num_non_zero: usize,
-
-    /// The A constraint matrix. This is empty when
-    /// `self.mode == SynthesisMode::Prove { construct_matrices = false }`.
-    pub a: Matrix<F>,
-    /// The B constraint matrix. This is empty when
-    /// `self.mode == SynthesisMode::Prove { construct_matrices = false }`.
-    pub b: Matrix<F>,
-    /// The C constraint matrix. This is empty when
-    /// `self.mode == SynthesisMode::Prove { construct_matrices = false }`.
-    pub c: Matrix<F>,
 }
