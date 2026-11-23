@@ -31,7 +31,7 @@ async function panelBundle() {
   });
 }
 
-async function openPanel(t, { mode = 'traceable', count = 43, spendAt = null } = {}) {
+async function openPanel(t, { mode = 'traceable', count = 43, spendAt = null, bobFrom = null, registryReady = false } = {}) {
   const browser = await chromium.launch({ channel: process.env.CHROMIUM_CHANNEL });
   t.after(() => browser.close());
   const page = await browser.newPage();
@@ -44,15 +44,18 @@ async function openPanel(t, { mode = 'traceable', count = 43, spendAt = null } =
   await page.setContent(html.match(/<section id="global-view"[\s\S]*?<\/section>/)[0]);
   await page.locator('#global-view').evaluate((section) => { section.hidden = false; });
   await page.addScriptTag({ content: (await panelBundle()).outputFiles[0].text });
-  await page.evaluate(async ({ mode, count, spendAt }) => {
+  await page.evaluate(async ({ mode, count, spendAt, bobFrom, registryReady }) => {
     const pool = { poolContractId: 'pool', gvkMode: mode };
     window.calls = 0;
+    window.registryReady = registryReady;
     window.auditClient = {
       contractConfig: () => ({ pools: [pool] }),
       poolContractsData: () => ({ pools: [{ fee: 0 }] }),
-      noteKeyOwnerLookup: () => ({
+      noteKeyOwnerLookup: (keys) => ({
         registryFullySynced: !!window.registryReady,
-        owners: [{ noteKey: 'alice', address: 'registered-address', free() {} }],
+        owners: keys.map((noteKey) => ({
+          noteKey, address: noteKey === 'alice' ? 'registered-address' : `${noteKey}-address`, free() {},
+        })),
         free() {},
       }),
       gvkAuthority: () => ({
@@ -62,6 +65,11 @@ async function openPanel(t, { mode = 'traceable', count = 43, spendAt = null } =
           return {
             free() {},
             nextTx() {
+              // Each listed ledger holds the scan after it until the test calls resumeScan.
+              if (window.pauses?.[0] === ledger) {
+                window.pauses.shift();
+                return new Promise((resolve) => { window.resumeScan = () => resolve(this.nextTx()); });
+              }
               window.calls++;
               if (ledger === window.failAt) {
                 window.failAt = null;
@@ -69,7 +77,8 @@ async function openPanel(t, { mode = 'traceable', count = 43, spendAt = null } =
               }
               if (ledger === count) return null;
               ledger++;
-              const note = { commitment: String(ledger), note: { pk: 'alice', amount: '0x10' } };
+              const pk = bobFrom != null && ledger >= bobFrom ? 'bob' : 'alice';
+              const note = { commitment: String(ledger), note: { pk, amount: '0x10' } };
               const inputs = ledger === spendAt
                 ? [{ nullifier: 'spent-first-note', note: { ...note, commitment: '1' } }]
                 : [];
@@ -80,7 +89,7 @@ async function openPanel(t, { mode = 'traceable', count = 43, spendAt = null } =
       }),
     };
     await window.gvkPanel.initGvkAuditPanel({ ensureCryptoReady: async () => {} });
-  }, { mode, count, spendAt });
+  }, { mode, count, spendAt, bobFrom, registryReady });
   const status = (value) => page.waitForFunction(
     (text) => document.querySelector('#gvkAuditStatus').textContent.includes(text), value,
   );
@@ -141,6 +150,44 @@ test('GVK paging, filter scans and graph selection', async (t) => {
   // The owner retry backs off up to 60 s while the registry syncs; fire it now.
   await page.clock.fastForward(60_000);
   await status('Transactions 1–20 of 43');
+  assert.deepEqual(errors, []);
+});
+
+test('GVK filters show matches while the pool scan continues', async (t) => {
+  const { page, errors, status, click } = await openPanel(t, { count: 100 });
+  const articles = page.locator('#gvkAuditResults article');
+  const next = page.locator('#gvkNextBtn');
+  await page.evaluate(() => { window.pauses = [30]; });
+  await page.locator('#gvkFilterPk').fill('missing');
+  await status('No matching transactions');
+
+  await page.locator('#gvkFilterPk').fill('');
+  await page.locator('#gvkFilterLedgerFrom').fill('11');
+  await status('Transactions 1–20 · more available (30 scanned)');
+  assert.equal(await articles.count(), 20);
+  assert.equal(await next.isDisabled(), false);
+  assert.equal(await page.locator('#gvkExportBtn').isDisabled(), true);
+
+  // Next waits for a match on the next page, then the scan fills the page in.
+  await click('NextBtn');
+  await page.evaluate(() => window.resumeScan());
+  await status('Transactions 21–40 of 90 (100 scanned)');
+  assert.equal(await articles.count(), 20);
+  assert.equal(await articles.first().getByText('ledger 31', { exact: true }).count(), 1);
+  assert.deepEqual(errors, []);
+});
+
+test('GVK address filters look up the owners of rows found mid-scan', async (t) => {
+  const { page, errors, status } = await openPanel(t, { count: 80, bobFrom: 31, registryReady: true });
+  // The scan checks the clock between batches of 20: skip past its refresh interval while held after ledger 40.
+  await page.evaluate(() => { window.pauses = [40, 60]; });
+  await page.locator('#gvkFilterPk').fill('bob-address');
+  await status('No matching transactions');
+  await page.clock.fastForward(1_000);
+  await page.evaluate(() => window.resumeScan());
+  await status('Transactions 1–20 · more available (60 scanned)');
+  await page.evaluate(() => window.resumeScan());
+  await status('Transactions 1–20 of 50 (80 scanned)');
   assert.deepEqual(errors, []);
 });
 

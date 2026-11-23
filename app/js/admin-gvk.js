@@ -599,19 +599,74 @@ function rowMatchesFilters(row, filters) {
 
 let appliedFilters;
 let matchingRows;
+let matchedThrough = 0;
+// Owner keys still pending when a PK filter tested their rows: settling one re-tests every row.
+const matchedPendingKeys = new Set();
+// Rows below this index had their owner keys looked up, whatever the answer.
+let ownersQueriedThrough = 0;
 let filterTimer;
 let filterRevision = 0;
 let timeRevision = 0;
 let refreshSelection;
 let fetchingPage = false;
+// The page last rendered and how many rows it showed, so a scan only re-renders a page that gained rows.
+let renderedPage = null;
+let matchWaiters = [];
 
+function pendingKeysOf(row) {
+  return txNotes(row.tx)
+    .map((note) => normalizeFieldKey(note.note.pk))
+    .filter((pk) => pk && state.pendingOwnerKeys.has(pk));
+}
+
+/**
+ * The rows matching the applied filters, extended as rows are appended. A PK filter also matches registered
+ * addresses, so it stops at the first row whose owners were never looked up, unless lookups are on hold.
+ */
 function matches() {
+  if (!isFiltersActive(appliedFilters)) return state.rows;
   if (!matchingRows) {
-    matchingRows = isFiltersActive(appliedFilters)
-      ? state.rows.filter((row) => rowMatchesFilters(row, appliedFilters))
-      : state.rows;
+    matchingRows = [];
+    matchedThrough = 0;
+    matchedPendingKeys.clear();
+  }
+  const holdForOwners = !!appliedFilters.pk && ownersRetryState(state.ownersRetry) === 'ok';
+  for (; matchedThrough < state.rows.length; matchedThrough += 1) {
+    const row = state.rows[matchedThrough];
+    if (appliedFilters.pk) {
+      const pending = pendingKeysOf(row);
+      if (pending.length && holdForOwners && matchedThrough >= ownersQueriedThrough) break;
+      for (const key of pending) matchedPendingKeys.add(key);
+    }
+    if (rowMatchesFilters(row, appliedFilters)) matchingRows.push(row);
   }
   return matchingRows;
+}
+
+/**
+ * Resolves once `count` rows match, or when the scan ends, the filters change or the audit resets.
+ * Rejects when the scan fails.
+ */
+function waitForMatches(count) {
+  if (matches().length >= count) return Promise.resolve();
+  return new Promise((resolve, reject) => matchWaiters.push({ count, resolve, reject }));
+}
+
+function settleMatchWaiters(all = false, error = null) {
+  if (!matchWaiters.length) return;
+  const found = all ? Infinity : matches().length;
+  matchWaiters = matchWaiters.filter((waiter) => {
+    if (found < waiter.count) return true;
+    if (error) waiter.reject(error);
+    else waiter.resolve();
+    return false;
+  });
+}
+
+/** True when the rendered page has room for rows that now match. */
+function pageHasNewRows() {
+  return !!renderedPage && renderedPage.count < BATCH_SIZE
+    && matches().length > renderedPage.page * BATCH_SIZE + renderedPage.count;
 }
 
 function showEmptyResults(message) {
@@ -633,6 +688,7 @@ function renderResults() {
   filterAmountMinEl?.setCustomValidity(filters.errors[0]);
   filterAmountMaxEl?.setCustomValidity(filters.errors[1]);
   if (!filters.valid) {
+    renderedPage = null;
     showEmptyResults('Correct the amount filters to view results.');
     return;
   }
@@ -640,6 +696,7 @@ function renderResults() {
   state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / BATCH_SIZE) - 1));
   const start = state.page * BATCH_SIZE;
   const visibleRows = rows.slice(start, start + BATCH_SIZE);
+  renderedPage = { page: state.page, count: visibleRows.length };
   if (!visibleRows.length) {
     showEmptyResults(state.audit && isFiltersActive(filters)
       ? 'No transactions match the current filters.'
@@ -1084,7 +1141,7 @@ async function applyGraphBrushRange(fromLedger, toLedger) {
   if (filterLedgerFromEl) filterLedgerFromEl.value = String(fromLedger);
   if (filterLedgerToEl) filterLedgerToEl.value = String(toLedger);
   state.timeFilterLedgers = { from: null, to: null };
-  commitFilters();
+  applyFilters();
   const revision = ++timeRevision;
 
   try {
@@ -2019,7 +2076,6 @@ function pushTx(tx) {
     const pk = normalizeFieldKey(note.note.pk);
     if (pk && !state.owners.has(pk)) state.pendingOwnerKeys.add(pk);
   }
-  matchingRows = null;
 }
 
 /** Plain `{ noteKey, address }` pairs of a lookup answer, freeing every WASM owner. */
@@ -2042,6 +2098,7 @@ async function resolvePkOwners() {
   if (!audit) return false;
   const retryBefore = ownersRetryState(state.ownersRetry);
   const queried = [...state.pendingOwnerKeys];
+  const queriedThrough = state.rows.length;
   let settled = false;
   let outcome = 'settled';
 
@@ -2055,7 +2112,7 @@ async function resolvePkOwners() {
         if (settled) {
           applyOwnerLookup(state.owners, queried, readLookupOwners(lookup));
           for (const key of queried) state.pendingOwnerKeys.delete(key);
-          matchingRows = null;
+          if (queried.some((key) => matchedPendingKeys.has(key))) matchingRows = null;
         } else outcome = 'waiting';
       } finally {
         lookup.free();
@@ -2066,6 +2123,7 @@ async function resolvePkOwners() {
       outcome = 'error';
     }
   }
+  ownersQueriedThrough = Math.max(ownersQueriedThrough, queriedThrough);
 
   const delayMs = nextOwnersRetry(state.ownersRetry, outcome);
   if (delayMs != null) scheduleOwnersRetry(delayMs);
@@ -2139,39 +2197,72 @@ async function fetchBatch(limit) {
 
 let drainPromise = null;
 
-/** Exhausts the audit cursor so filters can see the full result set, not just what's paged in so far. */
-async function ensureFullyLoaded() {
-  if (!state.audit || (state.exhausted && !drainPromise)) return;
+const DRAIN_TICK_MS = 250;
+
+/** Mid-scan refresh: looks up the new owners, wakes Next, and re-renders the page only if it gained rows. */
+async function drainTick(audit) {
+  // A lookup on hold is retried by its own timer.
+  if (state.pendingOwnerKeys.size && ownersRetryState(state.ownersRetry) === 'ok') await resolvePkOwners();
+  if (state.audit !== audit) return;
+  settleMatchWaiters();
+  if (isFiltersActive(appliedFilters) && !matchingRows) renderResults();
+  else if (pageHasNewRows()) renderResults();
+  updateStatus();
+  syncActionButtons();
+}
+
+async function drainCursor(audit) {
+  let lastYield = performance.now();
+  let lastTick = lastYield;
+  try {
+    while (state.audit === audit && !state.exhausted) {
+      await fetchRows(BATCH_SIZE);
+      if (performance.now() - lastTick >= DRAIN_TICK_MS || pageHasNewRows()
+        || matchWaiters.some((waiter) => matches().length >= waiter.count)) {
+        await drainTick(audit);
+        lastTick = performance.now();
+      }
+      // A local cursor can resolve in microtasks for many consecutive batches.
+      if (performance.now() - lastYield >= 16) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        lastYield = performance.now();
+      }
+    }
+  } finally {
+    if (state.audit === audit && state.pendingOwnerKeys.size) await resolvePkOwners();
+  }
+}
+
+/**
+ * Exhausts the audit cursor so filters and exports see the whole pool. The scan runs in the background,
+ * rendering matches as it finds them, and reports its own failure in the status line.
+ */
+function ensureFullyLoaded() {
+  if (!state.audit || (state.exhausted && !drainPromise)) return Promise.resolve();
   if (!drainPromise) {
     const audit = state.audit;
-    drainPromise = (async () => {
-      // Nothing renders mid-drain, so the owners are looked up once, for all the rows it pulled.
-      let lastYield = performance.now();
-      try {
-        while (state.audit === audit && !state.exhausted) {
-          await fetchRows(BATCH_SIZE);
-          // A local cursor can resolve in microtasks for many consecutive batches.
-          if (performance.now() - lastYield >= 16) {
-            await new Promise((resolve) => setTimeout(resolve, 0));
-            lastYield = performance.now();
-          }
-        }
-      } finally {
-        if (state.audit === audit && state.pendingOwnerKeys.size) await resolvePkOwners();
-      }
-    })().finally(() => {
-      if (state.audit === audit) drainPromise = null;
+    const finish = (err) => {
+      if (state.audit !== audit) return;
+      drainPromise = null;
+      refreshAuditDisplay();
+      if (err) setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
+      settleMatchWaiters(true, err);
+    };
+    drainPromise = drainCursor(audit).then(() => finish(null), (err) => {
+      finish(err);
+      throw err;
     });
   }
-  await drainPromise;
+  return drainPromise;
 }
 
 function syncActionButtons() {
   const valid = !!state.audit && appliedFilters?.valid;
-  const busy = fetchingPage || auditBtnEl?.ariaBusy === 'true' || !!drainPromise || !!filterTimer;
+  const busy = fetchingPage || auditBtnEl?.ariaBusy === 'true' || !!filterTimer;
+  const complete = state.exhausted && !drainPromise;
   prevBtnEl.disabled = !valid || busy || state.page === 0;
-  nextBtnEl.disabled = !valid || busy || (state.exhausted && (state.page + 1) * BATCH_SIZE >= matches().length);
-  exportBtnEl.disabled = !valid || busy || exportBtnEl.ariaBusy === 'true';
+  nextBtnEl.disabled = !valid || busy || (complete && (state.page + 1) * BATCH_SIZE >= matches().length);
+  exportBtnEl.disabled = !valid || busy || !!drainPromise || exportBtnEl.ariaBusy === 'true';
 }
 
 function csvEscape(value) {
@@ -2316,39 +2407,23 @@ function setView(view) {
   renderResults();
 }
 
-/** Drains the cursor first (if a filter needs the full result set), then re-renders. */
-async function applyFiltersAndRender() {
+/**
+ * Shows the matches among the rows loaded so far. A filter can match anywhere in the pool, so it also starts
+ * a background scan that renders further matches as it finds them.
+ */
+function applyFilters() {
   clearTimeout(filterTimer);
   filterTimer = null;
-  const revision = ++filterRevision;
+  ++filterRevision;
   appliedFilters = readFilters();
   matchingRows = null;
   state.page = 0;
-  if (appliedFilters.valid && isFiltersActive(appliedFilters) && state.audit && (!state.exhausted || drainPromise)) {
-    setPanelStatus('Loading full result set to apply filters…', 'info');
-    const loading = ensureFullyLoaded();
-    syncActionButtons();
-    try {
-      await loading;
-    } finally {
-      syncActionButtons();
-    }
+  settleMatchWaiters(true);
+  if (appliedFilters.valid && isFiltersActive(appliedFilters)) {
+    // ensureFullyLoaded reports a failed scan itself.
+    ensureFullyLoaded().catch(() => {});
   }
-  if (revision !== filterRevision) return;
   refreshAuditDisplay();
-  // Clear takes effect immediately while an earlier filter finishes scanning.
-  if (drainPromise) {
-    await drainPromise;
-    if (revision === filterRevision) refreshAuditDisplay();
-  }
-}
-
-function commitFilters() {
-  const pending = applyFiltersAndRender();
-  const revision = filterRevision;
-  pending.catch((err) => {
-    if (revision === filterRevision) setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
-  });
 }
 
 async function populatePools() {
@@ -2388,8 +2463,11 @@ function resetAuditState() {
   ++filterRevision;
   ++timeRevision;
   drainPromise = null;
+  settleMatchWaiters(true);
   appliedFilters = readFilters();
   matchingRows = null;
+  ownersQueriedThrough = 0;
+  renderedPage = null;
   state.notes = createNoteIndex();
   state.rows = [];
   state.owners = createOwnerBook();
@@ -2488,7 +2566,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       clearTimeout(filterTimer);
       ++filterRevision;
       filterTimer = setTimeout(() => {
-        commitFilters();
+        applyFilters();
         if ([filterAmountMinEl, filterAmountMaxEl].includes(filterEl)) filterEl.reportValidity();
       }, 250);
       syncActionButtons();
@@ -2502,7 +2580,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       clearTimeout(filterTimer);
       filterTimer = null;
       await updateTimeFilterLedgers(revision);
-      if (revision === timeRevision) commitFilters();
+      if (revision === timeRevision) applyFilters();
     });
   }
 
@@ -2524,7 +2602,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     ++timeRevision;
     state.timeFilterLedgers = { from: null, to: null };
     if (filterTimeHintEl) filterTimeHintEl.textContent = TIME_FILTER_HINT_DEFAULT;
-    commitFilters();
+    applyFilters();
   });
 
   let panelReady = false;
@@ -2547,7 +2625,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       auditBtnEl.textContent = 'Syncing…';
       setPanelStatus('Syncing chain data and opening audit cursor…', 'info');
       await ensurePanelReady({ unlock: true });
-      if (await startAudit(privateKey)) await applyFiltersAndRender();
+      if (await startAudit(privateKey)) applyFilters();
     } catch (err) {
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
       showToast?.(`Global View audit failed: ${err?.message || err}`, 'error');
@@ -2571,8 +2649,9 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     fetchingPage = true;
     syncActionButtons();
     try {
-      if (!state.exhausted && isFiltersActive(appliedFilters)) {
-        await ensureFullyLoaded();
+      if (drainPromise || (!state.exhausted && isFiltersActive(appliedFilters))) {
+        // Turns the page at its first match; the scan fills it in.
+        await Promise.race([ensureFullyLoaded(), waitForMatches(nextPage * BATCH_SIZE + 1)]);
       } else if (!state.exhausted) {
         const missing = (nextPage + 1) * BATCH_SIZE - matches().length;
         if (missing > 0) await fetchBatch(missing);
