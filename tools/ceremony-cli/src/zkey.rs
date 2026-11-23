@@ -3,8 +3,9 @@
 //   https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/index.rs (`NPIndex`)
 //
 // Local changes: only the proving key is read (the constraint matrices and
-// `NPIndex` are dropped), malformed headers and missing sections return errors
-// instead of panicking, and the test module (which needs the upstream test
+// `NPIndex` are dropped), malformed headers, missing sections, non-canonical
+// field elements and invalid curve points return errors instead of panicking,
+// and the upstream test module (which needs the upstream test
 // vectors and the wasmer witness calculator) is dropped.
 #![allow(
     clippy::arithmetic_side_effects,
@@ -311,6 +312,9 @@ impl HeaderGroth {
 // form
 fn deserialize_field<R: Read>(reader: &mut R) -> IoResult<Fq> {
     let bigint = BigInteger256::deserialize_uncompressed(reader)?;
+    if bigint >= Fq::MODULUS {
+        return Err(SerializationError::InvalidData);
+    }
     // if you use Fq::new it multiplies by R
     Ok(Fq::new_unchecked(bigint))
 }
@@ -326,10 +330,13 @@ fn deserialize_g1<R: Read>(reader: &mut R) -> IoResult<G1Affine> {
     let y = deserialize_field(reader)?;
     let infinity = x.is_zero() && y.is_zero();
     if infinity {
-        Ok(G1Affine::identity())
-    } else {
-        Ok(G1Affine::new(x, y))
+        return Ok(G1Affine::identity());
     }
+    let point = G1Affine::new_unchecked(x, y);
+    if !point.is_on_curve() || !point.is_in_correct_subgroup_assuming_on_curve() {
+        return Err(SerializationError::InvalidData);
+    }
+    Ok(point)
 }
 
 fn deserialize_g2<R: Read>(reader: &mut R) -> IoResult<G2Affine> {
@@ -337,10 +344,13 @@ fn deserialize_g2<R: Read>(reader: &mut R) -> IoResult<G2Affine> {
     let f2 = deserialize_field2(reader)?;
     let infinity = f1.is_zero() && f2.is_zero();
     if infinity {
-        Ok(G2Affine::identity())
-    } else {
-        Ok(G2Affine::new(f1, f2))
+        return Ok(G2Affine::identity());
     }
+    let point = G2Affine::new_unchecked(f1, f2);
+    if !point.is_on_curve() || !point.is_in_correct_subgroup_assuming_on_curve() {
+        return Err(SerializationError::InvalidData);
+    }
+    Ok(point)
 }
 
 fn deserialize_g1_vec<R: Read>(reader: &mut R, n_vars: u32) -> IoResult<Vec<G1Affine>> {
@@ -349,4 +359,76 @@ fn deserialize_g1_vec<R: Read>(reader: &mut R, n_vars: u32) -> IoResult<Vec<G1Af
 
 fn deserialize_g2_vec<R: Read>(reader: &mut R, n_vars: u32) -> IoResult<Vec<G2Affine>> {
     (0..n_vars).map(|_| deserialize_g2(reader)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ark_bn254::{g1, g2};
+    use ark_ff::{AdditiveGroup, Field};
+    use ark_serialize::CanonicalSerialize;
+
+    fn write_fq(out: &mut Vec<u8>, value: BigInteger256) {
+        value.serialize_uncompressed(out).unwrap();
+    }
+
+    fn g1_bytes(point: &G1Affine) -> Vec<u8> {
+        let mut out = Vec::new();
+        write_fq(&mut out, point.x.0);
+        write_fq(&mut out, point.y.0);
+        out
+    }
+
+    fn g2_bytes(point: &G2Affine) -> Vec<u8> {
+        let mut out = Vec::new();
+        for c in [point.x.c0, point.x.c1, point.y.c0, point.y.c1] {
+            write_fq(&mut out, c.0);
+        }
+        out
+    }
+
+    #[test]
+    fn g1_roundtrip() {
+        let g = G1Affine::new_unchecked(g1::G1_GENERATOR_X, g1::G1_GENERATOR_Y);
+        assert_eq!(deserialize_g1(&mut &g1_bytes(&g)[..]).unwrap(), g);
+        let zero = [0u8; 64];
+        assert_eq!(
+            deserialize_g1(&mut &zero[..]).unwrap(),
+            G1Affine::identity()
+        );
+    }
+
+    #[test]
+    fn g1_rejects_off_curve_point() {
+        let point = G1Affine::new_unchecked(Fq::ONE, Fq::ONE);
+        assert!(deserialize_g1(&mut &g1_bytes(&point)[..]).is_err());
+    }
+
+    #[test]
+    fn g1_rejects_non_canonical_coordinate() {
+        let mut bytes = Vec::new();
+        write_fq(&mut bytes, Fq::MODULUS);
+        write_fq(&mut bytes, Fq::ONE.0);
+        assert!(deserialize_g1(&mut &bytes[..]).is_err());
+    }
+
+    #[test]
+    fn g2_roundtrip() {
+        let g = G2Affine::new_unchecked(g2::G2_GENERATOR_X, g2::G2_GENERATOR_Y);
+        assert_eq!(deserialize_g2(&mut &g2_bytes(&g)[..]).unwrap(), g);
+    }
+
+    #[test]
+    fn g2_rejects_point_outside_subgroup() {
+        let mut x = Fq2::ZERO;
+        let point = loop {
+            x += Fq2::ONE;
+            if let Some(p) = G2Affine::get_point_from_x_unchecked(x, false) {
+                break p;
+            }
+        };
+        assert!(point.is_on_curve());
+        assert!(!point.is_in_correct_subgroup_assuming_on_curve());
+        assert!(deserialize_g2(&mut &g2_bytes(&point)[..]).is_err());
+    }
 }
