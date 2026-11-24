@@ -609,7 +609,6 @@ let filterRevision = 0;
 let timeRevision = 0;
 let refreshSelection;
 let fetchingPage = false;
-// The page last rendered and how many rows it showed, so a scan only re-renders a page that gained rows.
 let renderedPage = null;
 let matchWaiters = [];
 
@@ -665,8 +664,9 @@ function settleMatchWaiters(all = false, error = null) {
 
 /** True when the rendered page has room for rows that now match. */
 function pageHasNewRows() {
-  return !!renderedPage && renderedPage.count < BATCH_SIZE
-    && matches().length > renderedPage.page * BATCH_SIZE + renderedPage.count;
+  if (!renderedPage) return false;
+  const count = renderedPage.transactions.size;
+  return count < BATCH_SIZE && matches().length > renderedPage.page * BATCH_SIZE + count;
 }
 
 function showEmptyResults(message) {
@@ -696,7 +696,7 @@ function renderResults() {
   state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / BATCH_SIZE) - 1));
   const start = state.page * BATCH_SIZE;
   const visibleRows = rows.slice(start, start + BATCH_SIZE);
-  renderedPage = { page: state.page, count: visibleRows.length };
+  renderedPage = { page: state.page, transactions: new Set(visibleRows.map((row) => row.index)), stale: false };
   if (!visibleRows.length) {
     let message = 'Select a pool, enter the authority key, then run Sync & Audit.';
     if (state.audit && isFiltersActive(filters)) {
@@ -706,11 +706,11 @@ function renderResults() {
     return;
   }
 
+  emptyEl.hidden = true;
+  resultsEl.hidden = false;
   // Measured before clearing resultsEl below: reading layout (clientWidth) once
   // the container is mid-teardown forces a synchronous reflow while the page
   // is transiently shorter, which makes the browser clamp/jump scroll position.
-  emptyEl.hidden = true;
-  resultsEl.hidden = false;
   const containerWidth = resultsEl.clientWidth;
   clearAllHighlights();
   resultsEl.replaceChildren();
@@ -1016,7 +1016,7 @@ function txLabel(txIndex, ledger) {
 
 /** View-only pools never decrypt inputs, so an unlinked note may still have been spent: its status is unknown, not unspent. */
 function noteStatus(note) {
-  if (note.knownSpent || note.spentTxIndex != null) return 'Spent';
+  if (note.knownSpent) return 'Spent';
   if (state.poolGvkMode !== 'traceable') return 'Unknown';
   return state.exhausted ? 'Unspent' : 'No spend seen yet';
 }
@@ -1977,11 +1977,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     return { flow: f, x, shaftStartY, shaftEndY: headBaseY, tipY, headBaseY, color: colorForPk(f.fromPk) };
   });
 
-  const isSelectedFlow = (f) => (
-    state.selectedFlow?.txIndex === f.txIndex
-    && state.selectedFlow?.fromPk === f.fromPk
-    && state.selectedFlow?.toPk === f.toPk
-  );
+  const isSelectedFlow = (f) => sameFlow(state.selectedFlow, f);
 
   const flowGroups = svg.append('g')
     .selectAll('g')
@@ -2061,7 +2057,7 @@ function renderPkGraph(rows, containerWidth, filters) {
       .attr('stroke-width', (d) => (isSelectedDot(d) ? 3 : d.pk === state.selectedPk ? 2.5 : 1))
       .attr('data-highlight', (d) => (isSelectedDot(d) ? '' : null));
     graphWrap.nextElementSibling?.remove();
-    const dot = dots.find((d) => sameDot(state.selectedDot, d));
+    const dot = dots.find(isSelectedDot);
     renderPkGraphDetailPanel(outer, nodes, edges, state.selectedFlow, dot);
   };
   refreshSelection();
@@ -2073,7 +2069,13 @@ function pushTx(tx) {
   const kind = state.poolGvkMode === 'traceable' ? txKind(tx) : null;
   const row = { tx, index, kind };
   state.rows.push(row);
-  state.notes.append(row);
+  const changedTransactions = state.notes.append(row);
+  for (const changedIndex of changedTransactions) {
+    if (renderedPage?.transactions.has(changedIndex)) {
+      renderedPage.stale = true;
+      break;
+    }
+  }
   for (const note of txNotes(tx)) {
     const pk = normalizeFieldKey(note.note.pk);
     if (pk && !state.owners.has(pk)) state.pendingOwnerKeys.add(pk);
@@ -2201,14 +2203,14 @@ let drainPromise = null;
 
 const DRAIN_TICK_MS = 250;
 
-/** Mid-scan refresh: looks up the new owners, wakes Next, and re-renders the page only if it gained rows. */
+/** Looks up new owners, wakes Next, and refreshes the page if its rows or notes changed. */
 async function drainTick(audit) {
   // A lookup on hold is retried by its own timer.
   if (state.pendingOwnerKeys.size && ownersRetryState(state.ownersRetry) === 'ok') await resolvePkOwners();
   if (state.audit !== audit) return;
   settleMatchWaiters();
   if (isFiltersActive(appliedFilters) && !matchingRows) renderResults();
-  else if (pageHasNewRows()) renderResults();
+  else if (renderedPage?.stale || pageHasNewRows()) renderResults();
   updateStatus();
   syncActionButtons();
 }

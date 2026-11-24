@@ -59,6 +59,7 @@ const blank = {
   spentKind: null,
   nullifier: null,
   spentNoteId: null,
+  knownSpent: false,
 };
 
 /** Incrementally pairs creation and spend events across the loaded audit. */
@@ -67,23 +68,17 @@ export function createNoteIndex() {
   const unspent = new Map();
   const byTransaction = new Map();
   const links = new Map();
-  const totals = new Map();
+  const received = new Map();
+  const spent = new Map();
 
-  function credit(audited) {
+  function add(totals, audited) {
     const pk = normalizeFieldKey(audited?.note.pk);
-    if (!pk) return null;
-    const amount = parseFieldAmount(audited.note.amount);
-    let total = totals.get(pk);
-    if (!total) {
-      total = { balance: 0n, received: 0n };
-      totals.set(pk, total);
-    }
-    total.balance += amount;
-    total.received += amount;
-    return { total, amount };
+    if (pk) totals.set(pk, (totals.get(pk) ?? 0n) + parseFieldAmount(audited.note.amount));
   }
 
+  /** Appends a transaction and returns the indices of earlier transactions whose notes changed. */
   function append({ tx, index, kind }) {
+    const changedTransactions = new Set();
     const touched = [];
     byTransaction.set(index, touched);
     // Inputs before outputs: a tx cannot spend its own outputs.
@@ -93,19 +88,24 @@ export function createNoteIndex() {
         spentLedger: tx.ledger,
         spentKind: kind,
         nullifier: slot.nullifier,
+        knownSpent: true,
       };
       // The GVK ciphertext carries no leaf index, so guess the oldest unspent copy:
       // the SDK spends a wallet's oldest copy first.
-      const match = unspent.get(normalizeFieldKey(slot.audited?.commitment))?.shift();
+      const key = normalizeFieldKey(slot.audited?.commitment);
+      const copies = unspent.get(key);
+      const existing = copies?.shift();
+      if (copies?.length === 0) unspent.delete(key);
 
-      if (match) {
-        const { note: existing, credit } = match;
-        if (credit) credit.total.balance -= credit.amount;
+      if (existing) {
+        // Debit what the output credited, before a spend can reveal a view-only output.
+        add(spent, existing.audited);
         Object.assign(existing, spend, { spentNoteId: noteRowId(index, 'input', slot.index) });
         links.set(existing.noteId, existing.spentNoteId);
         links.set(existing.spentNoteId, existing.noteId);
         touched.push(existing);
         if (!existing.audited && slot.audited) existing.audited = slot.audited;
+        changedTransactions.add(existing.createdTxIndex);
         continue;
       }
 
@@ -136,12 +136,13 @@ export function createNoteIndex() {
       };
       notes.push(note);
       touched.push(note);
-      const credited = credit(slot.audited);
+      add(received, slot.audited);
       const key = normalizeFieldKey(commitment);
       if (!key) continue;
       if (!unspent.has(key)) unspent.set(key, []);
-      unspent.get(key).push({ note, credit: credited });
+      unspent.get(key).push(note);
     }
+    return changedTransactions;
   }
 
   // Clip event details to the visible transactions, retaining the known spend status.
@@ -149,7 +150,7 @@ export function createNoteIndex() {
     const shown = new Set(rows.map((row) => row.index));
     const touched = new Set(rows.flatMap((row) => byTransaction.get(row.index) ?? []));
     return [...touched].filter((note) => note.audited).sort((a, b) => a.order - b.order).map((record) => {
-      const note = { ...record, knownSpent: record.spentTxIndex != null };
+      const note = { ...record };
       if (!shown.has(note.createdTxIndex)) {
         Object.assign(note, { createdTxIndex: null, createdLedger: null, createdKind: null });
       }
@@ -165,8 +166,8 @@ export function createNoteIndex() {
     links,
     visibleNotes,
     auditedNotes: () => notes.filter((note) => note.audited),
-    balanceOf: (pk) => totals.get(normalizeFieldKey(pk))?.balance ?? 0n,
-    receivedBy: (pk) => totals.get(normalizeFieldKey(pk))?.received ?? 0n,
+    balanceOf: (pk) => (received.get(normalizeFieldKey(pk)) ?? 0n) - (spent.get(normalizeFieldKey(pk)) ?? 0n),
+    receivedBy: (pk) => received.get(normalizeFieldKey(pk)) ?? 0n,
   };
 }
 
