@@ -36,6 +36,7 @@ To protect user confidentiality during transaction proving and indexing, the SDK
 ## Browser Memory Model
 
 * **Same-origin scripts are trusted.** A script running in the app's origin can call the SDK, wrap the wallet signer, or read WASM linear memory, so it can obtain every secret. Both app pages ship a Content-Security-Policy that only allows same-origin scripts and the hashed import map.
+* **The app refuses to run inside a frame.** GitHub Pages cannot send `frame-ancestors` or `X-Frame-Options`, so each page hides itself and stops before any app code runs when it is not the top-level window.
 * **Rust-owned secrets are zeroized on drop**: privacy keys, key-derivation signatures, the storage key and the GVK authority key.
 * **The browser build wipes every heap block when it is freed**, so copies Rust leaves behind are cleared too: worker message buffers, `Vec` growth, serde and formatting temporaries, and SQLite's freed pages. Stack copies are not covered.
 * **Copies outside Rust ownership are not wiped**:
