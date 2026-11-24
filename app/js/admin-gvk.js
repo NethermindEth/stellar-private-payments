@@ -17,7 +17,7 @@ import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, readToke
 import { amountByPk, createNoteIndex, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteRowId, parseFieldAmount } from './gvk-notes.js';
 import {
   applyOwnerLookup, createOwnerBook, createOwnersRetry, nextOwnersRetry, ownerAddresses as registeredAddresses,
-  ownerCsvFields, ownerStatus, ownersRetryState,
+  ownerCsvFields, ownerStatus, ownersRetryState, pendingPks,
 } from './gvk-owners.js';
 import { friendlyErrorMessage } from './facade-errors.js';
 import { formatAmount as formatBaseUnits, shortHex, tokenLabel } from './ui/notes-view.js';
@@ -598,10 +598,9 @@ function rowMatchesFilters(row, filters) {
 }
 
 let appliedFilters;
-let matchingRows;
-let matchedThrough = 0;
-// Owner keys still pending when a PK filter tested their rows: settling one re-tests every row.
-const matchedPendingKeys = new Set();
+// Rows matching `appliedFilters`, the rows tested so far, and the owner keys still pending when a PK filter
+// tested their rows: settling one of those re-tests every row.
+let matchCache = null;
 // Rows below this index had their owner keys looked up, whatever the answer.
 let ownersQueriedThrough = 0;
 let filterTimer;
@@ -610,12 +609,11 @@ let timeRevision = 0;
 let refreshSelection;
 let fetchingPage = false;
 let renderedPage = null;
-let matchWaiters = [];
+let pendingPageMatch = null;
 
-function pendingKeysOf(row) {
-  return txNotes(row.tx)
-    .map((note) => normalizeFieldKey(note.note.pk))
-    .filter((pk) => pk && state.pendingOwnerKeys.has(pk));
+/** The distinct normalized PKs of `tx` whose registry owners were never looked up. */
+function unownedPks(tx) {
+  return pendingPks(state.owners, txNotes(tx).map((note) => note.note.pk));
 }
 
 /**
@@ -624,22 +622,18 @@ function pendingKeysOf(row) {
  */
 function matches() {
   if (!isFiltersActive(appliedFilters)) return state.rows;
-  if (!matchingRows) {
-    matchingRows = [];
-    matchedThrough = 0;
-    matchedPendingKeys.clear();
-  }
-  const holdForOwners = !!appliedFilters.pk && ownersRetryState(state.ownersRetry) === 'ok';
-  for (; matchedThrough < state.rows.length; matchedThrough += 1) {
-    const row = state.rows[matchedThrough];
-    if (appliedFilters.pk) {
-      const pending = pendingKeysOf(row);
-      if (pending.length && holdForOwners && matchedThrough >= ownersQueriedThrough) break;
-      for (const key of pending) matchedPendingKeys.add(key);
+  matchCache ??= { rows: [], through: 0, pendingKeys: new Set() };
+  const holdForOwners = ownersRetryState(state.ownersRetry) === 'ok';
+  for (; matchCache.through < state.rows.length; matchCache.through += 1) {
+    const row = state.rows[matchCache.through];
+    if (appliedFilters.pk && state.pendingOwnerKeys.size) {
+      const pending = unownedPks(row.tx);
+      if (pending.length && holdForOwners && matchCache.through >= ownersQueriedThrough) break;
+      for (const key of pending) matchCache.pendingKeys.add(key);
     }
-    if (rowMatchesFilters(row, appliedFilters)) matchingRows.push(row);
+    if (rowMatchesFilters(row, appliedFilters)) matchCache.rows.push(row);
   }
-  return matchingRows;
+  return matchCache.rows;
 }
 
 /**
@@ -648,18 +642,19 @@ function matches() {
  */
 function waitForMatches(count) {
   if (matches().length >= count) return Promise.resolve();
-  return new Promise((resolve, reject) => matchWaiters.push({ count, resolve, reject }));
+  return new Promise((resolve, reject) => { pendingPageMatch = { count, resolve, reject }; });
 }
 
-function settleMatchWaiters(all = false, error = null) {
-  if (!matchWaiters.length) return;
-  const found = all ? Infinity : matches().length;
-  matchWaiters = matchWaiters.filter((waiter) => {
-    if (found < waiter.count) return true;
-    if (error) waiter.reject(error);
-    else waiter.resolve();
-    return false;
-  });
+function nextPageHasMatch() {
+  return pendingPageMatch && matches().length >= pendingPageMatch.count;
+}
+
+function settlePageMatch(error = null) {
+  if (!pendingPageMatch) return;
+  const { resolve, reject } = pendingPageMatch;
+  pendingPageMatch = null;
+  if (error) reject(error);
+  else resolve();
 }
 
 /** True when the rendered page has room for rows that now match. */
@@ -669,10 +664,14 @@ function pageHasNewRows() {
   return count < BATCH_SIZE && matches().length > renderedPage.page * BATCH_SIZE + count;
 }
 
-function showEmptyResults(message) {
-  clearAllHighlights();
+function clearSelection() {
   state.selectedNoteId = state.selectedPk = state.selectedFlow = state.selectedDot = null;
   state.graphNotes = state.pkGraphNodes = null;
+}
+
+function showEmptyResults(message) {
+  clearAllHighlights();
+  clearSelection();
   resultsEl.replaceChildren();
   resultsEl.hidden = true;
   emptyEl.hidden = false;
@@ -2076,10 +2075,7 @@ function pushTx(tx) {
       break;
     }
   }
-  for (const note of txNotes(tx)) {
-    const pk = normalizeFieldKey(note.note.pk);
-    if (pk && !state.owners.has(pk)) state.pendingOwnerKeys.add(pk);
-  }
+  for (const pk of unownedPks(tx)) state.pendingOwnerKeys.add(pk);
 }
 
 /** Plain `{ noteKey, address }` pairs of a lookup answer, freeing every WASM owner. */
@@ -2116,7 +2112,7 @@ async function resolvePkOwners() {
         if (settled) {
           applyOwnerLookup(state.owners, queried, readLookupOwners(lookup));
           for (const key of queried) state.pendingOwnerKeys.delete(key);
-          if (queried.some((key) => matchedPendingKeys.has(key))) matchingRows = null;
+          if (queried.some((key) => matchCache?.pendingKeys.has(key))) matchCache = null;
         } else outcome = 'waiting';
       } finally {
         lookup.free();
@@ -2190,12 +2186,16 @@ function fetchRows(limit) {
   });
 }
 
+async function resolveNewOwners(audit) {
+  if (state.audit === audit && state.pendingOwnerKeys.size) await resolvePkOwners();
+}
+
 async function fetchBatch(limit) {
   const audit = state.audit;
   try {
     return await fetchRows(limit);
   } finally {
-    if (state.audit === audit && state.pendingOwnerKeys.size) await resolvePkOwners();
+    await resolveNewOwners(audit);
   }
 }
 
@@ -2208,9 +2208,8 @@ async function drainTick(audit) {
   // A lookup on hold is retried by its own timer.
   if (state.pendingOwnerKeys.size && ownersRetryState(state.ownersRetry) === 'ok') await resolvePkOwners();
   if (state.audit !== audit) return;
-  settleMatchWaiters();
-  if (isFiltersActive(appliedFilters) && !matchingRows) renderResults();
-  else if (renderedPage?.stale || pageHasNewRows()) renderResults();
+  if (nextPageHasMatch()) settlePageMatch();
+  if ((isFiltersActive(appliedFilters) && !matchCache) || renderedPage?.stale || pageHasNewRows()) renderResults();
   updateStatus();
   syncActionButtons();
 }
@@ -2221,8 +2220,7 @@ async function drainCursor(audit) {
   try {
     while (state.audit === audit && !state.exhausted) {
       await fetchRows(BATCH_SIZE);
-      if (performance.now() - lastTick >= DRAIN_TICK_MS || pageHasNewRows()
-        || matchWaiters.some((waiter) => matches().length >= waiter.count)) {
+      if (performance.now() - lastTick >= DRAIN_TICK_MS || pageHasNewRows() || nextPageHasMatch()) {
         await drainTick(audit);
         lastTick = performance.now();
       }
@@ -2233,7 +2231,7 @@ async function drainCursor(audit) {
       }
     }
   } finally {
-    if (state.audit === audit && state.pendingOwnerKeys.size) await resolvePkOwners();
+    await resolveNewOwners(audit);
   }
 }
 
@@ -2242,21 +2240,20 @@ async function drainCursor(audit) {
  * rendering matches as it finds them, and reports its own failure in the status line.
  */
 function ensureFullyLoaded() {
-  if (!state.audit || (state.exhausted && !drainPromise)) return Promise.resolve();
-  if (!drainPromise) {
-    const audit = state.audit;
-    const finish = (err) => {
-      if (state.audit !== audit) return;
-      drainPromise = null;
-      refreshAuditDisplay();
-      if (err) setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
-      settleMatchWaiters(true, err);
-    };
-    drainPromise = drainCursor(audit).then(() => finish(null), (err) => {
-      finish(err);
-      throw err;
-    });
-  }
+  if (drainPromise) return drainPromise;
+  if (!state.audit || state.exhausted) return Promise.resolve();
+  const audit = state.audit;
+  const finish = (err) => {
+    if (state.audit !== audit) return;
+    drainPromise = null;
+    refreshAuditDisplay();
+    if (err) setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
+    settlePageMatch(err);
+  };
+  drainPromise = drainCursor(audit).then(() => finish(null), (err) => {
+    finish(err);
+    throw err;
+  });
   return drainPromise;
 }
 
@@ -2425,14 +2422,19 @@ function setView(view) {
  * Shows the matches among the rows loaded so far. A filter can match anywhere in the pool, so it also starts
  * a background scan that renders further matches as it finds them.
  */
-function applyFilters() {
+/** Applies the filter inputs from the first page, dropping the cached matches and any pending Next. */
+function resetMatches() {
   clearTimeout(filterTimer);
   filterTimer = null;
   ++filterRevision;
   appliedFilters = readFilters();
-  matchingRows = null;
+  matchCache = null;
   state.page = 0;
-  settleMatchWaiters(true);
+  settlePageMatch();
+}
+
+function applyFilters() {
+  resetMatches();
   if (appliedFilters.valid && isFiltersActive(appliedFilters)) {
     // ensureFullyLoaded reports a failed scan itself.
     ensureFullyLoaded().catch(() => {});
@@ -2472,14 +2474,9 @@ function resetAuditState() {
   for (const input of [filterAmountMinEl, filterAmountMaxEl]) {
     if (input) { input.value = ''; input.disabled = true; input.setCustomValidity(''); }
   }
-  clearTimeout(filterTimer);
-  filterTimer = null;
-  ++filterRevision;
   ++timeRevision;
   drainPromise = null;
-  settleMatchWaiters(true);
-  appliedFilters = readFilters();
-  matchingRows = null;
+  resetMatches();
   ownersQueriedThrough = 0;
   renderedPage = null;
   state.notes = createNoteIndex();
@@ -2493,13 +2490,7 @@ function resetAuditState() {
   state.poolFee = 0n;
   state.txCounter = 0;
   state.exhausted = false;
-  state.page = 0;
-  state.selectedNoteId = null;
-  state.graphNotes = null;
-  state.selectedPk = null;
-  state.selectedFlow = null;
-  state.selectedDot = null;
-  state.pkGraphNodes = null;
+  clearSelection();
 }
 
 async function readPoolFee(poolContractId) {
@@ -2665,7 +2656,8 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     try {
       if (drainPromise || (!state.exhausted && isFiltersActive(appliedFilters))) {
         // Turns the page at its first match; the scan fills it in.
-        await Promise.race([ensureFullyLoaded(), waitForMatches(nextPage * BATCH_SIZE + 1)]);
+        ensureFullyLoaded().catch(() => {});
+        await waitForMatches(nextPage * BATCH_SIZE + 1);
       } else if (!state.exhausted) {
         const missing = (nextPage + 1) * BATCH_SIZE - matches().length;
         if (missing > 0) await fetchBatch(missing);
@@ -2702,7 +2694,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
           ? buildPkGraphCsvRows()
           : buildNotesCsvRows();
       downloadCsv(`gvk-notes-${poolContractId.slice(0, 8)}-${Date.now()}.csv`, rows);
-      refreshAuditDisplay();
+      updateStatus();
     } catch (err) {
       if (state.audit !== audit) return;
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');

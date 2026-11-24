@@ -213,6 +213,21 @@ test('GVK refreshes a full note page when a later spend is found mid-scan', asyn
   assert.deepEqual(errors, []);
 });
 
+test('GVK Next reports a scan failure and restarts the scan on retry', async (t) => {
+  const { page, errors, status, click, fill } = await openPanel(t, { count: 100 });
+  await page.evaluate(() => { window.pauses = [20]; window.failAt = 25; });
+  await fill('FilterLedgerFrom', '31');
+  await status('none found yet');
+  await page.waitForFunction(() => window.pauses.length === 0);
+
+  await click('NextBtn');
+  await page.evaluate(() => window.resumeScan());
+  await status('Cursor interrupted');
+  await click('NextBtn');
+  await status('Transactions 21–40 of 70 (100 scanned)');
+  assert.deepEqual(errors, []);
+});
+
 test('GVK traceable notes reflect spends found on later pages', async (t) => {
   const { page, errors, status, click, fill } = await openPanel(t, { count: 21, spendAt: 21 });
   const results = page.locator('#gvkAuditResults');
