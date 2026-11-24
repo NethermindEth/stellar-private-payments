@@ -9,6 +9,7 @@ import { RecipientAccount } from './ui/recipient-account.js';
 import { NotesTable } from './ui/notes-table.js';
 import { Dashboard } from './ui/dashboard.js';
 import { updateLastVisit, registerServiceWorker } from './ui/push-notifications.js';
+import { isolationReady } from './service-worker.js';
 import { getConnectedAddress } from './wallet.js';
 import { rememberedNoteOwner } from './account-session.js';
 import { localStoreExists } from './wasm-facade.js';
@@ -28,6 +29,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     updateLastVisit();
     registerServiceWorker();
+    // Before the reconnect below can open storage: a page that sw.js is about
+    // to take over reloads once to become cross-origin isolated.
+    await isolationReady();
 
     // Reconnect on load only to an owner the user connected before. Without
     // one, connecting would take Varial's active account as the owner, and

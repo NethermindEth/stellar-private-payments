@@ -30,25 +30,14 @@ encrypted-storage = [
 ]
 # Plaintext wallet storage using rusqlite's bundled SQLite.
 unencrypted-storage = ["rusqlite/bundled"]
-# Multi-threaded proving with rayon, using the parallel code in `ark-groth16`
-# and `ark-ec`. For native targets. It compiles for wasm32 but cannot prove
-# there: `ark-ec` 0.6 builds a new rayon pool inside every MSM, which needs
-# `std::thread::spawn`. Threaded wasm32 builds use `parallel-chunked-msm`.
+# Multi-threaded proving, on native targets and in threaded wasm32 builds (shared
+# memory plus a rayon pool). The SDK assembles the proof itself and splits each
+# MSM over the rayon pool it runs in (see `zk/chunked_msm.rs`), while
+# `ark-groth16` and `ark-ec` stay serial. They have to: `ark-ec` 0.6 builds a new
+# rayon pool inside every MSM, which needs `std::thread::spawn` and panics on
+# wasm32, so this feature must not turn on `ark-groth16/parallel` or
+# `ark-ec/parallel`.
 parallel = [
-    "dep:rayon",
-    "ark-ff/parallel",
-    "ark-groth16/parallel",
-    "ark-poly/parallel",
-    "ark-std/parallel",
-]
-# Multi-threaded proving on a rayon pool that cannot create nested pools, such
-# as a wasm32 thread pool. `ark-groth16` and `ark-ec` stay serial; the SDK
-# assembles the proof itself and splits each MSM over the current pool (see
-# `zk/chunked_msm.rs`). On wasm32 it needs a threaded build (shared memory plus
-# a rayon pool). Must not turn on `ark-groth16/parallel` or `ark-ec/parallel`.
-# With `parallel` also on (feature unification), `parallel` wins and proofs come
-# from `ark-groth16`, which is right on native and unusable on wasm32.
-parallel-chunked-msm = [
     "dep:ark-ec",
     "dep:rayon",
     "ark-ff/parallel",
@@ -137,7 +126,6 @@ sha2 = { workspace = true }
 sqlite3mc-src = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-x-wing = { workspace = true }
 circuit-keys = { workspace = true }
 contract-types = { workspace = true }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
@@ -151,11 +139,12 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 wiremock = { workspace = true }
+x-wing = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-x-wing = { workspace = true }
 rusqlite = { workspace = true }
 wasm-bindgen-test = { workspace = true }
+x-wing = { workspace = true }
 
 [lints]
 workspace = true

@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 75
     steps:
       - name: Checkout source code
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -38,6 +38,12 @@ jobs:
           targets: wasm32-unknown-unknown
           override: true
 
+      # The threaded prover worker rebuilds std from source, which needs
+      # rust-src. rust-toolchain.toml lists it; installing it again is a no-op.
+      - name: Install rust-src for the threaded prover worker
+        run: rustup component add rust-src
+
+      # Also keeps target/web-threads, the threaded worker's std and dependencies.
       - name: Cache
         uses: ./.github/actions/rust-cache
         with:
@@ -45,7 +51,7 @@ jobs:
           cache-targets: "true"
 
       - name: Install Trunk
-        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2.67.29
         with:
           tool: trunk@0.21.14
 
@@ -60,7 +66,7 @@ jobs:
           version: v28.1.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
@@ -126,7 +132,7 @@ jobs:
         run: xvfb-run -a bash integration-tests-app/scripts/serve-and-run.sh ${{ steps.select.outputs.tests }}
 
       - name: Upload test results
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: integration-tests-app-results

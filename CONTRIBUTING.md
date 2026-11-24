@@ -129,7 +129,8 @@ bash scripts/check-msrv.sh consumer
 
 The scripts explicitly select the minimum compiler, independently of the local
 toolchain pin. Locked checks cover native workspace targets, the SDK's optional
-native `parallel` feature, browser WASM and workers, all deployable contracts,
+native `parallel` feature, browser WASM and workers (the threaded prover worker
+compiled without atomics), all deployable contracts,
 bootnode tests, and compilation of the excluded integration suites. Browser and
 contract checks install their Rust targets. The consumer check resolves fresh
 dependencies for the packaged SDK outside the workspace; it intentionally does
@@ -292,6 +293,9 @@ make sdk-web-build
 npm run check:artifacts --prefix sdk/web
 npm run check:types --prefix sdk/web
 ```
+
+The build also produces the threaded prover worker, which rebuilds std from the `rust-src` component
+of the toolchain pinned in `rust-toolchain.toml`. `SPP_WEB_THREADS=0` skips it.
 
 CI runs these checks in `.github/workflows/wasm-build.yml`.
 

@@ -18,6 +18,8 @@ import init, {
   debugLogsEnabled,
   registerTelemetrySinks,
 } from '../dist/stellar_private_payments_web.js';
+// Written by build.sh: the threaded prover worker's URL, or null if this build has none.
+import { threadedProverWorkerUrl } from '../dist/prover-threads.js';
 
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
 const proverWorkerUrl = new URL('../dist/workers/prover-worker.js', import.meta.url).href;
@@ -39,6 +41,77 @@ function parseTokenAmount(value, decimals) {
     throw new RangeError('Decimals must be a u32 integer');
   }
   return wasmParseTokenAmount(value, decimals);
+}
+
+/**
+ * Validate `proverThreads`. Returns null for automatic, otherwise the most
+ * threads the prover may use; 1 means the serial worker.
+ */
+function parseProverThreads(value) {
+  if (value === undefined || value === true) return null;
+  if (value === false) return 1;
+  if (typeof value !== 'number') throw new TypeError('proverThreads must be a boolean or a number');
+  if (!Number.isInteger(value) || value < 1 || value > 0xffff_ffff) {
+    throw new RangeError('proverThreads must be a positive integer (u32)');
+  }
+  return value;
+}
+
+/** Whether this page lets a worker share its memory with other workers. */
+function canShareMemory() {
+  return globalThis.crossOriginIsolated === true && typeof SharedArrayBuffer === 'function';
+}
+
+/**
+ * Spawn a prover worker and configure its circuits. Resolves to the bridge and
+ * how it proves: `{ mode: 'serial' | 'threaded' | 'custom', threads }`.
+ *
+ * The threaded worker is used only if this build has one, the page is
+ * cross-origin isolated and `proverThreads` allows more than one thread. If its
+ * pool does not start, the serial worker takes over, so a proof never fails for
+ * want of threads; if a request to it later times out, the bridge switches to
+ * the serial worker for good. An explicit `proverWorkerUrl` is spawned as
+ * given, with no thread selection. `requested` is `parseProverThreads`' result.
+ */
+async function spawnProver(options, requested, circuitsBaseUrl, lockJson) {
+  // Takes ownership of `prover`: frees it if it cannot be configured.
+  async function configure(prover, info) {
+    try {
+      await prover.configureCircuitsBase(circuitsBaseUrl, lockJson);
+      await prover.ping();
+    } catch (error) {
+      prover.free();
+      throw error;
+    }
+    return { prover, info };
+  }
+
+  if (options?.proverWorkerUrl != null) {
+    if (!options.proverWorkerUrl.trim()) {
+      throw new Error('proverWorkerUrl is required (absolute URL to prover-worker.js)');
+    }
+    return configure(ProverBridge.spawn(options.proverWorkerUrl), { mode: 'custom', threads: null });
+  }
+
+  const cores = Math.max(1, Math.trunc(globalThis.navigator?.hardwareConcurrency) || 1);
+  const wanted = Math.min(requested ?? cores, cores);
+  if (threadedProverWorkerUrl && canShareMemory() && wanted > 1) {
+    const threaded = ProverBridge.spawn(threadedProverWorkerUrl);
+    let threads = 1;
+    try {
+      // Starts the pool, and answers with the threads proofs will run on.
+      threads = await threaded.configureThreads(wanted);
+    } catch (error) {
+      console.warn('[stellar-private-payments] threaded prover worker unavailable, proving on one thread:', error);
+    }
+    if (threads > 1) {
+      threaded.fallBackToSerialOnTimeout(proverWorkerUrl, circuitsBaseUrl, lockJson);
+      return configure(threaded, { mode: 'threaded', threads });
+    }
+    threaded.free();
+  }
+
+  return configure(ProverBridge.spawn(proverWorkerUrl), { mode: 'serial', threads: 1 });
 }
 
 function requireField(value, name) {
@@ -120,19 +193,30 @@ function prepareProvers(preparation) {
   return preparation.running;
 }
 
-function wrapClient(wasmClient, telemetrySinks, preparation) {
+/**
+ * `ownedProver` is the prover `newClient` spawned, freed with the client; null
+ * for a prover the caller passed in. `preparation` is what `prepareProvers` needs,
+ * null for such a prover too.
+ */
+function wrapClient(wasmClient, telemetrySinks, proverInfo, ownedProver, preparation) {
   return {
+    /** How proofs run: `{ mode: 'serial' | 'threaded' | 'custom', threads }`. */
+    proverInfo: () =>
+      proverInfo.mode === 'threaded' && ownedProver.fellBackToSerial()
+        ? { mode: 'serial', threads: 1 }
+        : { ...proverInfo },
     backgroundSync: () => wasmClient.backgroundSync(),
     stopBackgroundSync: () => wasmClient.stopBackgroundSync(),
     /**
-     * Free this client's telemetry sinks now, instead of waiting for GC to
-     * do it. Optional — {@link newClient} already registers the client for
-     * automatic cleanup.
+     * Free this client's telemetry sinks and the prover worker it spawned
+     * now, instead of waiting for GC to do it. Optional — {@link newClient}
+     * already registers the client for automatic cleanup.
      */
     dispose: () => {
       telemetryFinalizer.unregister(wasmClient);
       telemetrySinks.free();
       wasmClient.free();
+      ownedProver?.free();
     },
     sync: () => wasmClient.sync(),
     prepareProvers: () => prepareProvers(preparation),
@@ -185,6 +269,8 @@ function wrapClient(wasmClient, telemetrySinks, preparation) {
  */
 async function newClient(options) {
   const contractConfig = requireField(options.contractConfig, 'contractConfig');
+  // Before opening storage, which may prompt for a signature or persist a key.
+  const proverThreads = parseProverThreads(options.proverThreads);
   const lockJson = options.prover ? undefined : JSON.stringify(requireField(options.circuitLock, 'circuitLock'));
 
   const storage =
@@ -196,22 +282,15 @@ async function newClient(options) {
     }));
 
   let prover = options.prover;
+  let proverInfo = { mode: 'custom', threads: null };
+  let ownedProver = null;
   let preparation = null;
   if (!prover) {
     const circuitsBaseUrl = requireField(options.circuitsBaseUrl, 'circuitsBaseUrl');
-    const resolvedProverWorkerUrl = options.proverWorkerUrl ?? proverWorkerUrl;
-    if (!resolvedProverWorkerUrl.trim()) {
-      throw new Error('proverWorkerUrl is required (absolute URL to prover-worker.js)');
-    }
-    preparation = { proverWorkerUrl: resolvedProverWorkerUrl, circuitsBaseUrl, lockJson, contractConfig, running: null };
-    prover = ProverBridge.spawn(resolvedProverWorkerUrl);
-    try {
-      await prover.configureCircuitsBase(circuitsBaseUrl, lockJson);
-      await prover.ping();
-    } catch (error) {
-      prover.free();
-      throw error;
-    }
+    ({ prover, info: proverInfo } = await spawnProver(options, proverThreads, circuitsBaseUrl, lockJson));
+    ownedProver = prover;
+    // Decompression runs on one thread, so the serial worker does it.
+    preparation = { proverWorkerUrl: options.proverWorkerUrl ?? proverWorkerUrl, circuitsBaseUrl, lockJson, contractConfig, running: null };
   }
   const proverHandle = prover.toHandle();
   const storageHandle = await storage.toHandle();
@@ -226,7 +305,7 @@ async function newClient(options) {
       options.bootnodeUrl ?? undefined,
     );
     telemetryFinalizer.register(wasmClient, telemetrySinks);
-    return wrapClient(wasmClient, telemetrySinks, preparation);
+    return wrapClient(wasmClient, telemetrySinks, proverInfo, ownedProver, preparation);
   } finally {
     storageHandle.free();
     proverHandle.free();
@@ -240,12 +319,11 @@ async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, op
   const contractConfig = requireField(options?.contractConfig, 'contractConfig');
   const circuitsBaseUrl = requireField(options?.circuitsBaseUrl, 'circuitsBaseUrl');
   const lockJson = JSON.stringify(requireField(options?.circuitLock, 'circuitLock'));
-  const resolvedProverWorkerUrl = options?.proverWorkerUrl ?? proverWorkerUrl;
+  // Verifying needs no thread pool: the serial worker, unless the caller asks for threads.
+  const proverThreads = parseProverThreads(options?.proverThreads ?? false);
 
-  const prover = ProverBridge.spawn(resolvedProverWorkerUrl);
+  const { prover } = await spawnProver(options, proverThreads, circuitsBaseUrl, lockJson);
   try {
-    await prover.configureCircuitsBase(circuitsBaseUrl, lockJson);
-    await prover.ping();
     const proverHandle = prover.toHandle();
     try {
       return await wasmVerifySelectiveDisclosure(rpcUrl, proverHandle, receiptJson, expectedVkHash, {

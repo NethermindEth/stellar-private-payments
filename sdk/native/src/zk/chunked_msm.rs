@@ -13,10 +13,11 @@
 //! chunk is a stock serial `msm_bigint`, and the chunks and the independent
 //! MSMs run on the pool the caller is already in.
 //!
-//! **Remove this module**, the `parallel-chunked-msm` feature and the optional
-//! `ark-ec` dependency once the SDK depends on an arkworks release whose MSM no
-//! longer builds its own pools (fixed on the arkworks main branch after 0.6.0);
-//! the `parallel` feature then works on every target.
+//! The SDK's `parallel` feature proves through this module on every target.
+//! **Remove this module** and the optional `ark-ec` dependency once the SDK
+//! depends on an arkworks release whose MSM no longer builds its own pools
+//! (fixed on the arkworks main branch after 0.6.0); `parallel` can then go back
+//! to turning on `ark-groth16/parallel`.
 //!
 //! # What it reimplements
 //!
@@ -41,16 +42,16 @@
 //!   still alive while the other MSMs run.
 //! - Three `unwrap`s that cannot fail in proving mode return the error instead.
 //!
-//! # With the `parallel` feature also on
+//! # When another crate turns on `ark-ec/parallel`
 //!
-//! Cargo unifies features, so a build can have both `parallel` and
-//! `parallel-chunked-msm`. `parallel` then wins: `prover.rs` proves through
-//! `ark-groth16`, exactly as with `parallel` alone, and this module is compiled
-//! but only its tests call it. That is correct on native targets. Its functions
-//! stay correct there too; every chunk is then a parallel `ark-ec` MSM that
-//! builds its own short-lived pools. On wasm32 the combination cannot prove,
-//! for the reason above; a threaded wasm32 build must turn on
-//! `parallel-chunked-msm` only.
+//! Cargo unifies features across a build, so a crate other than the SDK can
+//! turn on `ark-ec/parallel`. In this workspace the `circuits` crate's
+//! `parallel` feature does, through `ark-groth16/parallel`, so workspace builds
+//! have it; the CLI, the SDK tests, `e2e-tests` and the web build do not.
+//! Proofs stay correct, because each chunk then becomes a parallel `ark-ec` MSM
+//! that builds short-lived pools of its own. On native targets that only costs
+//! extra threads. On wasm32 it cannot prove at all, for the reason above, so a
+//! threaded wasm32 build must keep `ark-ec/parallel` off.
 
 use ark_ec::{AffineRepr, CurveGroup, VariableBaseMSM, pairing::Pairing};
 use ark_ff::{PrimeField, UniformRand, Zero};

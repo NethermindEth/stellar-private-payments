@@ -40,16 +40,12 @@ impl Indexer {
     async fn run_round(&self) -> anyhow::Result<bool> {
         let t0 = Instant::now();
 
-        let latest = self.state.upstream.get_latest_ledger().await?;
-        let tip_sequence = latest.sequence;
-        gauge!("bootnode_upstream_tip").set(f64::from(tip_sequence));
-
         let indexer = self.state.storage.load_indexer_state().await?;
         let mut cursor = indexer.last_upstream_cursor;
         let mut start_ledger = cursor.is_none().then_some(self.state.min_deployment_ledger);
         let page_size = self.state.cfg.page_size;
         let mut may_have_more = false;
-        let cutoff = tip_sequence.saturating_sub(self.state.cfg.cutoff_ledgers());
+        let mut first_page_cutoff = None;
 
         for _page in 0..self.state.cfg.max_pages_per_round {
             let prev_cursor = cursor.clone();
@@ -60,6 +56,14 @@ impl Indexer {
                 Some(page_size),
             );
             let result = self.state.upstream.get_events(params).await?;
+
+            let tip_sequence = result.latest_ledger;
+            gauge!("bootnode_upstream_tip").set(f64::from(tip_sequence));
+            // The cutoff is fixed by the first page's `latestLedger`; later
+            // pages reuse it.
+            let cutoff = *first_page_cutoff.get_or_insert_with(|| {
+                tip_sequence.saturating_sub(self.state.cfg.cutoff_ledgers())
+            });
 
             self.state.storage.upsert_events(&result.events).await?;
             if result.oldest_ledger > 0 {

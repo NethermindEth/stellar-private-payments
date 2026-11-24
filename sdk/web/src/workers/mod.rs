@@ -1,5 +1,11 @@
 #[cfg(target_arch = "wasm32")]
 pub mod prover;
+#[cfg(all(
+    target_arch = "wasm32",
+    target_feature = "atomics",
+    feature = "threads"
+))]
+pub mod prover_threads;
 #[cfg(target_arch = "wasm32")]
 pub mod storage;
 
