@@ -49,8 +49,9 @@ async fn a_deposit_is_simulated_sent_and_confirmed_once() -> Result<()> {
     assert_eq!(h.storage.build_transact_params_calls(), 1);
     assert_eq!(h.prover.calls(), 1);
     assert_eq!(h.signer.calls(), 1);
-    // One catch-up, before proving.
-    assert_eq!(h.rpc.count("getLatestLedger").await, 1);
+    // One catch-up, before proving: the init probe and two pages, the second
+    // reaching the tail.
+    assert_eq!(h.rpc.count("getEvents").await, 3);
     Ok(())
 }
 
@@ -65,8 +66,10 @@ async fn a_deposit_waiting_for_sync_once_syncs_again_and_sends_once() -> Result<
     assert_eq!(result.tx_hash, tx_hash(0));
     assert_eq!(h.storage.build_transact_params_calls(), 2);
     assert_eq!(h.prover.calls(), 1);
-    // Before each of the two attempts, and once more after the refusal.
-    assert_eq!(h.rpc.count("getLatestLedger").await, 3);
+    // A catch-up before each of the two attempts, and one more after the
+    // refusal. The first takes the init probe and two pages; the others resume
+    // from the cursor, so a probe and one page.
+    assert_eq!(h.rpc.count("getEvents").await, 7);
     assert_eq!(stages(&h).await, SIMULATE_SEND_CONFIRM);
     Ok(())
 }

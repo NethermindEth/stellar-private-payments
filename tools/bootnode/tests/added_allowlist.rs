@@ -56,10 +56,7 @@ async fn upstream(trees: &[TreeConfigEntry]) -> Upstream {
             let (events, r, b, o) = (events.clone(), r.clone(), b.clone(), o.clone());
             async move {
                 let params = &request["params"];
-                let result = if request["method"] == "getLatestLedger" {
-                    r.fetch_add(1, Ordering::SeqCst);
-                    json!({"id": "tip", "protocolVersion": 22, "sequence": NETWORK_TIP})
-                } else {
+                let result = {
                     let page = |start: u64, served: usize| {
                         let page: Vec<Event> = events
                             .into_iter()
@@ -84,7 +81,11 @@ async fn upstream(trees: &[TreeConfigEntry]) -> Upstream {
                             start.parse().expect("start"),
                             served.parse().expect("served"),
                         ),
-                        (None, _) => (vec![], json!(cursor)),
+                        // A round resuming from the archive's tail.
+                        (None, _) => {
+                            r.fetch_add(1, Ordering::SeqCst);
+                            (vec![], json!(cursor))
+                        }
                     };
                     json!({"events": events, "cursor": cursor, "latestLedger": NETWORK_TIP,
                         "latestLedgerCloseTime": "", "oldestLedger": UPSTREAM_OLDEST,
