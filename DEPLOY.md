@@ -107,6 +107,15 @@ cargo run -p gvkey-gen -- validate --file admin-pub.json
 generate` can also save the key into an encrypted client SDK wallet database via
 `--db PATH --storage-account <identity>`.
 
+## Selective disclosure
+
+[Selective disclosure](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/disclosure.md)
+needs no deployment option and works with every pool, whatever its policy and
+GVK mode. Receipts are verified off chain, so no contract is deployed for it.
+Its circuits, `selectiveDisclosure_1` to `selectiveDisclosure_4`, are listed in
+`deployments/<network>/circuits.json` and published with the other circuit
+artifacts.
+
 ## Pool fee and smallest deposit
 
 Every `transact` pays the pool fee: a deposit sends it on top of what it leaves
