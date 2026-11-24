@@ -107,6 +107,15 @@ cargo run -p gvkey-gen -- validate --file admin-pub.json
 generate` can also save the key into an encrypted client SDK wallet database via
 `--db PATH --storage-account <identity>`.
 
+## Selective disclosure
+
+[Selective disclosure](https://github.com/NethermindEth/stellar-private-payments/blob/main/docs/src/disclosure.md)
+needs no deployment option and works with every pool, whatever its policy and
+GVK mode. Receipts are verified off chain, so no contract is deployed for it.
+Its circuits, `selectiveDisclosure_1` to `selectiveDisclosure_4`, are listed in
+`deployments/<network>/circuits.json` and published with the other circuit
+artifacts.
+
 ## Pool fee and smallest deposit
 
 Every `transact` pays the pool fee: a deposit sends it on top of what it leaves
@@ -170,6 +179,24 @@ deployments/scripts/deploy.sh testnet \
   --max-deposit 1000000000 \
   --kdf-domain Nethermind \
   --pool native:$(stellar contract id asset --asset native --network testnet)
+```
+
+Single native XLM pool, blocklist with a view-only GVK. `admin-pub.json` is the
+public key `gvkey-gen generate` writes, as
+[Global View Key (GVK)](#global-view-key-gvk) shows. Use `gvk-traceable`
+instead to let the admin decrypt inputs too:
+
+```sh
+deployments/scripts/deploy.sh testnet \
+  --deployer <identity> \
+  --gvk-authority-pubkey-file ./admin-pub.json \
+  --asp-levels 10 \
+  --pool-levels 20 \
+  --fee 1000000 \
+  --min-deposit 10000000 \
+  --max-deposit 1000000000 \
+  --kdf-domain Nethermind \
+  --pool blocklist:gvk-viewonly:native:$(stellar contract id asset --asset native --network testnet)
 ```
 
 Mixed-policy: a blocklist pool alongside an allowlist-blocklist pool, both

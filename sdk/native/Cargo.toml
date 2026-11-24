@@ -126,7 +126,6 @@ sha2 = { workspace = true }
 sqlite3mc-src = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-x-wing = { workspace = true }
 circuit-keys = { workspace = true }
 contract-types = { workspace = true }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
@@ -140,11 +139,12 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 wiremock = { workspace = true }
+x-wing = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-x-wing = { workspace = true }
 rusqlite = { workspace = true }
 wasm-bindgen-test = { workspace = true }
+x-wing = { workspace = true }
 
 [lints]
 workspace = true
