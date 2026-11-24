@@ -2,7 +2,7 @@
 
 use crate::{
     registration::RegistrationProof,
-    types::{ExtData, NoteOwnerAddress, SignerAddress},
+    types::{EncryptionPublicKey, ExtData, NoteOwnerAddress, SignerAddress},
 };
 use anyhow::{Result, anyhow, bail, ensure};
 use stellar_xdr::{self as xdr};
@@ -117,7 +117,8 @@ impl StateFetcher {
     /// the wallet must collect that signature in addition to `payer`'s
     /// signature on the envelope.
     ///
-    /// `encryption_key` is the Edwards encoding the registry stores.
+    /// `encryption_key` is the key notes are encrypted to; the registry stores
+    /// it as is.
     ///
     /// Refuses any authorization beyond this `register`; see
     /// [`check_register_auth`].
@@ -126,10 +127,11 @@ impl StateFetcher {
         owner: &NoteOwnerAddress,
         payer: &SignerAddress,
         note_key: [u8; 32],
-        encryption_key: [u8; 32],
+        encryption_key: &EncryptionPublicKey,
         proof: &RegistrationProof,
     ) -> Result<PreparedSorobanTx> {
-        let account_scval = register_account_to_scval(owner.as_str(), encryption_key, note_key)?;
+        let account_scval =
+            register_account_to_scval(owner.as_str(), encryption_key.as_ref(), note_key)?;
         let proof_scval = registration_proof_to_scval(proof)?;
         let args = vec![account_scval, proof_scval];
         let registry = &self.contract_config().public_key_registry;
@@ -464,7 +466,7 @@ mod tests {
     }
 
     const NOTE_KEY: [u8; 32] = [0xAB; 32];
-    const ENCRYPTION_KEY: [u8; 32] = [0xEE; 32];
+    const ENCRYPTION_KEY: [u8; 64] = [0xEE; 64];
 
     fn register_owner() -> NoteOwnerAddress {
         NoteOwnerAddress::new(ed25519::PublicKey([1u8; 32]).to_string().as_str())
@@ -477,7 +479,6 @@ mod tests {
     fn registration_proof() -> RegistrationProof {
         RegistrationProof {
             note_key_proof: vec![0x01; 256],
-            encryption_key_signature: [0x02; 64],
             owner_signature: [0x03; 64],
         }
     }
@@ -492,7 +493,7 @@ mod tests {
         let config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
         let owner = register_owner();
         let args = vec![
-            register_account_to_scval(owner.as_str(), ENCRYPTION_KEY, NOTE_KEY)
+            register_account_to_scval(owner.as_str(), &ENCRYPTION_KEY, NOTE_KEY)
                 .expect("account scval"),
             registration_proof_to_scval(&registration_proof()).expect("proof scval"),
         ];
@@ -560,7 +561,7 @@ mod tests {
                 &register_owner(),
                 &payer,
                 NOTE_KEY,
-                ENCRYPTION_KEY,
+                &EncryptionPublicKey(ENCRYPTION_KEY.to_vec().into_boxed_slice()),
                 &registration_proof(),
             )
             .await;

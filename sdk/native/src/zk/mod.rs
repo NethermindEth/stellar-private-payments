@@ -2,6 +2,8 @@
 //! and selective-disclosure receipt validation.
 
 pub mod babyjub;
+#[cfg(feature = "parallel")]
+mod chunked_msm;
 pub mod circom_reduction;
 pub mod crypto;
 pub mod disclosure;

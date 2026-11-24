@@ -14,7 +14,6 @@ use zeroize::Zeroizing;
 use super::{
     SqliteStorage,
     database_key::{DatabaseKey, OpenPurpose},
-    encrypted_migration,
     wallet_vault::{self, WalletContext},
 };
 use crate::{types::KeyDerivationSignature, zk::encryption::verify_owner_signature};
@@ -100,7 +99,6 @@ pub fn unlock_with(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e.into()),
     }
-    let plaintext = encrypted_migration::is_plaintext_file(database)?;
     let key = if let Some(context) = wallet_vault::context(&record)? {
         wallet_vault::validate_context(&context)?;
         ensure!(
@@ -115,8 +113,8 @@ pub fn unlock_with(
         wallet_vault::unlock(&record, &context, &secret(&context, sign)?)?
     } else {
         ensure!(
-            !nonempty || plaintext,
-            "encrypted database has no wallet record; restore its matching .key file or choose a new --data-dir"
+            !nonempty,
+            "database has no wallet record; restore its matching .key file or choose a new --data-dir"
         );
         let mut salt = [0u8; 32];
         getrandom::getrandom(&mut salt)?;
@@ -147,22 +145,15 @@ pub fn unlock_with(
         wallet_vault::create(&record, &key, context, &material)?;
         key
     };
-    if plaintext {
-        eprintln!(
-            "Encrypting local storage. Deleted plaintext and older backups may remain recoverable; encryption does not securely erase them."
-        );
-        encrypted_migration::encrypt_in_place(database, &key)?;
-    } else {
-        drop(SqliteStorage::connect_encrypted(
-            database,
-            &key,
-            if nonempty {
-                OpenPurpose::OpenExisting
-            } else {
-                OpenPurpose::CreateNew
-            },
-        )?);
-    }
+    drop(SqliteStorage::connect_encrypted(
+        database,
+        &key,
+        if nonempty {
+            OpenPurpose::OpenExisting
+        } else {
+            OpenPurpose::CreateNew
+        },
+    )?);
     Ok(key)
 }
 

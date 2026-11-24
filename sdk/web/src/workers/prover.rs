@@ -1,5 +1,8 @@
 use crate::{
-    circuits::{fetch_circuit_artifact, get_or_derive_uncompressed},
+    circuits::{
+        fetch_circuit_artifact, get_or_derive_uncompressed, has_configured_uncompressed,
+        has_uncompressed,
+    },
     telemetry::WorkerTelemetryConfig,
     workers::{CorrelatedRequest, ProverHandle},
 };
@@ -11,7 +14,12 @@ use gloo_worker::{
     oneshot::{OneshotBridge, oneshot},
 };
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    fmt::Write as _,
+    rc::Rc,
+};
 use stellar_private_payments::{
     CircuitLockfile, Error, Prover, disclosure,
     prover::ProverEngine,
@@ -51,6 +59,10 @@ pub(crate) enum ProverWorkerRequest {
     ConfigureCircuitsBase(String, String),
     ConfigureTelemetry(WorkerTelemetryConfig),
     DumpLogs,
+    PrepareCircuit(String),
+    /// Size of the threaded prover worker's thread pool, sent before the first
+    /// proof. The serial worker answers with an error.
+    ConfigureThreads(u32),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -64,6 +76,8 @@ pub(crate) enum ProverWorkerResponse {
     DisclosureProofVerified(bool),
     KeyOwnershipProof(Vec<u8>),
     Logs(String),
+    /// Pool size the threaded prover worker will use, after clamping.
+    ThreadsConfigured(u32),
 }
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -191,34 +205,57 @@ async fn build_prover_from_compressed(
     init_prover(stem, &compressed, graph_bytes, r1cs_bytes)
 }
 
-async fn uncompressed_pk_bytes(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
+/// File name and expected SHA-256 of `stem`'s compressed proving key, which
+/// identify its uncompressed copy in the cache.
+fn proving_key_id(stem: &str) -> Result<(String, [u8; 32]), JsError> {
     let lock = crate::circuits::circuit_lock()?;
-    let pk_name = CircuitLockfile::artifact_file_name(stem, "proving_key.bin");
     let pk_sha256 = lock
         .artifact_sha256(stem, "proving_key.bin")
         .map_err(circuit_err)?;
-    let pk_name_for_log = pk_name.clone();
-    let stem_owned = stem.to_owned();
-    let r1cs_bytes = r1cs_bytes.to_vec();
-    get_or_derive_uncompressed(&pk_name, pk_sha256, move || {
-        let stem = stem_owned.clone();
-        let r1cs_bytes = r1cs_bytes.clone();
-        let pk_name = pk_name_for_log.clone();
-        async move {
-            let compressed = fetch_circuit_artifact(&stem, "proving_key.bin").await?;
-            let tmp = Groth16Prover::new(&compressed, &r1cs_bytes).map_err(|e| {
-                JsError::new(&format!(
-                    "failed to build prover for uncompressed export ({pk_name}): {e:#}"
-                ))
-            })?;
-            tmp.get_uncompressed_proving_key().map_err(|e| {
-                JsError::new(&format!(
-                    "failed to export uncompressed proving key ({pk_name}): {e:#}"
-                ))
-            })
-        }
+    Ok((
+        CircuitLockfile::artifact_file_name(stem, "proving_key.bin"),
+        pk_sha256,
+    ))
+}
+
+/// Fetch `stem`'s compressed proving key and export it uncompressed. This is
+/// the slow step: it decompresses every curve point of the key.
+async fn decompress_proving_key(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
+    let pk_name = CircuitLockfile::artifact_file_name(stem, "proving_key.bin");
+    let compressed = fetch_circuit_artifact(stem, "proving_key.bin").await?;
+    let tmp = Groth16Prover::new(&compressed, r1cs_bytes).map_err(|e| {
+        JsError::new(&format!(
+            "failed to build prover for uncompressed export ({pk_name}): {e:#}"
+        ))
+    })?;
+    tmp.get_uncompressed_proving_key().map_err(|e| {
+        JsError::new(&format!(
+            "failed to export uncompressed proving key ({pk_name}): {e:#}"
+        ))
+    })
+}
+
+async fn uncompressed_pk_bytes(stem: &str, r1cs_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
+    let (pk_name, pk_sha256) = proving_key_id(stem)?;
+    get_or_derive_uncompressed(&pk_name, pk_sha256, || {
+        decompress_proving_key(stem, r1cs_bytes)
     })
     .await
+}
+
+/// Make sure the cache holds `stem`'s uncompressed proving key, decompressing
+/// it if it is missing. The R1CS is fetched only then.
+async fn prepare_circuit(stem: &str) -> Result<(), JsError> {
+    let (pk_name, pk_sha256) = proving_key_id(stem)?;
+    if has_configured_uncompressed(&pk_name, pk_sha256).await {
+        return Ok(());
+    }
+    get_or_derive_uncompressed(&pk_name, pk_sha256, || async move {
+        let r1cs_bytes = fetch_circuit_artifact(stem, "r1cs").await?;
+        decompress_proving_key(stem, &r1cs_bytes).await
+    })
+    .await
+    .map(drop)
 }
 
 async fn ensure_prover(stem: &str) -> Result<(), JsError> {
@@ -310,6 +347,13 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
         ProverWorkerRequest::ConfigureCircuitsBase(base_url, lock_json) => {
             crate::circuits::configure_circuits(base_url, &lock_json)?;
+            ProverWorkerResponse::Saved
+        }
+        ProverWorkerRequest::PrepareCircuit(stem) => {
+            tracing::debug!("[{WORKER_NAME}] prepare {stem}");
+            prepare_circuit(&stem)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
             ProverWorkerResponse::Saved
         }
         ProverWorkerRequest::Transact(params) => {
@@ -452,6 +496,9 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::DumpLogs => {
             ProverWorkerResponse::Logs(crate::telemetry::dump_recent_logs())
         }
+        ProverWorkerRequest::ConfigureThreads(_) => {
+            anyhow::bail!("this prover worker proves on one thread and has no thread pool")
+        }
         ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
             tracing::debug!("[{WORKER_NAME}] verify disclosure proof");
 
@@ -493,18 +540,74 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
     Ok(resp)
 }
 
+/// Circuits of the deployment's enabled pools and of key registration whose
+/// proving keys are not yet decompressed in the cache. Runs on the page, so
+/// `prepareProvers` starts no worker when there is nothing to do.
+#[wasm_bindgen(js_name = circuitsToPrepare)]
+pub async fn circuits_to_prepare(
+    contract_config: JsValue,
+    circuits_base_url: String,
+    circuit_lock: String,
+) -> Result<Vec<String>, JsError> {
+    let config = crate::deployment::parse_contract_config(contract_config)?;
+    let base = crate::deployment::require_circuits_base_url(circuits_base_url)?;
+    let lock = stellar_private_payments::circuit_lock(&circuit_lock).map_err(circuit_err)?;
+    let stems = config
+        .enabled_pool_circuits()
+        .into_iter()
+        .map(|stem| stem.to_string())
+        .chain([KEY_OWNERSHIP_CIRCUIT.to_owned()]);
+    let mut missing = Vec::new();
+    for stem in stems {
+        // A circuit the lock does not know is left to the worker, which
+        // reports the error.
+        let cached = match lock.artifact_sha256(&stem, "proving_key.bin") {
+            Ok(sha) => {
+                let name = CircuitLockfile::artifact_file_name(&stem, "proving_key.bin");
+                has_uncompressed(&base, &name, sha).await
+            }
+            Err(_) => false,
+        };
+        if !cached {
+            missing.push(stem);
+        }
+    }
+    Ok(missing)
+}
+
 const PROVE_TIMEOUT_MS: u32 = 30_000;
+const PREPARE_TIMEOUT_MS: u32 = 60_000;
+/// `ConfigureThreads` is the first request a threaded worker answers, so this
+/// also covers downloading and compiling its wasm, and starting its pool (up
+/// to 10 s).
+const CONFIGURE_THREADS_TIMEOUT_MS: u32 = 40_000;
+const CONFIGURE_CIRCUITS_TIMEOUT_MS: u32 = 5_000;
+
+/// The serial prover worker that replaces a threaded one whose request timed
+/// out, and the circuits to configure it with.
+struct SerialFallback {
+    worker_url: String,
+    circuits_base_url: String,
+    lock_json: String,
+}
 
 /// Prover worker bridge — main-thread ↔ worker I/O for Groth16 proving.
+///
+/// Every fork shares the worker, so a fallback to the serial worker applies to
+/// all of them.
 #[wasm_bindgen]
 pub struct ProverBridge {
-    bridge: OneshotBridge<ProverWorker>,
+    bridge: Rc<RefCell<OneshotBridge<ProverWorker>>>,
+    fallback: Rc<RefCell<Option<SerialFallback>>>,
+    fell_back: Rc<Cell<bool>>,
 }
 
 impl Clone for ProverBridge {
     fn clone(&self) -> Self {
         Self {
-            bridge: self.bridge.fork(),
+            bridge: Rc::clone(&self.bridge),
+            fallback: Rc::clone(&self.fallback),
+            fell_back: Rc::clone(&self.fell_back),
         }
     }
 }
@@ -533,6 +636,43 @@ impl ProverBridge {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
+    /// Sizes and starts a threaded prover worker's thread pool, which clamps
+    /// the size to `1..=hardwareConcurrency`, and resolves to the number of
+    /// threads proofs will run on (1 if the pool did not start). Rejects on
+    /// the serial worker and after the first proof.
+    #[wasm_bindgen(js_name = configureThreads)]
+    pub async fn configure_threads_js(&self, threads: u32) -> Result<u32, JsError> {
+        self.configure_threads(threads)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Replace this (threaded) worker with the serial worker at `worker_url`,
+    /// configured with these circuits, once a request to it times out. A pool
+    /// thread that traps leaves its proof waiting forever; without this, every
+    /// later proof would wait out its timeout too.
+    #[wasm_bindgen(js_name = fallBackToSerialOnTimeout)]
+    pub fn fall_back_to_serial_on_timeout(
+        &self,
+        worker_url: String,
+        circuits_base_url: String,
+        lock_json: String,
+    ) -> Result<(), JsError> {
+        let circuits_base_url = crate::deployment::require_circuits_base_url(circuits_base_url)?;
+        *self.fallback.borrow_mut() = Some(SerialFallback {
+            worker_url,
+            circuits_base_url,
+            lock_json,
+        });
+        Ok(())
+    }
+
+    /// Whether a timeout replaced this worker with the serial one.
+    #[wasm_bindgen(js_name = fellBackToSerial)]
+    pub fn fell_back_to_serial(&self) -> bool {
+        self.fell_back.get()
+    }
+
     #[wasm_bindgen(js_name = toHandle)]
     pub fn to_handle(&self) -> ProverHandle {
         ProverHandle::new(self.clone().into())
@@ -547,11 +687,95 @@ impl ProverBridge {
     pub async fn ping_js(&self) -> Result<(), JsError> {
         self.ping().await.map_err(|e| JsError::new(&e.to_string()))
     }
+
+    /// Decompress the proving keys of `stems` into the shared cache, one
+    /// circuit at a time. A failed circuit does not stop the others; the error
+    /// names every circuit that failed and why.
+    #[wasm_bindgen(js_name = prepareCircuits)]
+    pub async fn prepare_circuits_js(&self, stems: Vec<String>) -> Result<(), JsError> {
+        let mut failed = Vec::new();
+        for stem in stems {
+            if let Err(e) = self.prepare_circuit(stem.clone()).await {
+                tracing::warn!("[{WORKER_NAME}] preparing {stem} failed: {e:#}");
+                failed.push(format!("{stem}: {e:#}"));
+            }
+        }
+        if failed.is_empty() {
+            Ok(())
+        } else {
+            Err(JsError::new(&format!(
+                "failed to prepare circuits: {}",
+                failed.join("; ")
+            )))
+        }
+    }
 }
 
 impl ProverBridge {
     pub(crate) fn new(bridge: OneshotBridge<ProverWorker>) -> Self {
-        Self { bridge }
+        Self {
+            bridge: Rc::new(RefCell::new(bridge)),
+            fallback: Rc::new(RefCell::new(None)),
+            fell_back: Rc::new(Cell::new(false)),
+        }
+    }
+
+    /// Send `req` to `bridge` and wait at most `timeout_ms` for the answer.
+    async fn run(
+        bridge: &OneshotBridge<ProverWorker>,
+        req: ProverWorkerRequest,
+        timeout_ms: u32,
+    ) -> Option<ProverWorkerResponse> {
+        let correlated_req = CorrelatedRequest {
+            correlation_id: crate::correlation::current_correlation_id()
+                .unwrap_or_else(|| "-".to_string()),
+            payload: req,
+        };
+        let mut bridge = bridge.fork();
+        let fut = bridge.run(correlated_req).fuse();
+        let timeout = TimeoutFuture::new(timeout_ms).fuse();
+        futures::pin_mut!(fut, timeout);
+        futures::select! {
+            value = fut => Some(value),
+            _ = timeout => None,
+        }
+    }
+
+    /// If a serial fallback is set, replace the worker with it. Dropping the
+    /// last bridge to the old worker terminates it and its pool threads.
+    async fn fall_back_to_serial(&self) {
+        let Some(fallback) = self.fallback.borrow_mut().take() else {
+            return;
+        };
+        tracing::warn!(
+            "[{WORKER_NAME}] threaded prover worker timed out, switching to the serial worker"
+        );
+        let serial = ProverWorker::spawner()
+            .with_loader(true)
+            .as_module(true)
+            .spawn(&fallback.worker_url);
+        let configured = Self::run(
+            &serial,
+            ProverWorkerRequest::ConfigureCircuitsBase(
+                fallback.circuits_base_url,
+                fallback.lock_json,
+            ),
+            PROVE_TIMEOUT_MS,
+        )
+        .await;
+        if !matches!(configured, Some(ProverWorkerResponse::Saved)) {
+            tracing::warn!(
+                "[{WORKER_NAME}] serial prover worker did not configure its circuits: {configured:?}"
+            );
+        }
+        let _ = Self::run(
+            &serial,
+            ProverWorkerRequest::ConfigureTelemetry(crate::telemetry::current_worker_config()),
+            CONFIGURE_CIRCUITS_TIMEOUT_MS,
+        )
+        .await;
+        *self.bridge.borrow_mut() = serial;
+        self.fell_back.set(true);
     }
 
     pub(crate) async fn call(
@@ -559,22 +783,11 @@ impl ProverBridge {
         req: ProverWorkerRequest,
         timeout_ms: u32,
     ) -> anyhow::Result<ProverWorkerResponse> {
-        let correlated_req = CorrelatedRequest {
-            correlation_id: crate::correlation::current_correlation_id()
-                .unwrap_or_else(|| "-".to_string()),
-            payload: req,
-        };
-        let mut bridge = self.bridge.fork();
-        let fut = bridge.run(correlated_req).fuse();
-        let timeout = TimeoutFuture::new(timeout_ms).fuse();
-
-        futures::pin_mut!(fut, timeout);
-
-        let resp = futures::select! {
-            value = fut => value,
-            _ = timeout => {
-                return Err(anyhow!("operation timed out after {timeout_ms} ms"));
-            }
+        let bridge = self.bridge.borrow().fork();
+        let Some(resp) = Self::run(&bridge, req, timeout_ms).await else {
+            drop(bridge);
+            self.fall_back_to_serial().await;
+            return Err(anyhow!("operation timed out after {timeout_ms} ms"));
         };
 
         match resp {
@@ -593,6 +806,19 @@ impl ProverBridge {
         }
     }
 
+    pub(crate) async fn prepare_circuit(&self, stem: String) -> anyhow::Result<()> {
+        match self
+            .call(
+                ProverWorkerRequest::PrepareCircuit(stem),
+                PREPARE_TIMEOUT_MS,
+            )
+            .await?
+        {
+            ProverWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
     pub(crate) async fn configure_circuits_base(
         &self,
         base_url: String,
@@ -601,11 +827,29 @@ impl ProverBridge {
         match self
             .call(
                 ProverWorkerRequest::ConfigureCircuitsBase(base_url, lock_json),
-                5_000,
+                CONFIGURE_CIRCUITS_TIMEOUT_MS,
             )
             .await?
         {
             ProverWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    /// Sizes and starts the threaded prover worker's thread pool, and returns
+    /// the number of threads proofs will run on: `threads` clamped to
+    /// `1..=hardwareConcurrency`, or 1 if the pool did not start. The pool
+    /// cannot be resized, so this has to come before the first proof;
+    /// afterwards, and from the serial prover worker, the answer is an error.
+    pub async fn configure_threads(&self, threads: u32) -> anyhow::Result<u32> {
+        match self
+            .call(
+                ProverWorkerRequest::ConfigureThreads(threads),
+                CONFIGURE_THREADS_TIMEOUT_MS,
+            )
+            .await?
+        {
+            ProverWorkerResponse::ThreadsConfigured(threads) => Ok(threads),
             other => Err(anyhow!("unexpected response: {other:?}")),
         }
     }

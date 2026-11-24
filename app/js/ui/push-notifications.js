@@ -1,3 +1,5 @@
+import { serviceWorkerRegistration } from '../service-worker.js';
+
 const NOTIFICATIONS_PROMPTED_FLAG = 'poolstellar_notifications_prompted';
 const META_CACHE = 'poolstellar-meta';
 const LAST_VISIT_URL = '/last-visit';
@@ -33,23 +35,18 @@ export async function requestNotificationPermission() {
 }
 
 export async function registerServiceWorker() {
-    if (!('serviceWorker' in navigator)) return;
-    try {
-        const reg = await navigator.serviceWorker.register('/sw.js');
-        if ('periodicSync' in reg) {
-            try {
-                const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
-                if (status.state === 'granted') {
-                    await reg.periodicSync.register('check-last-visit', {
-                        minInterval: 24 * 60 * 60 * 1000,
-                    });
-                }
-            } catch (e) {
-                console.debug('[PushNotifications] periodicSync registration failed:', e);
+    const reg = await serviceWorkerRegistration();
+    if (reg && 'periodicSync' in reg) {
+        try {
+            const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
+            if (status.state === 'granted') {
+                await reg.periodicSync.register('check-last-visit', {
+                    minInterval: 24 * 60 * 60 * 1000,
+                });
             }
+        } catch (e) {
+            console.debug('[PushNotifications] periodicSync registration failed:', e);
         }
-    } catch (e) {
-        console.debug('[PushNotifications] SW registration failed:', e);
     }
 }
 

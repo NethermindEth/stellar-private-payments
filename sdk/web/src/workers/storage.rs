@@ -86,10 +86,17 @@ pub(crate) struct PrivacyKeys {
     encryption_keypair: PublicEncryptionKeyPair,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AspSecret {
     membership_blinding: Field,
+}
+
+/// The blinding is secret and `Field` prints its value.
+impl std::fmt::Debug for AspSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AspSecret(<redacted>)")
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -324,8 +331,7 @@ const OPFS_LOCK_RETRY_DELAY_MS: u32 = 200;
 async fn init(opening: OpenRequest) -> Result<(), JsError> {
     let directory = match &opening {
         #[cfg(feature = "unencrypted-storage")]
-        // Not `.opfs-sahpool`: the app treats that directory as legacy
-        // plaintext storage and offers to delete it.
+        // Separate from the encrypted storage directories.
         OpenRequest::Plaintext => ".opfs-sahpool-plaintext",
         #[cfg(feature = "encrypted-storage")]
         OpenRequest::Encrypted { directory, .. } => {
@@ -484,13 +490,19 @@ enum MainFile {
 
 /// Find the database file `name` in the OPFS pool, removing it when it is
 /// empty.
+///
+/// The pool's errors are turned into messages rather than converted with `?`:
+/// they hold a `JsValue`, which is not `Send + Sync` in builds with atomics
+/// (the threaded prover worker links this module too), so they cannot become
+/// `anyhow::Error` there.
 #[cfg(target_arch = "wasm32")]
 fn main_file(name: &str) -> anyhow::Result<MainFile> {
     SAH_POOL.with(|p| {
         use sqlite_wasm_rs::vfs::VfsFilesManager;
         let pool = p.borrow();
         let pool = pool.as_ref().ok_or_else(|| anyhow!("OPFS unavailable"))?;
-        if !pool.contains(name)? {
+        let contains = |file: &str| pool.contains(file).map_err(|e| anyhow!("{e}"));
+        if !contains(name)? {
             return Ok(MainFile::Missing);
         }
         if !database_is_empty(name)? {
@@ -500,11 +512,10 @@ fn main_file(name: &str) -> anyhow::Result<MainFile> {
         // open yet. Only a zero-byte main file without recovery sidecars is
         // safe to recreate.
         anyhow::ensure!(
-            !pool.contains(&format!("{name}-journal"))?
-                && !pool.contains(&format!("{name}-wal"))?,
+            !contains(&format!("{name}-journal"))? && !contains(&format!("{name}-wal"))?,
             "empty database has recovery files; existing data has been preserved"
         );
-        pool.remove(name)?;
+        pool.remove(name).map_err(|e| anyhow!("{e}"))?;
         Ok(MainFile::Removed)
     })
 }

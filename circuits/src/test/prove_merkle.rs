@@ -62,7 +62,6 @@ mod tests {
 
         let mut inputs = Inputs::new();
         inputs.set("leaf", leaf_val);
-        inputs.set("root", &root_val);
         inputs.set("pathElements", path_elems);
         inputs.set("pathIndices", path_idx);
 
@@ -124,7 +123,7 @@ mod tests {
         // Indices to try (cover left/right edges and middle)
         let indices = [0usize, 1, 7, 8, 15, 16, 23, 31];
 
-        let keys = generate_keys(&wasm, &r1cs)?;
+        let keys = generate_keys(&r1cs)?;
 
         // Run cases
         for &idx in &indices {

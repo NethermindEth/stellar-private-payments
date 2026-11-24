@@ -11,7 +11,7 @@ build = "build.rs"
 
 # sqlite-wasm-rs enables the WASM host adapter for rusqlite, and SQLite3MC with `encrypted-storage`.
 [package.metadata.cargo-shear]
-ignored = ["sqlite-wasm-rs"]
+ignored = ["sqlite-wasm-rs", "rustls"]
 
 [lib]
 name = "stellar_private_payments"
@@ -30,11 +30,17 @@ encrypted-storage = [
 ]
 # Plaintext wallet storage using rusqlite's bundled SQLite.
 unencrypted-storage = ["rusqlite/bundled"]
-# multi-threaded proving
+# Multi-threaded proving, on native targets and in threaded wasm32 builds (shared
+# memory plus a rayon pool). The SDK assembles the proof itself and splits each
+# MSM over the rayon pool it runs in (see `zk/chunked_msm.rs`), while
+# `ark-groth16` and `ark-ec` stay serial. They have to: `ark-ec` 0.6 builds a new
+# rayon pool inside every MSM, which needs `std::thread::spawn` and panics on
+# wasm32, so this feature must not turn on `ark-groth16/parallel` or
+# `ark-ec/parallel`.
 parallel = [
+    "dep:ark-ec",
     "dep:rayon",
     "ark-ff/parallel",
-    "ark-groth16/parallel",
     "ark-poly/parallel",
     "ark-std/parallel",
 ]
@@ -47,12 +53,14 @@ flate2 = { version = "1", default-features = false, features = ["rust_backend"] 
 futures-timer = "3"
 getrandom = { workspace = true, features = ["std"] }
 hkdf = { version = "0.13", optional = true }
-rayon = { version = "1.12", default-features = false, optional = true }
 reqwest = { workspace = true, features = ["rustls"] }
 # The storage features pick the SQLite build: `in_gecko` (`encrypted-storage`) tells
 # `libsqlite3-sys` to use the `sqlite3mc` C symbols compiled by `build.rs`, and `bundled`
 # (`unencrypted-storage`) compiles plain SQLite.
 rusqlite = { workspace = true }
+# Not referenced directly: turns on the hybrid post-quantum TLS key exchange (X25519MLKEM768) as the
+# preferred group of reqwest's rustls backend, which `reqwest` leaves off.
+rustls = { version = "0.23", default-features = false, features = ["prefer-post-quantum"] }
 tar = "0.4"
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tracing-subscriber = { workspace = true }
@@ -73,16 +81,17 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 bigdecimal = "0.4.11"
 circom-witness-rs = { workspace = true }
-ed25519-dalek = { workspace = true, features = ["digest", "hazmat", "zeroize"] }
+ed25519-dalek = { workspace = true, features = ["zeroize"] }
 futures = { workspace = true, features = ["executor"] }
 getrandom = { workspace = true }
 hex = { workspace = true }
+hpke = { workspace = true }
 http = "1.5.0"
 rusqlite_migration = { version = "2.7.0", default-features = false }
 serde = { workspace = true }
 serde-aux = "4.7.0"
 serde_json = { workspace = true, features = ["alloc"] }
-sha2 = { workspace = true }
+sha2 = { workspace = true, features = ["zeroize"] }
 sha3 = { version = "0.12", default-features = false }
 stellar-strkey = "0.0.18"
 stellar-xdr = { workspace = true }
@@ -96,6 +105,8 @@ zeroize = { workspace = true }
 
 # Arkworks ZK proving
 ark-bn254 = { workspace = true }
+# Already in the tree through `ark-groth16`; named here only to call its MSM.
+ark-ec = { workspace = true, optional = true }
 ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 ark-poly = { workspace = true }
@@ -104,9 +115,9 @@ ark-serialize = { workspace = true }
 ark-snark = { workspace = true }
 ark-std = { workspace = true }
 crypto_secretbox.workspace = true
+rayon = { version = "1.12", default-features = false, optional = true }
 ruint = { workspace = true }
 taceo-poseidon2 = { workspace = true }
-x25519-dalek = { version = "3.0", default-features = false, features = ["static_secrets"] }
 
 [build-dependencies]
 cc = { version = "1", optional = true }
@@ -115,6 +126,7 @@ sha2 = { workspace = true }
 sqlite3mc-src = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+x-wing = { workspace = true }
 circuit-keys = { workspace = true }
 contract-types = { workspace = true }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
@@ -130,6 +142,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 wiremock = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+x-wing = { workspace = true }
 rusqlite = { workspace = true }
 wasm-bindgen-test = { workspace = true }
 

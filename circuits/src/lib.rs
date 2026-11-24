@@ -9,6 +9,9 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 extern crate alloc;
 
+/// Circom R1CS, circuit and witness helpers, without a WASM runtime
+#[cfg(feature = "std")]
+pub mod circom_compat;
 /// Core circuit utilities
 pub mod core;
 

@@ -3,9 +3,10 @@
 //! Implements the witness map used by snarkjs rather than arkworks' default
 //! `LibsnarkReduction`: Circom prepares powers-of-tau in Lagrange form over a
 //! doubled domain, and the H contribution is taken as the odd coefficients of
-//! `(AB − C)` in that domain.  Vendored (the `parallel` feature swaps `rayon`
-//! for serial loops when off) so upgrades to `circom-compat` / ark-groth16 can
-//! be re-audited against a pinned upstream source.
+//! `(AB − C)` in that domain.  Vendored (the loops use `rayon` with the
+//! `parallel` feature and are serial otherwise) so
+//! upgrades to `circom-compat` / ark-groth16 can be re-audited against a pinned
+//! upstream source.
 //!
 //! Upstream reference (`arkworks-rs/circom-compat` @ `7344c75`):
 //!   - `src/circom/qap.rs` (`CircomReduction`)
@@ -26,8 +27,9 @@ use rayon::prelude::*;
 /// in that domain. This serves as HZ when computing the C proof element.
 pub struct CircomReduction;
 
-// With the `parallel` feature, use `rayon` parallel iterators.
-// Otherwise (including all wasm32 builds), use the equivalent serial loops.
+// With the `parallel` feature, use `rayon` parallel iterators. Otherwise, use
+// the equivalent serial loops. These loops only use the current pool, so they
+// also run in a wasm32 thread pool.
 impl R1CSToQAP for CircomReduction {
     #[allow(clippy::type_complexity)]
     fn instance_map_with_evaluation<F: PrimeField, D: EvaluationDomain<F>>(

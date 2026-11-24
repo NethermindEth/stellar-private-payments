@@ -11,7 +11,7 @@ mod logging;
 mod policy_tx;
 pub use address::*;
 pub use amounts::*;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 pub use chain_data::*;
 pub use circuit_stem::{CircuitStem, KEY_OWNERSHIP_CIRCUIT};
 pub use client::*;
@@ -173,7 +173,7 @@ pub struct UserNote {
 pub struct PublicKeyEntry {
     /// Stellar address (primary key).
     pub address: String,
-    /// X25519 encryption public key (hex).
+    /// Encryption public key (hex).
     pub encryption_key: EncryptionPublicKey,
     /// BN254 note public key (hex).
     pub note_key: NotePublicKey,
@@ -330,9 +330,15 @@ impl Drop for EncryptionPrivateKey {
     }
 }
 
-/// Encryption public key
+/// Encryption public key: an X-Wing public key, `ML-KEM-768 (1184) || X25519
+/// (32)`.
 #[derive(Debug, Clone)]
-pub struct EncryptionPublicKey(pub [u8; 32]);
+pub struct EncryptionPublicKey(pub Box<[u8]>);
+
+impl EncryptionPublicKey {
+    /// Byte length of an X-Wing (X25519 + ML-KEM-768) public key.
+    pub const LEN: usize = 1216;
+}
 
 /// Encryption key pair
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -423,6 +429,18 @@ impl ContractConfig {
         self.pools.iter().filter(|p| p.enabled)
     }
 
+    /// Transact circuits of the enabled pools, each once, in pool order.
+    pub fn enabled_pool_circuits(&self) -> Vec<CircuitStem> {
+        let mut stems: Vec<CircuitStem> = Vec::new();
+        for pool in self.enabled_pools() {
+            let stem = CircuitStem::transact(pool.policy_flags, pool.gvk_mode);
+            if !stems.contains(&stem) {
+                stems.push(stem);
+            }
+        }
+        stems
+    }
+
     /// Enabled pool metadata for portfolio rendering.
     pub fn portfolio_pools(&self) -> Vec<PortfolioPoolEntry> {
         self.enabled_pools().map(PortfolioPoolEntry::from).collect()
@@ -506,9 +524,58 @@ impl ContractConfig {
 }
 
 impl EncryptionPublicKey {
-    /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
+    /// Parse a `0x`-prefixed (or raw) hex string of [`Self::LEN`] bytes.
     pub fn parse(s: &str) -> Result<Self> {
-        Ok(Self(parse_0x_hex_32(s)?))
+        let s = s.strip_prefix("0x").unwrap_or(s);
+        if s.len() != Self::LEN * 2 {
+            bail!("expected {} hex chars, got {}", Self::LEN * 2, s.len());
+        }
+        let bytes = hex::decode(s).map_err(|e| anyhow!("cannot decode hex: {e}"))?;
+        Ok(Self(bytes.into_boxed_slice()))
+    }
+
+    /// `0x`-prefixed hex encoding.
+    pub fn to_0x_hex(&self) -> String {
+        format!("0x{}", hex::encode(&self.0))
+    }
+}
+
+impl Serialize for EncryptionPublicKey {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> core::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_0x_hex())
+    }
+}
+
+impl<'de> Deserialize<'de> for EncryptionPublicKey {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> core::result::Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Self::parse(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+impl std::convert::TryFrom<Vec<u8>> for EncryptionPublicKey {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        let len = value.len();
+        if len != Self::LEN {
+            bail!(
+                "EncryptionPublicKey: Invalid length. Expected {}, got {len}",
+                Self::LEN
+            );
+        }
+        Ok(Self(value.into_boxed_slice()))
+    }
+}
+
+impl AsRef<[u8]> for EncryptionPublicKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -555,7 +622,6 @@ macro_rules! impl_key_serde_hex {
 }
 
 impl_key_serde_hex!(EncryptionPrivateKey);
-impl_key_serde_hex!(EncryptionPublicKey);
 impl_key_serde_hex!(NotePrivateKey);
 impl_key_serde_hex!(NotePublicKey);
 
@@ -595,7 +661,29 @@ mod rusqlite_key_impls {
     }
 
     impl_key_rusqlite_blob_32!(EncryptionPrivateKey);
-    impl_key_rusqlite_blob_32!(EncryptionPublicKey);
+
+    impl ToSql for EncryptionPublicKey {
+        fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+            Ok(ToSqlOutput::Owned(Value::Blob(self.0.to_vec())))
+        }
+    }
+
+    impl FromSql for EncryptionPublicKey {
+        fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+            match value {
+                ValueRef::Blob(b) => {
+                    if b.len() != EncryptionPublicKey::LEN {
+                        return Err(FromSqlError::InvalidBlobSize {
+                            expected_size: EncryptionPublicKey::LEN,
+                            blob_size: b.len(),
+                        });
+                    }
+                    Ok(EncryptionPublicKey(Box::from(b)))
+                }
+                _ => Err(FromSqlError::InvalidType),
+            }
+        }
+    }
     impl_key_rusqlite_blob_32!(NotePrivateKey);
     impl_key_rusqlite_blob_32!(NotePublicKey);
 }
@@ -678,9 +766,19 @@ mod key_serde_tests {
     }
 
     hex_key_tests!(EncryptionPrivateKey, encryption_private_key);
-    hex_key_tests!(EncryptionPublicKey, encryption_public_key);
     hex_key_tests!(NotePrivateKey, note_private_key);
     hex_key_tests!(NotePublicKey, note_public_key);
+
+    #[test]
+    fn encryption_public_key_hex_roundtrip_and_length() -> Result<()> {
+        let key = EncryptionPublicKey(vec![0xab; EncryptionPublicKey::LEN].into_boxed_slice());
+        let json = serde_json::to_string(&key)?;
+        let back: EncryptionPublicKey = serde_json::from_str(&json)?;
+        assert_eq!(back.0, key.0);
+        assert!(EncryptionPublicKey::parse(&hex::encode([0u8; 32])).is_err());
+        assert!(serde_json::from_str::<EncryptionPublicKey>("[0,1,2,3]").is_err());
+        Ok(())
+    }
 
     #[test]
     fn note_public_key_deserialize_from_plain_str_deserializer() -> Result<()> {
@@ -738,7 +836,6 @@ macro_rules! impl_byte_wrapper {
 
 // Apply the macro to your types
 impl_byte_wrapper!(EncryptionPrivateKey);
-impl_byte_wrapper!(EncryptionPublicKey);
 impl_byte_wrapper!(NotePrivateKey);
 impl_byte_wrapper!(NotePublicKey);
 
@@ -876,6 +973,37 @@ mod contract_config_tests {
         }
         assert!(!config.is_deployment_contract("GADMIN"));
         assert!(!config.is_deployment_contract(""));
+        Ok(())
+    }
+
+    #[test]
+    fn enabled_pool_circuits_lists_each_enabled_circuit_once() -> Result<()> {
+        let mut config = config()?;
+        let base = config.pool("CPOOL")?.clone();
+        config.pools.extend([
+            PoolConfigEntry {
+                pool_contract_id: "CSAME".into(),
+                ..base.clone()
+            },
+            PoolConfigEntry {
+                pool_contract_id: "CGVK".into(),
+                gvk_mode: GvkMode::Traceable,
+                ..base.clone()
+            },
+            PoolConfigEntry {
+                pool_contract_id: "COFF".into(),
+                policy_flags: PolicyFlags::BLOCKLIST,
+                enabled: false,
+                ..base
+            },
+        ]);
+
+        let stems: Vec<String> = config
+            .enabled_pool_circuits()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        assert_eq!(stems, ["policy_tx_2_2_A", "policy_tx_2_2_A_gvk_T"]);
         Ok(())
     }
 

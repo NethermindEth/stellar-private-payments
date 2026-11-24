@@ -18,11 +18,12 @@ jobs:
   wasm-build:
     env:
       SPP_NETWORK: testnet
-    timeout-minutes: 30
+    # The threaded prover worker and the prover test add a few minutes.
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
@@ -32,6 +33,12 @@ jobs:
           targets: wasm32-unknown-unknown
           override: true
 
+      # The threaded prover worker rebuilds std from source, which needs
+      # rust-src. rust-toolchain.toml lists it; installing it again is a no-op.
+      - name: Install rust-src for the threaded prover worker
+        run: rustup component add rust-src
+
+      # Also keeps target/web-threads, the threaded worker's std and dependencies.
       - name: Cache
         uses: ./.github/actions/rust-cache
         with:
@@ -44,7 +51,7 @@ jobs:
         run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
 
       - name: Setup Node.js
-        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
@@ -73,6 +80,11 @@ jobs:
           npm run check:artifacts --prefix sdk/web
           npm run check:bindgen --prefix sdk/web
           npm run check:types --prefix sdk/web
+
+      # Proves on the threaded worker of an isolated page and on the serial
+      # worker of a page that is not isolated.
+      - name: Test the prover workers in Chromium
+        run: node sdk/web/scripts/test-prover-threads.js --binary "$(command -v google-chrome)" --driver "$CHROMEWEBDRIVER/chromedriver" --artifacts "$RUNNER_TEMP/prover-checks/chromium"
 
       - name: Test SDK amount bindings
         run: npm run test:amounts --prefix sdk/web
@@ -111,7 +123,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
@@ -128,6 +140,13 @@ jobs:
 
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
+
+      # The threaded prover worker builds `parallel` with atomics (wasm-build
+      # job); keep it compiling, warning-free, without them too.
+      - name: Check the parallel feature on wasm32
+        env:
+          RUSTFLAGS: "-Dwarnings"
+        run: cargo check --target wasm32-unknown-unknown -p stellar-private-payments --features parallel
 
       - name: Run wasm tests
         run: cargo test --target wasm32-unknown-unknown -p stellar-private-payments --lib

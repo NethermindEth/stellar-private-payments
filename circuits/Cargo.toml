@@ -8,18 +8,30 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "parallel"]
 std = [
     "anyhow",
-    "ark-circom",
     "ark-groth16",
+    "ark-poly",
     "ark-relations",
     "ark-serialize",
     "ark-snark",
     "ark-std",
+    "byteorder",
+    "hex",
     "num-bigint",
     "num-integer",
+    "rayon",
     "serde_json",
+    "tempfile",
+]
+# Multi-threaded proving in the tests and tools.
+parallel = [
+    "std",
+    "ark-ff/parallel",
+    "ark-groth16/parallel",
+    "ark-poly/parallel",
+    "ark-std/parallel",
 ]
 
 [dependencies]
@@ -31,23 +43,19 @@ taceo-poseidon2 = { workspace = true }
 
 # Test utilities dependencies (std only — used by the `test` module)
 anyhow = { workspace = true, optional = true }
-ark-circom = { workspace = true, optional = true }
 ark-groth16 = { workspace = true, optional = true }
+ark-poly = { workspace = true, optional = true }
 ark-relations = { workspace = true, optional = true }
 ark-serialize = { workspace = true, optional = true }
 ark-snark = { workspace = true, optional = true }
 ark-std = { workspace = true, optional = true }
+byteorder = { version = "1.4", optional = true }
+hex = { workspace = true, optional = true }
 num-bigint = { workspace = true, optional = true }
 num-integer = { workspace = true, optional = true }
+rayon = { version = "1.5", optional = true }
 serde_json = { workspace = true, default-features = false, features = ["alloc", "std"], optional = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# external
-ark-circom = { workspace = true, features = ["parallel"], optional = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-# external
-ark-circom = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
 
 [lints]
 workspace = true

@@ -194,10 +194,6 @@ pub fn pool_ext_data_to_scval(ext: &ExtData) -> Result<ScVal> {
 pub fn registration_proof_to_scval(proof: &RegistrationProof) -> Result<ScVal> {
     sorted_map(vec![
         map_entry(
-            "encryption_key_signature",
-            bytes_to_scval(proof.encryption_key_signature)?,
-        )?,
-        map_entry(
             "note_key_proof",
             groth16_proof_to_scval(&proof.note_key_proof)?,
         )?,
@@ -208,7 +204,7 @@ pub fn registration_proof_to_scval(proof: &RegistrationProof) -> Result<ScVal> {
 /// Encodes a public-key registration `Account` for `register`.
 pub fn register_account_to_scval(
     owner: &str,
-    encryption_key: [u8; 32],
+    encryption_key: &[u8],
     note_key: [u8; 32],
 ) -> Result<ScVal> {
     sorted_map(vec![
@@ -438,7 +434,7 @@ mod tests {
     fn account_encoding_matches_contracttype_xdr() {
         let env = Env::default();
         let owner = Address::from_str(&env, TEST_ACCOUNT);
-        let encryption_key = Bytes::from_array(&env, &[0xEE; 32]);
+        let encryption_key = Bytes::from_array(&env, &[0xEE; 64]);
         let note_key = Bytes::from_array(&env, &[0xAB; 32]);
         let on_chain = Account {
             owner: owner.clone(),
@@ -450,7 +446,7 @@ mod tests {
         let ours = scval_xdr(
             &register_account_to_scval(
                 TEST_ACCOUNT,
-                soroban_bytes32(&encryption_key),
+                &encryption_key.to_alloc_vec(),
                 soroban_bytes32(&note_key),
             )
             .expect("encode"),
@@ -464,7 +460,6 @@ mod tests {
         let note_key_proof = mk_mock_groth16_proof(&env);
         let on_chain = KeyOwnershipProof {
             note_key_proof: note_key_proof.clone(),
-            encryption_key_signature: BytesN::from_array(&env, &[0x02; 64]),
             owner_signature: BytesN::from_array(&env, &[0x03; 64]),
         };
         let expected = on_chain.to_xdr(&env);
@@ -472,7 +467,6 @@ mod tests {
         let ours = scval_xdr(
             &registration_proof_to_scval(&RegistrationProof {
                 note_key_proof: proof_uncompressed_from_contract(&note_key_proof),
-                encryption_key_signature: [0x02; 64],
                 owner_signature: [0x03; 64],
             })
             .expect("encode"),

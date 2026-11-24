@@ -18,6 +18,7 @@ export const Client = {async new(rpc, storage, prover, config) {
   return { contractConfig() { return config; }, free() {} };
 }};
 export function registerTelemetrySinks() { return {free() {}}; }
+export async function circuitsToPrepare() { return []; }
 export class BlocklistOperator {};
 export class PoolAdmin {};
 export async function verifySelectiveDisclosure(rpc, prover, receipt, hash, options) { return options.contractConfig; }
@@ -36,8 +37,10 @@ export default function init() {};
 const url = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
 const mockUrl = url(mockSource);
 const sourceUrl = new URL('../../../sdk/web/js/index.js', import.meta.url);
+const noThreadsUrl = url('export const threadedProverWorkerUrl = null;');
 const source = (await readFile(sourceUrl, 'utf8'))
   .replaceAll('../dist/stellar_private_payments_web.js', mockUrl)
+  .replaceAll('../dist/prover-threads.js', noThreadsUrl)
   .replaceAll('import.meta.url', JSON.stringify(sourceUrl.href));
 const sdk = await import(url(source));
 const mock = await import(mockUrl);
@@ -100,8 +103,7 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
     .replace("'./storage-key.js'", JSON.stringify(url('export async function openWalletStorage({ storage }) { return storage.open(); }')))
     .replace("'./storage-account-dialog.js'", JSON.stringify(url('export async function confirmStorageAccount() {}')))
     .replace("'./storage-signature.js'", JSON.stringify(url('export async function verifyStorageSignature() {}')))
-    .replace("'./private-signers.js'", JSON.stringify(url('export async function migratePrivateSigners() {}')))
-    .replace("'./storage-backup.js'", JSON.stringify(url('export const STORAGE_RECORD_KEY = "k"; export async function exportStorageBackup() {} export async function importStorageBackup() {} export function parseBackup() {} export async function resetStorage() {} export async function hasEncryptedStorage() { return false; } export async function hasLegacyPlaintextStorage() { return false; } export async function removeLegacyPlaintextStorage() {} export async function acquireStorageLease() { return async () => {}; }')))
+    .replace("'./storage-backup.js'", JSON.stringify(url('export const STORAGE_RECORD_KEY = "k"; export async function exportStorageBackup() {} export async function importStorageBackup() {} export function parseBackup() {} export async function resetStorage() {} export async function hasEncryptedStorage() { return false; } export async function acquireStorageLease() { return async () => {}; }')))
     .replace("'./wallet.js'", JSON.stringify(url('export async function getWalletAddress() {} export async function signWalletMessage() {} export function startWalletWatcher() {}')));
   for (const name of ['network-config', 'app-storage']) {
     let moduleSource = await readFile(new URL(`../../../app/js/${name}.js`, import.meta.url), 'utf8');
@@ -141,4 +143,137 @@ test('app reopens clients and verifies receipts without fetching circuit fingerp
       else globalThis[key] = value;
     }
   }
+});
+
+// Prover worker selection, against a bridge that records what it is asked.
+async function loadSdk({ threadedUrl, threadsFail, poolThreads = 4 }) {
+  const bridge = url(`
+    export const spawned = [];
+    export const threadRequests = [];
+    export const freed = [];
+    export const fallbacks = [];
+    export const ProverBridge = { spawn(workerUrl) {
+      spawned.push(workerUrl);
+      return {
+        async configureThreads(n) {
+          threadRequests.push(n);
+          if (${JSON.stringify(Boolean(threadsFail))}) throw new Error('worker did not start');
+          return Math.min(n, ${JSON.stringify(poolThreads)});
+        },
+        fallBackToSerialOnTimeout(serialUrl) { fallbacks.push([workerUrl, serialUrl]); },
+        fellBackToSerial() { return false; },
+        async configureCircuitsBase() {}, async ping() {}, toHandle() { return { free() {} }; },
+        fork() { return this; }, free() { freed.push(workerUrl); },
+      };
+    }};
+  `);
+  const mockForBridge = url(mockSource.replace('export const ProverBridge', 'const _unused').replace(
+    'export default function init() {};',
+    `export { ProverBridge } from ${JSON.stringify(bridge)}; export default function init() {};`,
+  ));
+  const marker = url(`export const threadedProverWorkerUrl = ${JSON.stringify(threadedUrl ?? null)};`);
+  const text = (await readFile(sourceUrl, 'utf8'))
+    .replaceAll('../dist/stellar_private_payments_web.js', mockForBridge)
+    .replaceAll('../dist/prover-threads.js', marker)
+    .replaceAll('import.meta.url', JSON.stringify(sourceUrl.href));
+  return { sdk: await import(url(text)), bridge: await import(bridge) };
+}
+
+test('prover worker selection follows the build, isolation and proverThreads', async (t) => {
+  const THREADED = 'https://example.test/workers/prover-worker-threads.js';
+  const options = {
+    rpcUrl: 'https://rpc.example', contractConfig: {}, circuitLock: {},
+    circuitsBaseUrl: 'https://example.test/', keyProvider: async () => new Uint8Array(32),
+  };
+  const saved = { isolated: globalThis.crossOriginIsolated, warn: console.warn, navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator') };
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  const setCores = (hardwareConcurrency) =>
+    Object.defineProperty(globalThis, 'navigator', { value: { hardwareConcurrency }, configurable: true, writable: true });
+  setCores(16);
+  t.after(() => {
+    globalThis.crossOriginIsolated = saved.isolated;
+    console.warn = saved.warn;
+    if (saved.navigator) Object.defineProperty(globalThis, 'navigator', saved.navigator);
+    else delete globalThis.navigator;
+  });
+  const run = async (load, isolated, extra = {}) => {
+    globalThis.crossOriginIsolated = isolated;
+    const client = await load.sdk.Client.new({ ...options, ...extra });
+    const info = client.proverInfo();
+    client.dispose();
+    return { info, spawned: load.bridge.spawned.at(-1) };
+  };
+  const serialUrl = (spawned) => spawned.endsWith('/workers/prover-worker.js');
+
+  // A default build never asks for the threaded worker.
+  const plain = await loadSdk({});
+  let r = await run(plain, true, { proverThreads: 8 });
+  assert.deepEqual(r.info, { mode: 'serial', threads: 1 });
+  assert.ok(serialUrl(r.spawned));
+  assert.deepEqual(plain.bridge.threadRequests, []);
+
+  const threaded = await loadSdk({ threadedUrl: THREADED });
+  r = await run(threaded, true, { proverThreads: 8 });
+  assert.deepEqual(r.info, { mode: 'threaded', threads: 4 });
+  assert.equal(r.spawned, THREADED);
+  assert.deepEqual(threaded.bridge.threadRequests, [8]);
+  // A threaded worker falls back to the serial one on a timeout, and dispose frees it.
+  assert.ok(threaded.bridge.fallbacks.at(-1)[0] === THREADED && serialUrl(threaded.bridge.fallbacks.at(-1)[1]));
+  assert.equal(threaded.bridge.freed.at(-1), THREADED);
+
+  // The request is clamped to the cores before choosing: one core never spawns the threaded worker.
+  setCores(1);
+  let count = threaded.bridge.spawned.length;
+  r = await run(threaded, true, { proverThreads: 8 });
+  assert.deepEqual(r.info, { mode: 'serial', threads: 1 });
+  assert.equal(threaded.bridge.spawned.length, count + 1);
+  assert.ok(serialUrl(r.spawned));
+  setCores(16);
+
+  // A pool that settles on one thread: the threaded worker is freed and the serial one used.
+  const single = await loadSdk({ threadedUrl: THREADED, poolThreads: 1 });
+  r = await run(single, true, { proverThreads: 8 });
+  assert.deepEqual(r.info, { mode: 'serial', threads: 1 });
+  assert.deepEqual(single.bridge.spawned.slice(-2).map((u, i) => i === 0 ? u : serialUrl(u)), [THREADED, true]);
+  assert.equal(single.bridge.freed[0], THREADED);
+
+  // Walletless verification uses the serial worker unless threads are asked for.
+  count = threaded.bridge.threadRequests.length;
+  await threaded.sdk.verifySelectiveDisclosure('rpc', '{}', 'hash', options);
+  assert.ok(serialUrl(threaded.bridge.spawned.at(-1)));
+  assert.equal(threaded.bridge.threadRequests.length, count);
+
+  // Not isolated, switched off, or capped at one thread: serial, and the threaded worker is not spawned.
+  const before = threaded.bridge.spawned.length;
+  for (const [isolated, extra] of [[false, {}], [true, { proverThreads: false }], [true, { proverThreads: 1 }]]) {
+    r = await run(threaded, isolated, extra);
+    assert.deepEqual(r.info, { mode: 'serial', threads: 1 });
+    assert.ok(serialUrl(r.spawned));
+  }
+  assert.equal(threaded.bridge.spawned.length, before + 3);
+  assert.ok(!threaded.bridge.spawned.slice(before).includes(THREADED));
+
+  // An explicit worker URL wins and is not asked about threads.
+  const asked = threaded.bridge.threadRequests.length;
+  r = await run(threaded, true, { proverWorkerUrl: 'https://example.test/mine.js' });
+  assert.deepEqual(r.info, { mode: 'custom', threads: null });
+  assert.equal(r.spawned, 'https://example.test/mine.js');
+  assert.equal(threaded.bridge.threadRequests.length, asked);
+
+  // A threaded worker that does not start is freed and the serial worker takes over, once.
+  const broken = await loadSdk({ threadedUrl: THREADED, threadsFail: true });
+  r = await run(broken, true, { proverThreads: 2 });
+  assert.deepEqual(r.info, { mode: 'serial', threads: 1 });
+  assert.deepEqual(broken.bridge.spawned.slice(-2).map((u, i) => i === 0 ? u : serialUrl(u)), [THREADED, true]);
+  assert.equal(broken.bridge.freed[0], THREADED);
+  assert.equal(warnings.length, 1);
+
+  // An invalid proverThreads is rejected before storage is opened.
+  let keyRequests = 0;
+  const keyProvider = async () => { keyRequests += 1; return new Uint8Array(32); };
+  for (const bad of [0, -1, 1.5, 2 ** 32, '4', null]) {
+    await assert.rejects(run(threaded, true, { proverThreads: bad, keyProvider }), bad === '4' || bad === null ? TypeError : RangeError);
+  }
+  assert.equal(keyRequests, 0);
 });

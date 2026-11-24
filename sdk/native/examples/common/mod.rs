@@ -15,7 +15,7 @@
 //! | `SPP_STORAGE_ACCOUNT` | unset | optional `stellar keys` alias to unlock `SPP_WALLET_PATH` |
 //! | `SPP_DEPLOYMENT_JSON` | `<CARGO_MANIFEST_DIR>/../../deployments/testnet/deployments.json` | all examples |
 //! | `SPP_POOL_CONTRACT_ID` | first enabled pool from deployment config | account/pool/transact examples |
-//! | `SPP_AMOUNT_STROOPS` | `10000000` token base units | estimate/transact examples |
+//! | `SPP_TOKEN_AMOUNT_BASE_UNITS` | `10000000` token base units | estimate/transact examples |
 //! | `STELLAR_SECRET_KEY` | — | account/pool/transact examples (also unlocks `spp`-created wallets when `SPP_STORAGE_ACCOUNT` is unset) |
 //!
 //! Four prerequisite classes print a skip message and exit with code 0: a
@@ -364,17 +364,19 @@ pub fn skip_on_retention_gap(e: &Error) -> ! {
     std::process::exit(0);
 }
 
-/// Parse `SPP_AMOUNT_STROOPS` as a [`NoteAmount`] (default: 10000000 token base
-/// units).
+/// Parse `SPP_TOKEN_AMOUNT_BASE_UNITS` as a [`NoteAmount`] (default: 10000000
+/// token base units).
 pub fn amount() -> Result<NoteAmount, String> {
-    let raw = env_or("SPP_AMOUNT_STROOPS", "10000000");
-    let stroops: u128 = raw
+    let raw = env_or("SPP_TOKEN_AMOUNT_BASE_UNITS", "10000000");
+    let base_units: u128 = raw
         .parse()
-        .map_err(|e| format!("invalid SPP_AMOUNT_STROOPS `{raw}`: {e}"))?;
-    if stroops == 0 {
-        return Err("invalid SPP_AMOUNT_STROOPS `0`: amount must be greater than zero".to_string());
+        .map_err(|e| format!("invalid SPP_TOKEN_AMOUNT_BASE_UNITS `{raw}`: {e}"))?;
+    if base_units == 0 {
+        return Err(
+            "invalid SPP_TOKEN_AMOUNT_BASE_UNITS `0`: amount must be greater than zero".to_string(),
+        );
     }
-    Ok(NoteAmount::from(stroops))
+    Ok(NoteAmount::from(base_units))
 }
 
 /// Load a full transact-ready client, account, and pool in one call.

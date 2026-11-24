@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           toolchain: stable
@@ -38,6 +38,9 @@ jobs:
         run: cargo test --workspace --no-run
       - name: Run tests
         run: cargo test --workspace
+      # Run the chunked-MSM tests that need the circuit artifacts provided above.
+      - name: Test the chunked-MSM prover on circuit artifacts
+        run: cargo test -p stellar-private-payments --lib --features parallel -- --include-ignored chunked_msm proofs_from_every_entry_point
 
   # macOS file locking differs from Linux: flock and SQLite's fcntl locks on
   # the same file conflict there, even within one process. Run the SDK's
@@ -46,7 +49,7 @@ jobs:
     timeout-minutes: 45
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           toolchain: stable

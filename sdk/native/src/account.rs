@@ -143,6 +143,9 @@ impl Account {
     /// [`Error::SignerIsNotNoteOwner`] — and again if the returned signature
     /// was not made by the owner's key (a signer may claim an address without
     /// actually holding it).
+    ///
+    /// Memory protection is best effort only; see
+    /// [`crate::zk::encryption::MEMORY_PROTECTION_WARNING`].
     pub async fn derive_privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         if self
             .storage
@@ -289,11 +292,6 @@ impl Account {
         .context("check the owner's signature of the registration message")?;
         let proof = RegistrationProof {
             note_key_proof,
-            encryption_key_signature: inputs
-                .encryption_key_signature
-                .as_slice()
-                .try_into()
-                .context("encryption key signature must be 64 bytes")?,
             owner_signature: owner_signature
                 .0
                 .as_slice()
@@ -308,7 +306,7 @@ impl Account {
                 &self.user_address,
                 &self.signer_address,
                 inputs.key_ownership.note_public_key.0,
-                inputs.encryption_key,
+                &inputs.encryption_key,
                 &proof,
             )
             .await
