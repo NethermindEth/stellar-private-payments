@@ -141,6 +141,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 WASM_DIR="$ROOT_DIR/target/stellar"
 
 NETWORK="${1:-}"
+case "$NETWORK" in -h|--help) usage ;; esac
 shift || true
 
 DEPLOYER=""
