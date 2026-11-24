@@ -5,6 +5,7 @@ import {
   Client,
   Storage,
   TX_PROGRESS_EVENT,
+  PANIC_EVENT,
   type ContractConfig,
   type PoolExecuteResult,
   type PrivatePool,
@@ -17,6 +18,7 @@ declare const signer: import('../signer.js').WalletSigner;
 
 async function typedConsumer(config: ContractConfig) {
   void TX_PROGRESS_EVENT;
+  void PANIC_EVENT;
 
   const storage = await Storage.open({ keyProvider, createNew: true });
   const client = await Client.new({

@@ -25,6 +25,9 @@ const proverWorkerUrl = new URL('../dist/workers/prover-worker.js', import.meta.
 /** @type {'stellar-private-payments:tx-progress'} */
 export const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
 
+/** @type {'stellar-private-payments:panic'} */
+export const PANIC_EVENT = 'stellar-private-payments:panic';
+
 /**
  * Frees a client's telemetry sinks once the client itself is garbage
  * collected, so forgetting to call `dispose()` leaks a GC cycle at worst

@@ -1,4 +1,4 @@
-import { closeAndReload } from './storage-lock.js';
+import { closeAndReload, reloadOnPanic } from './storage-lock.js';
 import { startAutoLock, loadAutoLockSetting, clearAutoLockSetting, autoLockMinutes } from './storage-timeout.js';
 /**
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, `Account`, and app persistence.
@@ -24,6 +24,7 @@ import init, {
   configureTelemetry,
   dump_recent_logs,
   debugLogsEnabled as sdkDebugLogsEnabled,
+  PANIC_EVENT,
 } from 'stellar-private-payments';
 import { VarialSigner } from 'stellar-private-payments/varial';
 
@@ -86,6 +87,20 @@ function setStorageState(state) {
     window.dispatchEvent(new Event(STORAGE_STATE_EVENT));
 }
 
+/** Hides dialogs and settings too. */
+function coverDecryptedContent() {
+    document.body.inert = true;
+    document.body.style.visibility = 'hidden';
+}
+
+reloadOnPanic(globalThis, PANIC_EVENT, {
+    holdsSecrets: () => !!(storageHandle || storageOpening || storageLocking),
+    lock: () => {
+        markStorageLocked();
+        coverDecryptedContent();
+    },
+});
+
 /**
  * Close the worker, then reload to discard all decrypted UI and WASM state.
  * @param {{ idleMinutes?: number | null }} [opts] - set when inactivity triggered the lock
@@ -99,9 +114,7 @@ export async function lockStorage({ idleMinutes = null } = {}) {
     clearAutoLockSetting();
     disposeClient();
     setStorageState('locking');
-    // Cover decrypted content immediately, including dialogs and settings.
-    document.body.inert = true;
-    document.body.style.visibility = 'hidden';
+    coverDecryptedContent();
     const handle = storageHandle;
     storageHandle = null;
     appStorageInstance = null;

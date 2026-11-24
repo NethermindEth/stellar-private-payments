@@ -160,6 +160,11 @@ const logs = await dump_recent_logs(); // main thread + storage/prover workers
 set_log_level('info');
 ```
 
+A Rust panic on the main thread fires `PANIC_EVENT` on `globalThis`, then the
+WASM instance traps without running destructors, so secrets that were live
+stay in its memory. Apps holding open storage should reload the page.
+Listeners must not call back into the SDK.
+
 ## TypeScript
 
 Public types live under [`js/types/`](./js/types/): `api-types.d.ts` (JS

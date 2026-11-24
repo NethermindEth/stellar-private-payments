@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { startAutoLock, autoLockMinutes, setAutoLockMinutes, loadAutoLockSetting, clearAutoLockSetting, MAX_BUSY_LOCK_DELAY_MS } from '../../../app/js/storage-timeout.js';
-import { closeAndReload } from '../../../app/js/storage-lock.js';
+import { closeAndReload, reloadOnPanic } from '../../../app/js/storage-lock.js';
 
 function fixture(t) {
     clearAutoLockSetting();
@@ -63,6 +63,15 @@ test('an unresponsive worker cannot prevent locking', async () => {
     let reloads = 0;
     await closeAndReload({ close: () => new Promise(() => {}) }, { timeoutMs: 5, reload: () => reloads++ });
     assert.equal(reloads, 1);
+});
+test('an SDK panic locks and reloads only while WASM may hold secrets', () => {
+    for (const secrets of [true, false]) {
+        const events = [];
+        const target = new EventTarget();
+        reloadOnPanic(target, 'panic', { holdsSecrets: () => secrets, lock: () => events.push('lock'), reload: () => events.push('reload') });
+        target.dispatchEvent(new Event('panic'));
+        assert.deepEqual(events, secrets ? ['lock', 'reload'] : []);
+    }
 });
 
 

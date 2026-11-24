@@ -43,3 +43,4 @@ To protect user confidentiality during transaction proving and indexing, the SDK
   * JS strings, which are immutable: the wallet's `signMessage` reply, `Account.aspSecret()`, and a GVK authority key pasted on the admin page.
   * Browser process memory: swap, crash dumps and devtools heap snapshots.
 * **Locking storage reloads the page**, discarding the WASM instances and the JS heap along with any copies left in them.
+* **A main-thread panic locks storage too.** A Rust panic traps the WASM instance without running destructors, leaving live secrets in its memory. The SDK fires `PANIC_EVENT` on `globalThis`, and the app marks storage locked and reloads the page if storage is open, opening or locking. A worker panic is not reported to the page; the worker's memory is only reachable from that worker.
