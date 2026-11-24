@@ -98,11 +98,11 @@ Examples:
     --max-deposit 1000000000 \
     --kdf-domain Nethermind
 
-  # GVK traceable blocklist pool
+  # GVK view-only blocklist pool
   deployments/scripts/deploy.sh futurenet \
     --deployer alice \
     --gvk-authority-pubkey '{"x":"0x..","y":"0x.."}' \
-    --pool blocklist:gvk-traceable:native:CB... \
+    --pool blocklist:gvk-viewonly:native:CB... \
     --asp-levels 10 \
     --pool-levels 20 \
     --fee 1000000 \
