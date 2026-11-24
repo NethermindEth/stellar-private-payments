@@ -266,7 +266,7 @@ fn creation_retry_preserves_nonempty_files_and_serializes_creators() -> Result<(
     assert_eq!(snapshot(&f.db())?, before);
     let target = f.0.join("empty-target.db");
     fs::write(&target, [])?;
-    // An active creator owns the empty file until initialization finishes.
+    // A creator holding the empty reservation blocks another creation attempt.
     let reservation = reserve_creation(&target)?;
     assert!(open(&target, &key, OpenPurpose::CreateNew).is_err());
     assert_eq!(fs::metadata(&target)?.len(), 0);
