@@ -170,24 +170,3 @@ export function createNoteIndex() {
     receivedBy: (pk) => received.get(normalizeFieldKey(pk)) ?? 0n,
   };
 }
-
-function indexRows(rows) {
-  const index = createNoteIndex();
-  rows.forEach(index.append);
-  return index;
-}
-
-export function collectNotes(rows, visible = rows) {
-  const index = indexRows(rows);
-  return visible === rows ? index.auditedNotes() : index.visibleNotes(visible);
-}
-
-export function noteLinks(rows) {
-  return indexRows(rows).auditedNotes().filter((note) => note.spentNoteId)
-    .map((note) => [note.noteId, note.spentNoteId]);
-}
-
-/** Per PK, the value of its notes that no loaded transaction spent. */
-export function unspentByPk(notes) {
-  return amountByPk(notes.filter((note) => note.spentTxIndex == null));
-}
