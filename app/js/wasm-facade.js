@@ -238,6 +238,8 @@ async function openWrappedClient(sdkStorage, rpcUrl, bootnodeUrl) {
 export function disposeClient() {
     try {
         wrappedClient?.stopBackgroundSync?.();
+        // Frees the client's prover worker (and its thread pool) right away.
+        wrappedClient?.dispose?.();
     } catch {
         // Client may already be tearing down.
     }
