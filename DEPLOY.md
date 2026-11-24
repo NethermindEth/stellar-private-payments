@@ -172,6 +172,24 @@ deployments/scripts/deploy.sh testnet \
   --pool native:$(stellar contract id asset --asset native --network testnet)
 ```
 
+Single native XLM pool, blocklist with a view-only GVK. `admin-pub.json` is the
+public key `gvkey-gen generate` writes, as
+[Global View Key (GVK)](#global-view-key-gvk) shows. Use `gvk-traceable`
+instead to let the admin decrypt inputs too:
+
+```sh
+deployments/scripts/deploy.sh testnet \
+  --deployer <identity> \
+  --gvk-authority-pubkey-file ./admin-pub.json \
+  --asp-levels 10 \
+  --pool-levels 20 \
+  --fee 1000000 \
+  --min-deposit 10000000 \
+  --max-deposit 1000000000 \
+  --kdf-domain Nethermind \
+  --pool blocklist:gvk-viewonly:native:$(stellar contract id asset --asset native --network testnet)
+```
+
 Mixed-policy: a blocklist pool alongside an allowlist-blocklist pool, both
 native XLM:
 
