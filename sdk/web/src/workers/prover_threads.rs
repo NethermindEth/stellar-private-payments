@@ -7,7 +7,7 @@
 //! wasm-bindgen runs the binary's `main` on the first thread only, so the pool
 //! threads never register a worker of their own.
 //!
-//! Proofs use the SDK's `parallel-chunked-msm` proof assembly, which splits
+//! Proofs use the SDK's `parallel` proof assembly, which splits
 //! each MSM over this pool. `ark-ec`'s own parallel MSM cannot run here: it
 //! builds a new pool inside every MSM, which needs `std::thread::spawn`.
 
