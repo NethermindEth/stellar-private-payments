@@ -52,8 +52,9 @@ let stopAutoLock = null;
 let storageLocking = false;
 export const STORAGE_STATE_EVENT = 'spp:storage-state';
 const LOCKED_SESSION_KEY = 'spp.storageLocked';
-// Set only when inactivity caused the lock, so the locked page can say why.
+// Set only when inactivity or a panic caused the lock, so the locked page can say why.
 const IDLE_LOCK_SESSION_KEY = 'spp.idleLockMinutes';
+const PANIC_LOCK_SESSION_KEY = 'spp.panicLocked';
 export function storageWasLocked() {
     return sessionStorage.getItem(LOCKED_SESSION_KEY) === 'true';
 }
@@ -62,14 +63,20 @@ export function idleLockMinutes() {
     const minutes = Number(sessionStorage.getItem(IDLE_LOCK_SESSION_KEY));
     return storageWasLocked() && minutes > 0 ? minutes : null;
 }
-function markStorageLocked(idleMinutes = null) {
+export function panicLocked() {
+    return storageWasLocked() && sessionStorage.getItem(PANIC_LOCK_SESSION_KEY) === 'true';
+}
+function markStorageLocked({ idleMinutes = null, panicked = false } = {}) {
     sessionStorage.setItem(LOCKED_SESSION_KEY, 'true');
     if (idleMinutes) sessionStorage.setItem(IDLE_LOCK_SESSION_KEY, String(idleMinutes));
     else sessionStorage.removeItem(IDLE_LOCK_SESSION_KEY);
+    if (panicked) sessionStorage.setItem(PANIC_LOCK_SESSION_KEY, 'true');
+    else sessionStorage.removeItem(PANIC_LOCK_SESSION_KEY);
 }
 function clearStorageLocked() {
     sessionStorage.removeItem(LOCKED_SESSION_KEY);
     sessionStorage.removeItem(IDLE_LOCK_SESSION_KEY);
+    sessionStorage.removeItem(PANIC_LOCK_SESSION_KEY);
 }
 export function isStorageUnlocked() { return !!storageHandle && !storageLocking; }
 /**
@@ -96,7 +103,7 @@ function coverDecryptedContent() {
 reloadOnPanic(globalThis, PANIC_EVENT, {
     holdsSecrets: () => !!(storageHandle || storageOpening || storageLocking),
     lock: () => {
-        markStorageLocked();
+        markStorageLocked({ panicked: true });
         coverDecryptedContent();
     },
 });
@@ -108,7 +115,7 @@ reloadOnPanic(globalThis, PANIC_EVENT, {
 export async function lockStorage({ idleMinutes = null } = {}) {
     if (storageLocking) return;
     storageLocking = true;
-    markStorageLocked(idleMinutes);
+    markStorageLocked({ idleMinutes });
     stopAutoLock?.();
     stopAutoLock = null;
     clearAutoLockSetting();
