@@ -383,6 +383,13 @@ impl PoolInfo {
         u128::from(self.inner.minimum_deposit_amount)
     }
 
+    /// Sum of the values of the pool's unspent notes, in token base units
+    /// (`bigint` in JS), or `undefined` for a pool that does not keep it.
+    #[wasm_bindgen(getter, js_name = notesTotal)]
+    pub fn notes_total(&self) -> Option<u128> {
+        self.inner.notes_total.map(u128::from)
+    }
+
     #[wasm_bindgen(getter, js_name = merkleRoot)]
     pub fn merkle_root(&self) -> Option<String> {
         self.inner.merkle_root.as_ref().map(field_hex)

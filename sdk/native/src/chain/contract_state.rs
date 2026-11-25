@@ -122,6 +122,21 @@ impl StateFetcher {
             .unwrap_or(false))
     }
 
+    /// Reads the sum of a pool's unspent notes from its fetched state.
+    ///
+    /// A pool deployed before it kept the total stores no key, which reads as
+    /// `None` rather than as an empty pool.
+    fn notes_total_from_state(
+        pool_state: &HashMap<String, xdr::ScVal>,
+    ) -> Result<Option<NoteAmount>> {
+        pool_state
+            .get("NotesTotal")
+            .map(|value| -> Result<NoteAmount> {
+                NoteAmount::try_from(ExtAmount::from(scval_to_i128(value)?))
+            })
+            .transpose()
+    }
+
     /// Reads the fee and the minimum deposit out of a pool's fetched state.
     fn fee_fields_from_pool_state(
         pool_state: &HashMap<String, xdr::ScVal>,
@@ -490,6 +505,7 @@ impl StateFetcher {
             deposits_paused: Self::deposits_paused_from_state(pool_state)?,
             fee,
             minimum_deposit_amount,
+            notes_total: Self::notes_total_from_state(pool_state)?,
             merkle_root,
             merkle_capacity,
             total_commitments: merkle_next_index.to_string(),
@@ -987,6 +1003,24 @@ mod tests {
         let fields = StateFetcher::fee_fields_from_pool_state(&pool_state).expect("fee keys");
 
         assert_eq!(fields, (NoteAmount::from(5u128), NoteAmount::from(10u128)));
+    }
+
+    #[test]
+    fn a_pool_without_a_notes_total_reads_as_unknown() {
+        let pool_state: HashMap<String, xdr::ScVal> = HashMap::new();
+
+        let total = StateFetcher::notes_total_from_state(&pool_state).expect("no NotesTotal key");
+
+        assert_eq!(total, None);
+    }
+
+    #[test]
+    fn the_notes_total_is_read_from_the_instance() {
+        let pool_state = HashMap::from([("NotesTotal".to_string(), xdr::ScVal::from(1_234i128))]);
+
+        let total = StateFetcher::notes_total_from_state(&pool_state).expect("NotesTotal key");
+
+        assert_eq!(total, Some(NoteAmount::from(1_234u128)));
     }
 
     fn pool_entry(

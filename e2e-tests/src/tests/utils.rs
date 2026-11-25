@@ -903,6 +903,96 @@ pub fn sync_contract_state(
     }
 }
 
+/// Moves a pool's leaf counter forward to `next_index`, as if every leaf after
+/// `leaves` held the zero leaf, without inserting anything.
+///
+/// `leaves` are the leaves the pool already holds, in order. A real tree with
+/// those leaves followed by empty ones up to `next_index` has the same root,
+/// so the current root stays valid for proofs, and the left siblings written
+/// here are the ones that tree would hold. The next insertion then lands at
+/// `next_index` exactly as it would in a pool that got there for real, which
+/// lets a test reach the end of a 20-level tree in one step.
+///
+/// # Panics
+///
+/// Panics if `next_index` is odd, past the tree's capacity, or before the
+/// leaves the pool holds, or if the pool holds a different number of leaves
+/// than `leaves`.
+pub fn fast_forward_pool_tree(env: &Env, pool: &Address, leaves: &[Scalar], next_index: u64) {
+    use pool::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory, TreeState};
+
+    let leaves: std::vec::Vec<U256> = leaves
+        .iter()
+        .map(|leaf| scalar_to_u256(env, *leaf))
+        .collect();
+    let written = u64::try_from(leaves.len()).expect("the leaf count fits u64");
+    assert!(
+        next_index.is_multiple_of(2),
+        "the pool inserts leaves in pairs"
+    );
+    assert!(next_index >= written, "the counter only moves forward");
+
+    env.as_contract(pool, || {
+        let levels: u32 = env
+            .storage()
+            .instance()
+            .get(&MerkleDataKey::Levels)
+            .expect("the pool stores its depth");
+        assert!(
+            next_index <= 1u64 << levels,
+            "the counter stays within the tree"
+        );
+        let storage = env.storage().persistent();
+        let mut state: TreeState = storage
+            .get(&MerkleDataKey::State)
+            .expect("the pool stores its tree");
+        assert_eq!(state.next_index, written, "the pool holds exactly `leaves`");
+        let root = MerkleTreeWithHistory::get_last_root(env).expect("the pool has a root");
+
+        // An insertion at `next_index` reads a left sibling wherever its path
+        // is a right child, so those are the ones that must be right.
+        for level in 1..levels {
+            let index = next_index >> level;
+            let left = if index & 1 == 1 {
+                tree_node(env, &leaves, level, index ^ 1)
+            } else {
+                soroban_utils::zero_hash(env, level).expect("a zero hash for every level")
+            };
+            let slot = level.checked_sub(1).expect("levels start at 1");
+            state.filled_subtrees.set(slot, left);
+        }
+        // The root slot follows the counter, so the unchanged root moves with
+        // it.
+        let slot = (next_index >> 1)
+            .checked_rem(u64::from(state.roots.len()))
+            .expect("the root ring has slots");
+        state
+            .roots
+            .set(u32::try_from(slot).expect("a ring slot fits u32"), root);
+        state.next_index = next_index;
+        storage.set(&MerkleDataKey::State, &state);
+    });
+}
+
+/// The hash of the node at `level`, position `index`, of a tree holding
+/// `leaves` followed by empty leaves.
+fn tree_node(env: &Env, leaves: &[U256], level: u32, index: u64) -> U256 {
+    let first = usize::try_from(index << level).unwrap_or(usize::MAX);
+    if first >= leaves.len() {
+        return soroban_utils::zero_hash(env, level).expect("a zero hash for every level");
+    }
+    if level == 0 {
+        return leaves[first].clone();
+    }
+    let below = level.checked_sub(1).expect("level is above the leaves");
+    let left = index << 1;
+    soroban_utils::poseidon2_compress(
+        env,
+        tree_node(env, leaves, below, left),
+        tree_node(env, leaves, below, left | 1),
+    )
+}
+
 /// Returns the allowlist leaves a proof was made against: the frozen prefix of
 /// `trees`, with the leaf of each of the first `inputs` public keys at its
 /// tree's index.

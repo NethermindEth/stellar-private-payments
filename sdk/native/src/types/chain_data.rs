@@ -64,6 +64,11 @@ pub struct PoolInfo {
     /// Smallest deposit the pool accepts, net of the fee.
     #[serde(default)]
     pub minimum_deposit_amount: NoteAmount,
+    /// Sum of the values of the pool's unspent notes: what it holds for its
+    /// users, fees left out. `None` for a pool deployed before it kept the
+    /// total.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes_total: Option<NoteAmount>,
     pub merkle_root: Option<Field>,
     pub merkle_capacity: u64,
     pub total_commitments: String, //num_bigint::BigUint,
@@ -399,6 +404,7 @@ pub(crate) mod pool_info_gvk_tests {
             deposits_paused: false,
             fee: NoteAmount::ZERO,
             minimum_deposit_amount: NoteAmount::ZERO,
+            notes_total: None,
             merkle_root: Some(Field(U256::from(7))),
             merkle_capacity: 1_048_576,
             total_commitments: "6".to_string(),
