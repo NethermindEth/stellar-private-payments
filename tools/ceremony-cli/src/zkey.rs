@@ -2,11 +2,12 @@
 //   https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/zkey.rs
 //
 // Local changes: only the proving key is read (the constraint matrices are
-// dropped), every section must be consumed exactly, malformed headers, missing
-// sections, non-canonical field elements, invalid curve points, identity
-// verifying key points and a delta equal to gamma return errors instead of
-// panicking or being accepted, and the upstream test module (which needs the
-// upstream test vectors and the wasmer witness calculator) is replaced.
+// dropped), every section must be consumed exactly, unsupported versions,
+// duplicated sections, malformed headers, missing sections, non-canonical
+// field elements, invalid curve points, identity verifying key points and a
+// delta equal to gamma return errors instead of panicking or being accepted,
+// and the upstream test module (which needs the upstream test vectors and the
+// wasmer witness calculator) is replaced.
 #![allow(clippy::arithmetic_side_effects)]
 
 //! ZKey Parsing
@@ -50,6 +51,7 @@ use std::{
 type IoResult<T> = Result<T, SerializationError>;
 
 const ZKEY_MAGIC: &[u8; 4] = b"zkey";
+const ZKEY_VERSION: u32 = 1;
 const PROTOCOL_GROTH16: u32 = 1;
 
 #[derive(Clone, Debug)]
@@ -67,7 +69,7 @@ pub fn read_zkey<R: Read + Seek>(reader: &mut R) -> IoResult<ProvingKey<Bn254>> 
 
 #[derive(Debug)]
 struct BinFile<'a, R> {
-    sections: HashMap<u32, Vec<Section>>,
+    sections: HashMap<u32, Section>,
     reader: &'a mut R,
 }
 
@@ -79,7 +81,9 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
             return Err(SerializationError::InvalidData);
         }
 
-        let _version = reader.read_u32::<LittleEndian>()?;
+        if reader.read_u32::<LittleEndian>()? != ZKEY_VERSION {
+            return Err(SerializationError::InvalidData);
+        }
 
         let num_sections = reader.read_u32::<LittleEndian>()?;
 
@@ -88,11 +92,13 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
             let section_id = reader.read_u32::<LittleEndian>()?;
             let section_length = reader.read_u64::<LittleEndian>()?;
 
-            let section = sections.entry(section_id).or_insert_with(Vec::new);
-            section.push(Section {
+            let section = Section {
                 position: reader.stream_position()?,
                 size: section_length,
-            });
+            };
+            if sections.insert(section_id, section).is_some() {
+                return Err(SerializationError::InvalidData);
+            }
 
             let skip =
                 i64::try_from(section_length).map_err(|_| SerializationError::InvalidData)?;
@@ -155,7 +161,6 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
     fn get_section(&self, id: u32) -> IoResult<Section> {
         self.sections
             .get(&id)
-            .and_then(|s| s.first())
             .cloned()
             .ok_or(SerializationError::InvalidData)
     }
@@ -417,7 +422,7 @@ pub(crate) mod tests {
     fn zkey_file(sections: &[(u32, Vec<u8>)]) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(ZKEY_MAGIC);
-        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&ZKEY_VERSION.to_le_bytes());
         out.extend_from_slice(&u32::try_from(sections.len()).unwrap().to_le_bytes());
         for (id, body) in sections {
             out.extend_from_slice(&id.to_le_bytes());
@@ -540,5 +545,21 @@ pub(crate) mod tests {
         assert!(binfile.g1_section(3, 5).is_err());
         assert!(binfile.g2_section(1, 5).is_ok());
         assert!(binfile.g2_section(2, 5).is_err());
+    }
+
+    #[test]
+    fn binfile_rejects_unsupported_version() {
+        let mut bytes = zkey_file(&[]);
+        assert!(BinFile::new(&mut std::io::Cursor::new(bytes.clone())).is_ok());
+        bytes[4..8].copy_from_slice(&2u32.to_le_bytes());
+        assert!(BinFile::new(&mut std::io::Cursor::new(bytes)).is_err());
+    }
+
+    #[test]
+    fn binfile_rejects_duplicated_section() {
+        let unique = zkey_file(&[(3, Vec::new()), (4, Vec::new())]);
+        assert!(BinFile::new(&mut std::io::Cursor::new(unique)).is_ok());
+        let duplicated = zkey_file(&[(3, Vec::new()), (3, Vec::new())]);
+        assert!(BinFile::new(&mut std::io::Cursor::new(duplicated)).is_err());
     }
 }
