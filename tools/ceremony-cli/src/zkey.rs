@@ -3,10 +3,10 @@
 //
 // Local changes: only the proving key is read (the constraint matrices are
 // dropped), every section must be consumed exactly, malformed headers, missing
-// sections, non-canonical field elements, invalid curve points and identity IC
-// points return errors instead of panicking or being accepted, and the
-// upstream test module (which needs the upstream test vectors and the wasmer
-// witness calculator) is replaced.
+// sections, non-canonical field elements, invalid curve points, identity
+// verifying key points and a delta equal to gamma return errors instead of
+// panicking or being accepted, and the upstream test module (which needs the
+// upstream test vectors and the wasmer witness calculator) is replaced.
 #![allow(clippy::arithmetic_side_effects)]
 
 //! ZKey Parsing
@@ -234,6 +234,16 @@ impl ZVerifyingKey {
         let delta_g1 = deserialize_g1(reader)?;
         let delta_g2 = deserialize_g2(reader)?;
 
+        // No valid setup has identity points here. `zkey new` emits
+        // delta == gamma before any contribution, which lets anyone forge a
+        // proof for any public input by cancelling C against the IC term.
+        if [alpha_g1, beta_g1, delta_g1].contains(&G1Affine::identity())
+            || [beta_g2, gamma_g2, delta_g2].contains(&G2Affine::identity())
+            || delta_g2 == gamma_g2
+        {
+            return Err(SerializationError::InvalidData);
+        }
+
         Ok(Self {
             alpha_g1,
             beta_g1,
@@ -417,9 +427,35 @@ pub(crate) mod tests {
         out
     }
 
-    /// A one-variable, zero-public-input zkey whose points are all identity
-    /// except IC[0], which is `ic0`.
-    pub(crate) fn minimal_zkey(ic0: &G1Affine) -> Vec<u8> {
+    fn g1_generator() -> G1Affine {
+        G1Affine::new_unchecked(g1::G1_GENERATOR_X, g1::G1_GENERATOR_Y)
+    }
+
+    fn g2_generator() -> G2Affine {
+        G2Affine::new_unchecked(g2::G2_GENERATOR_X, g2::G2_GENERATOR_Y)
+    }
+
+    /// Generator points everywhere, except delta, which is doubled so it
+    /// differs from gamma.
+    fn valid_header() -> ZVerifyingKey {
+        let (g1, g2) = (g1_generator(), g2_generator());
+        ZVerifyingKey {
+            alpha_g1: g1,
+            beta_g1: g1,
+            beta_g2: g2,
+            gamma_g2: g2,
+            delta_g1: (g1 + g1).into(),
+            delta_g2: (g2 + g2).into(),
+        }
+    }
+
+    pub(crate) fn valid_zkey() -> Vec<u8> {
+        minimal_zkey(&valid_header(), &g1_generator())
+    }
+
+    /// A one-variable, zero-public-input zkey with the given header points and
+    /// IC[0]. The proving key queries are all identity.
+    fn minimal_zkey(vk: &ZVerifyingKey, ic0: &G1Affine) -> Vec<u8> {
         let g1 = vec![0u8; 64];
         let g2 = vec![0u8; 128];
 
@@ -431,9 +467,12 @@ pub(crate) mod tests {
         header.extend_from_slice(&1u32.to_le_bytes()); // n_vars
         header.extend_from_slice(&0u32.to_le_bytes()); // n_public
         header.extend_from_slice(&1u32.to_le_bytes()); // domain_size
-        for point in [&g1, &g1, &g2, &g2, &g1, &g2] {
-            header.extend_from_slice(point);
-        }
+        header.extend(g1_bytes(&vk.alpha_g1));
+        header.extend(g1_bytes(&vk.beta_g1));
+        header.extend(g2_bytes(&vk.beta_g2));
+        header.extend(g2_bytes(&vk.gamma_g2));
+        header.extend(g1_bytes(&vk.delta_g1));
+        header.extend(g2_bytes(&vk.delta_g2));
 
         zkey_file(&[
             (1, PROTOCOL_GROTH16.to_le_bytes().to_vec()),
@@ -447,14 +486,47 @@ pub(crate) mod tests {
         ])
     }
 
+    fn parses(vk: &ZVerifyingKey, ic0: &G1Affine) -> bool {
+        read_zkey(&mut std::io::Cursor::new(minimal_zkey(vk, ic0))).is_ok()
+    }
+
+    #[test]
+    fn read_zkey_accepts_valid_key() {
+        let pk = read_zkey(&mut std::io::Cursor::new(valid_zkey())).unwrap();
+        assert_eq!(pk.vk.gamma_abc_g1, vec![g1_generator()]);
+        assert_eq!(pk.delta_g1, valid_header().delta_g1);
+    }
+
     #[test]
     fn read_zkey_rejects_identity_ic() {
-        let g = G1Affine::new_unchecked(g1::G1_GENERATOR_X, g1::G1_GENERATOR_Y);
-        let pk = read_zkey(&mut std::io::Cursor::new(minimal_zkey(&g))).unwrap();
-        assert_eq!(pk.vk.gamma_abc_g1, vec![g]);
+        assert!(!parses(&valid_header(), &G1Affine::identity()));
+    }
 
-        let identity = minimal_zkey(&G1Affine::identity());
-        assert!(read_zkey(&mut std::io::Cursor::new(identity)).is_err());
+    #[test]
+    fn read_zkey_rejects_identity_header_points() {
+        let edits: [fn(&mut ZVerifyingKey); 6] = [
+            |vk| vk.alpha_g1 = G1Affine::identity(),
+            |vk| vk.beta_g1 = G1Affine::identity(),
+            |vk| vk.beta_g2 = G2Affine::identity(),
+            |vk| vk.gamma_g2 = G2Affine::identity(),
+            |vk| vk.delta_g1 = G1Affine::identity(),
+            |vk| vk.delta_g2 = G2Affine::identity(),
+        ];
+        for edit in edits {
+            let mut vk = valid_header();
+            edit(&mut vk);
+            assert!(!parses(&vk, &g1_generator()));
+        }
+    }
+
+    #[test]
+    fn read_zkey_rejects_uncontributed_key() {
+        let vk = ZVerifyingKey {
+            delta_g1: g1_generator(),
+            delta_g2: g2_generator(),
+            ..valid_header()
+        };
+        assert!(!parses(&vk, &g1_generator()));
     }
 
     #[test]

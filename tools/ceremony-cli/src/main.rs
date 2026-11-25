@@ -708,17 +708,10 @@ mod tests {
         Ok((result, runner.calls()?, written))
     }
 
-    fn valid_zkey() -> Vec<u8> {
-        let g = ark_bn254::G1Affine::new_unchecked(
-            ark_bn254::g1::G1_GENERATOR_X,
-            ark_bn254::g1::G1_GENERATOR_Y,
-        );
-        zkey::tests::minimal_zkey(&g)
-    }
-
     #[test]
     fn export_deployment_writes_verified_zkey() -> Result<()> {
-        let (result, calls, written) = run_export(&valid_zkey(), &MockRunner::default())?;
+        let (result, calls, written) =
+            run_export(&zkey::tests::valid_zkey(), &MockRunner::default())?;
 
         result?;
         assert!(calls.iter().any(|line| line.contains("zkey verify")));
@@ -732,7 +725,7 @@ mod tests {
             fail_verify: true,
             ..MockRunner::default()
         };
-        let (result, calls, written) = run_export(&valid_zkey(), &runner)?;
+        let (result, calls, written) = run_export(&zkey::tests::valid_zkey(), &runner)?;
 
         let err = result
             .err()

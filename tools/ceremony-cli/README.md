@@ -138,10 +138,12 @@ Why this step exists:
 - the app prover also needs `policy_tx_2_2_AB_proving_key.bin`, which is an arkworks-serialized `ProvingKey<Bn254>`, not a `snarkjs` `.zkey`
 - `vk_soroban.bin` and `vk_const.rs` are alternate verifier encodings used by this repo
 
-The helper first runs `snarkjs zkey verify` against the circuit and ptau, and
-refuses to export a zkey that fails it. It then parses the `.zkey` directly,
-rejects verification keys with an identity public-input point, writes
-`proving_key.bin`, and emits the verifier artifacts in the same formats as
+The helper first parses the `.zkey` directly, so a malformed key fails before
+the slow verify. Parsing rejects verification keys with identity points and
+keys whose delta equals gamma, which is what `init` produces before any
+contribution and would let anyone forge proofs. It then runs `snarkjs zkey verify` against the circuit and ptau and
+refuses to export a zkey that fails it. Only then does it write
+`proving_key.bin` and emit the verifier artifacts in the same formats as
 `tools/circuit-compiler`. As with the other commands, `--circuit` defaults to
 the compiled `policy_tx_2_2_AB.r1cs`, pass it explicitly when exporting keys for
 another circuit.
