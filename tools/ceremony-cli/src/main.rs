@@ -220,10 +220,9 @@ fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
 fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
     assert_readable_file(&args.zkey, "input zkey")?;
     let circuit = args.setup.resolve()?;
+    assert_output_allowed(&args.output, args.force)?;
 
     verify_zkey(runner, &circuit, &args.setup.ptau, &args.zkey)?;
-
-    assert_output_allowed(&args.output, args.force)?;
 
     let entropy = generate_entropy_hex()?;
     let entropy_flag = Zeroizing::new(format!("-e={}", entropy.as_str()));
