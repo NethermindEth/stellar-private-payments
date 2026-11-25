@@ -49,6 +49,8 @@ Other powers are available at `https://storage.googleapis.com/zkevm/ptau/powersO
 
 Alternative source: [PSE Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau) (80 contributions).
 
+Every command checks the ptau's blake2b-512 hash against the Hermez hashes published in the snarkjs README, and refuses to run with any other file. `zkey verify` only proves a zkey is consistent with the ptau it is given, so an unpinned ptau could come from a setup whose secrets are known. Pass `--allow-unpinned-ptau` to skip the check, for a test ceremony or another Phase-1 source you verified yourself.
+
 ---
 
 ## Coordinator runbook

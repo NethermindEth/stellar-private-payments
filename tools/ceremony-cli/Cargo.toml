@@ -21,6 +21,7 @@ ark-bn254.workspace = true
 ark-ff.workspace = true
 ark-groth16.workspace = true
 ark-serialize = { workspace = true, features = ["std"] }
+blake2 = "0.10"
 byteorder = "1.4"
 clap.workspace = true
 getrandom.workspace = true
