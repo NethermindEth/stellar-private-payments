@@ -96,11 +96,12 @@ The clients refuse a withdrawal paid to any contract the manifest lists.
 ## Keys
 
 Each user has one Stellar account, and the client derives three keys from it. The user's wallet
-signs the message below, where `KDF_DOMAIN` is the deployment's KDF domain, and every key in the
-table comes from that one signature:
+signs the message below. `KDF_DOMAIN` is the deployment's KDF domain, `NETWORK_PASSPHRASE` is its
+network's passphrase, and `NETWORK` is `Mainnet` or `Testnet`. On any other network the first line
+ends with the passphrase alone. Every key in the table comes from that one signature:
 
 ```text
-Privacy Pool Key Derivation [v1] (KDF_DOMAIN)
+Privacy Pool Key Derivation [v2] (KDF_DOMAIN) on NETWORK (NETWORK_PASSPHRASE)
 WARNING: signing this gives full control of your private funds. Only sign in the Stellar Private Payments app or CLI.
 ```
 
@@ -110,10 +111,10 @@ WARNING: signing this gives full control of your private funds. Only sign in the
 | Encryption key | Receives note memos. |
 | ASP secret | Blinds the user's allowlist leaf. The derivation also mixes in the manifest's network name. |
 
-The same wallet and KDF domain always produce the same keys, so a user who loses their local data
-signs again and the client rebuilds their notes from events. Only app settings and the record of
-their past operations are gone. A deployment with another KDF domain gives the same wallet
-different keys.
+The same wallet, KDF domain, and network always produce the same keys, so a user who loses their
+local data signs again and the client rebuilds their notes from events. Only app settings and the
+record of their past operations are gone. A deployment with another KDF domain, or on another
+network, gives the same wallet different keys.
 
 This makes the signature the user's entire privacy secret. Whoever obtains it derives the same
 keys, so they can read the user's notes and spend them, and nothing on chain can rotate or revoke

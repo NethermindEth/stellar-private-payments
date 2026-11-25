@@ -16,8 +16,7 @@ use stellar_private_payments::{
     state::{DEFAULT_BOOTNODE_URL, SqliteStorage},
     types::KeyDerivationSignature,
     zk::encryption::{
-        derive_encryption_and_note_keypairs, derive_membership_blinding, key_derivation_message,
-        verify_owner_signature,
+        derive_encryption_and_note_keypairs, derive_membership_blinding, verify_owner_signature,
     },
 };
 
@@ -157,7 +156,7 @@ fn derive_and_save_keys(
         "warning: {}",
         stellar_private_payments::zk::encryption::MEMORY_PROTECTION_WARNING
     );
-    let message = key_derivation_message(&config.deployment.kdf_domain);
+    let message = config.deployment.key_derivation_message()?;
     let signature = stellar_cli::sign_message(
         &account.alias,
         &message,
@@ -326,6 +325,10 @@ mod tests {
 
     const KDF_DOMAIN: &str = "tests";
 
+    fn message() -> String {
+        key_derivation_message(KDF_DOMAIN, "Test SDF Network ; September 2015")
+    }
+
     #[test]
     fn existing_keys_do_not_bypass_consent() {
         let owner = LocalSigner::from_seed([1; 32]);
@@ -339,7 +342,7 @@ mod tests {
             &account.address,
             KDF_DOMAIN,
             "custom-network",
-            &key_derivation_message(KDF_DOMAIN),
+            &message(),
             derivation_signature(&owner),
         )
         .expect("store keys");
@@ -360,12 +363,7 @@ mod tests {
 
     /// What `stellar message sign` returns for `signer`.
     fn derivation_signature(signer: &LocalSigner) -> KeyDerivationSignature {
-        KeyDerivationSignature(
-            signer
-                .sign(&sep53_payload(&key_derivation_message(KDF_DOMAIN)))
-                .as_bytes()
-                .to_vec(),
-        )
+        KeyDerivationSignature(signer.sign(&sep53_payload(&message())).as_bytes().to_vec())
     }
 
     #[test]
@@ -378,7 +376,7 @@ mod tests {
             owner.public_key(),
             KDF_DOMAIN,
             "testnet",
-            &key_derivation_message(KDF_DOMAIN),
+            &message(),
             derivation_signature(&owner),
         )
         .expect("the owner's own signature must store keys");
@@ -402,7 +400,7 @@ mod tests {
             owner.public_key(),
             KDF_DOMAIN,
             "testnet",
-            &key_derivation_message(KDF_DOMAIN),
+            &message(),
             derivation_signature(&other),
         )
         .expect_err("another account's signature must be refused");

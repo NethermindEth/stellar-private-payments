@@ -16,7 +16,7 @@
 //! ```text
 //! Varial Wallet (Ed25519)
 //!        │
-//!        └── signMessage("Privacy Pool Key Derivation [v1] (<kdf_domain>)
+//!        └── signMessage("Privacy Pool Key Derivation [v2] (<domain>) on <network> (<passphrase>)
 //!                         WARNING: signing this gives full control of …")
 //!                   │
 //!                   ├── SHA-256("privacy-pool/note-key/v1" || <sig>)
@@ -52,8 +52,7 @@ use sha2::{
 };
 use zeroize::Zeroizing;
 
-// Key derivation constants.
-// These MUST remain constant for backwards compatibility.
+// Key derivation constants. Changing any of them changes every user's keys.
 
 /// Message signed to derive both privacy keypairs.
 ///
@@ -61,13 +60,30 @@ use zeroize::Zeroizing;
 /// it can't be rotated, so the second line warns the user to sign it only in
 /// the app or CLI.
 ///
+/// The network passphrase makes the signature, and so every key, differ per
+/// network. Mainnet and testnet also show their short name before the
+/// passphrase, as in `on Testnet (Test SDF Network ; September 2015)`.
 /// `kdf_domain` is trimmed, so stray whitespace does not derive other keys.
-pub fn key_derivation_message(kdf_domain: &str) -> String {
+pub fn key_derivation_message(kdf_domain: &str, network_passphrase: &str) -> String {
+    let network = match NETWORK_NAMES
+        .iter()
+        .find(|(passphrase, _)| *passphrase == network_passphrase)
+    {
+        Some((_, name)) => format!("{name} ({network_passphrase})"),
+        None => network_passphrase.to_owned(),
+    };
     format!(
-        "Privacy Pool Key Derivation [v1] ({})\n{KEY_DERIVATION_WARNING}",
+        "Privacy Pool Key Derivation [v2] ({}) on {network}\n{KEY_DERIVATION_WARNING}",
         kdf_domain.trim()
     )
 }
+
+/// Short names of known networks in [`key_derivation_message`]. They are part
+/// of the signed text, so renaming one changes every key on that network.
+const NETWORK_NAMES: [(&str, &str); 2] = [
+    ("Public Global Stellar Network ; September 2015", "Mainnet"),
+    ("Test SDF Network ; September 2015", "Testnet"),
+];
 
 /// Second line of [`key_derivation_message`].
 const KEY_DERIVATION_WARNING: &str = "WARNING: signing this gives full control of your private \
@@ -569,25 +585,44 @@ mod owner_signature_tests {
         (key, address)
     }
 
+    const PASSPHRASE: &str = "Test SDF Network ; September 2015";
+
     fn message() -> String {
-        key_derivation_message("tests")
+        key_derivation_message("tests", PASSPHRASE)
     }
 
     #[test]
     fn key_derivation_message_is_fixed() {
         assert_eq!(
-            key_derivation_message("tests"),
-            "Privacy Pool Key Derivation [v1] (tests)\nWARNING: signing this gives full control \
-             of your private funds. Only sign in the Stellar Private Payments app or CLI."
+            message(),
+            "Privacy Pool Key Derivation [v2] (tests) on Testnet (Test SDF Network ; September \
+             2015)\nWARNING: signing this gives full control of your private funds. Only sign in \
+             the Stellar Private Payments app or CLI."
         );
     }
 
     #[test]
+    fn only_known_networks_get_a_short_name() {
+        for (passphrase, network) in [
+            (
+                "Public Global Stellar Network ; September 2015",
+                "Mainnet (Public Global Stellar Network ; September 2015)",
+            ),
+            (
+                "Standalone Network ; February 2017",
+                "Standalone Network ; February 2017",
+            ),
+        ] {
+            assert_eq!(
+                key_derivation_message("tests", passphrase).lines().next(),
+                Some(format!("Privacy Pool Key Derivation [v2] (tests) on {network}").as_str())
+            );
+        }
+    }
+
+    #[test]
     fn key_derivation_message_trims_domain() {
-        assert_eq!(
-            key_derivation_message(" tests\n"),
-            key_derivation_message("tests")
-        );
+        assert_eq!(key_derivation_message(" tests\n", PASSPHRASE), message());
     }
 
     fn sign(key: &SigningKey, message: &str) -> KeyDerivationSignature {

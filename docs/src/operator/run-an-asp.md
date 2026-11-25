@@ -59,8 +59,8 @@ sequenceDiagram
 4. Once the call lands, the user can deposit. Before then, the app tells them to share their keys
    with the ASP.
 
-The ASP secret depends on the user's wallet, the KDF domain, and the manifest's network name, so
-a user needs a separate leaf in each deployment.
+The ASP secret depends on the user's wallet, the KDF domain, the network passphrase, and the
+manifest's network name, so a user needs a separate leaf in each deployment.
 
 ## Remove a member from the allowlist
 

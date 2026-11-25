@@ -147,13 +147,19 @@ impl Account {
 
     /// Derive this account's privacy keys from the owner's wallet signature
     /// and persist them. Idempotent: returns the existing keys unchanged if
-    /// already derived. Fails if `signer_address` is not `user_address` — see
-    /// [`Error::SignerIsNotNoteOwner`] — and again if the returned signature
-    /// was not made by the owner's key (a signer may claim an address without
-    /// actually holding it).
+    /// already derived.
     ///
     /// Memory protection is best effort only; see
     /// [`crate::zk::encryption::MEMORY_PROTECTION_WARNING`].
+    ///
+    /// # Errors
+    /// Returns an error if the config has no `networkPassphrase`; see
+    /// [`ContractConfig::key_derivation_message`].
+    ///
+    /// Returns [`Error::SignerIsNotNoteOwner`] if `signer_address` is not
+    /// `user_address`, and an error if the returned signature was not made by
+    /// the owner's key (a signer may claim an address without actually
+    /// holding it).
     pub async fn derive_privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         if self
             .storage
@@ -164,8 +170,7 @@ impl Account {
         }
         ensure_signer_is_note_owner(&self.user_address, &self.signer_address)?;
 
-        let message =
-            crate::zk::encryption::key_derivation_message(&self.contract_config.kdf_domain);
+        let message = self.contract_config.key_derivation_message()?;
         let signature = self.signer.sign_message(&message).await?;
         // The signer only promises to sign *as* `signer_address`; a wallet
         // implementation can still return a signature made with a different
@@ -467,7 +472,7 @@ mod derive_privacy_keys_tests {
                     .expect("open storage"),
             ),
             ContractConfig {
-                network_passphrase: None,
+                network_passphrase: Some(PASSPHRASE.to_string()),
                 rpc_url: None,
 
                 network: PASSPHRASE.to_string(),
