@@ -28,5 +28,8 @@ num-traits = "0.2"
 shlex = "2.0.1"
 zeroize.workspace = true
 
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

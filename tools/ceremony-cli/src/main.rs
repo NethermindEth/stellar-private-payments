@@ -548,7 +548,6 @@ mod tests {
     use std::{
         fs,
         sync::{Arc, Mutex},
-        time::{SystemTime, UNIX_EPOCH},
     };
 
     #[derive(Clone, Default)]
@@ -613,8 +612,9 @@ mod tests {
 
     #[test]
     fn ceremony_e2e_flow() -> Result<()> {
-        let temp = temp_dir()?;
-        let (setup, out_dir) = setup_files(&temp)?;
+        let temp = tempfile::tempdir()?;
+        let temp = temp.path();
+        let (setup, out_dir) = setup_files(temp)?;
         let zkey0 = temp.join("init.zkey");
         let zkey1 = temp.join("contrib.zkey");
 
@@ -679,8 +679,6 @@ mod tests {
         assert!(zkey1.exists());
         assert!(out_dir.join("demo_final.zkey").exists());
         assert!(out_dir.join("demo_verification_key.json").exists());
-
-        fs::remove_dir_all(&temp)?;
         Ok(())
     }
 
@@ -690,9 +688,9 @@ mod tests {
         zkey_bytes: &[u8],
         runner: &MockRunner,
     ) -> Result<(Result<()>, Vec<String>, usize)> {
-        let temp = temp_dir()?;
-        let (setup, out_dir) = setup_files(&temp)?;
-        let zkey = temp.join("final.zkey");
+        let temp = tempfile::tempdir()?;
+        let (setup, out_dir) = setup_files(temp.path())?;
+        let zkey = temp.path().join("final.zkey");
         fs::write(&zkey, zkey_bytes)?;
 
         let result = execute(
@@ -708,8 +706,6 @@ mod tests {
             runner,
         );
         let written = fs::read_dir(&out_dir)?.count();
-
-        fs::remove_dir_all(&temp)?;
         Ok((result, runner.calls()?, written))
     }
 
@@ -755,16 +751,6 @@ mod tests {
         assert!(calls.is_empty());
         assert_eq!(written, 0);
         Ok(())
-    }
-
-    fn temp_dir() -> Result<PathBuf> {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .context("clock before unix epoch")?
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("ceremony-cli-{nanos}"));
-        fs::create_dir_all(&path)?;
-        Ok(path)
     }
 
     fn touch(path: &Path) -> Result<()> {
