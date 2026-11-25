@@ -733,9 +733,13 @@ mod tests {
             fail_verify: true,
             ..MockRunner::default()
         };
-        let (result, _, written) = run_export(&valid_zkey(), &runner)?;
+        let (result, calls, written) = run_export(&valid_zkey(), &runner)?;
 
-        assert!(result.is_err());
+        let err = result
+            .err()
+            .ok_or_else(|| anyhow!("expected verify error"))?;
+        assert!(err.to_string().contains("mock zkey verify failure"));
+        assert!(calls.iter().any(|line| line.contains("zkey verify")));
         assert_eq!(written, 0);
         Ok(())
     }
