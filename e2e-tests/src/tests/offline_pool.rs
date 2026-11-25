@@ -64,7 +64,6 @@ use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate, matchers::m
 pub const OWNER: &str = "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57";
 /// Ed25519 secret of [`OWNER`].
 const OWNER_SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
-const NETWORK_PASSPHRASE: &str = "Test SDF Network ; September 2015";
 
 /// Ledger the RPC reports as its tip, for both events and ledger entries.
 const LEDGER: u32 = 100;
@@ -1098,7 +1097,7 @@ impl ScriptedSigner {
         Ok(Self {
             inner: SignerHandle::from(LocalSigner::new(
                 OWNER_SECRET,
-                NETWORK_PASSPHRASE,
+                sdk_tests::seed::TEST_NETWORK_PASSPHRASE,
                 SignerAddress::new(OWNER),
             )?),
             refusals: Arc::default(),

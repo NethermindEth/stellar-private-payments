@@ -43,6 +43,8 @@ pub struct DisclosureRequest {
 #[serde(rename_all = "camelCase")]
 pub struct DisclosureInputsRequest {
     pub user_address: String,
+    /// Storage key of the owner's privacy keys, from
+    /// [`crate::types::ContractConfig::key_derivation_message`].
     pub kdf_domain: String,
     pub pool_address: String,
     pub selected_commitments: Vec<Field>,

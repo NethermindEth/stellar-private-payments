@@ -39,6 +39,9 @@ pub(crate) async fn native_balance(rpc: &RpcClient, address: &str) -> Result<u12
 /// Stellar account session
 ///
 /// Construct via [`crate::Client::account`].
+///
+/// Every method that reads privacy keys fails if the deployment config has no
+/// `networkPassphrase`; see [`ContractConfig::key_derivation_message`].
 pub struct Account {
     rpc: RpcClient,
     storage: StorageHandle,
@@ -112,7 +115,7 @@ impl Account {
         self.storage
             .list_portfolio_balances(
                 self.user_address.as_str(),
-                &self.contract_config.kdf_domain,
+                &self.contract_config.key_derivation_message()?,
                 &self.contract_config.portfolio_pools(),
             )
             .await
@@ -139,9 +142,14 @@ impl Account {
     }
 
     /// Locally derived note and encryption public keys for this account.
+    ///
+    /// # Errors
+    /// Returns [`Error::PrivacyKeysNotFound`] if no keys are stored for this
+    /// deployment's KDF domain and network.
     pub async fn privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        let message = self.contract_config.key_derivation_message()?;
         self.storage
-            .privacy_keys(self.user_address.as_str(), &self.contract_config.kdf_domain)
+            .privacy_keys(self.user_address.as_str(), &message)
             .await
     }
 
@@ -153,24 +161,21 @@ impl Account {
     /// [`crate::zk::encryption::MEMORY_PROTECTION_WARNING`].
     ///
     /// # Errors
-    /// Returns an error if the config has no `networkPassphrase`; see
-    /// [`ContractConfig::key_derivation_message`].
-    ///
     /// Returns [`Error::SignerIsNotNoteOwner`] if `signer_address` is not
     /// `user_address`, and an error if the returned signature was not made by
     /// the owner's key (a signer may claim an address without actually
     /// holding it).
     pub async fn derive_privacy_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        let message = self.contract_config.key_derivation_message()?;
         if self
             .storage
-            .privacy_keys_exist(self.user_address.as_str(), &self.contract_config.kdf_domain)
+            .privacy_keys_exist(self.user_address.as_str(), &message)
             .await?
         {
             return self.privacy_keys().await;
         }
         ensure_signer_is_note_owner(&self.user_address, &self.signer_address)?;
 
-        let message = self.contract_config.key_derivation_message()?;
         let signature = self.signer.sign_message(&message).await?;
         // The signer only promises to sign *as* `signer_address`; a wallet
         // implementation can still return a signature made with a different
@@ -194,7 +199,7 @@ impl Account {
         self.storage
             .save_private_keys(
                 self.user_address.as_str(),
-                &self.contract_config.kdf_domain,
+                &message,
                 &note_keypair,
                 &encryption_keypair,
                 &membership_blinding,
@@ -205,22 +210,28 @@ impl Account {
     }
 
     /// Locally derived ASP membership blinding for this account.
+    ///
+    /// # Errors
+    /// Returns [`Error::PrivacyKeysNotFound`] if no keys are stored for this
+    /// deployment's KDF domain and network.
     pub async fn asp_secret(&self) -> Result<Field, Error> {
+        let message = self.contract_config.key_derivation_message()?;
         self.storage
-            .asp_secret(self.user_address.as_str(), &self.contract_config.kdf_domain)
+            .asp_secret(self.user_address.as_str(), &message)
             .await
     }
 
     /// Derive the ASP membership tree leaf for this account's note public key.
     pub async fn derive_asp_user_leaf(&self) -> Result<Field, Error> {
+        let message = self.contract_config.key_derivation_message()?;
         let note = self
             .storage
-            .privacy_keys(self.user_address.as_str(), &self.contract_config.kdf_domain)
+            .privacy_keys(self.user_address.as_str(), &message)
             .await?
             .0;
         let blinding = self
             .storage
-            .asp_secret(self.user_address.as_str(), &self.contract_config.kdf_domain)
+            .asp_secret(self.user_address.as_str(), &message)
             .await?;
         crate::crypto::derive_asp_user_leaf(&note, &blinding)
     }
@@ -233,7 +244,7 @@ impl Account {
         self.storage
             .list_user_notes(
                 self.user_address.as_str(),
-                &self.contract_config.kdf_domain,
+                &self.contract_config.key_derivation_message()?,
                 limit,
             )
             .await
@@ -265,7 +276,8 @@ impl Account {
     /// delegated session stops here rather than at an unfillable auth entry.
     ///
     /// Returns [`Error::KdfDomainMismatch`] if the registry was deployed for
-    /// another key derivation domain than this session's config.
+    /// another key derivation domain than this session's config, and an error
+    /// if the config has no `networkPassphrase`.
     pub async fn register_public_keys(&self) -> Result<TransactionResult, Error> {
         ensure_signer_is_note_owner(&self.user_address, &self.signer_address)?;
 
@@ -287,7 +299,7 @@ impl Account {
             .storage()
             .build_registration_inputs(&RegistrationRequest {
                 user_address: self.user_address.as_str().to_string(),
-                kdf_domain: self.contract_config.kdf_domain.clone(),
+                kdf_domain: self.contract_config.key_derivation_message()?,
                 public_key_registry: self.contract_config.public_key_registry.clone(),
             })
             .await?;
@@ -463,7 +475,7 @@ mod derive_privacy_keys_tests {
     const SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
     const PASSPHRASE: &str = "Test SDF Network ; September 2015";
 
-    fn test_client(dir: &tempfile::TempDir) -> Client {
+    fn test_client(dir: &tempfile::TempDir, passphrase: &str) -> Client {
         let db = dir.path().join("wallet.sqlite");
         Client::init_readonly(
             "https://soroban-testnet.stellar.org",
@@ -472,7 +484,7 @@ mod derive_privacy_keys_tests {
                     .expect("open storage"),
             ),
             ContractConfig {
-                network_passphrase: Some(PASSPHRASE.to_string()),
+                network_passphrase: Some(passphrase.to_string()),
                 rpc_url: None,
 
                 network: PASSPHRASE.to_string(),
@@ -527,7 +539,7 @@ mod derive_privacy_keys_tests {
     #[tokio::test]
     async fn derive_privacy_keys_derives_and_persists_privacy_keys_for_the_owner() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let account = test_client(&dir)
+        let account = test_client(&dir, PASSPHRASE)
             .account(NoteOwnerAddress::new(OWNER), test_signer(OWNER))
             .expect("open account");
 
@@ -540,9 +552,24 @@ mod derive_privacy_keys_tests {
     }
 
     #[tokio::test]
+    async fn derive_privacy_keys_derives_other_keys_on_another_network() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut note_keys = Vec::new();
+        for passphrase in [PASSPHRASE, "Standalone Network ; February 2017"] {
+            let account = test_client(&dir, passphrase)
+                .account(NoteOwnerAddress::new(OWNER), test_signer(OWNER))
+                .expect("open account");
+            let (note_key, _) = account.derive_privacy_keys().await.expect("derive keys");
+            note_keys.push(note_key.0);
+        }
+
+        assert_ne!(note_keys[0], note_keys[1]);
+    }
+
+    #[tokio::test]
     async fn derive_privacy_keys_does_not_re_derive_when_keys_already_exist() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let client = test_client(&dir);
+        let client = test_client(&dir, PASSPHRASE);
         let account = client
             .account(NoteOwnerAddress::new(OWNER), test_signer(OWNER))
             .expect("open account");
@@ -574,7 +601,7 @@ mod derive_privacy_keys_tests {
         const DELEGATE: &str = "GD6ROJBYLKQMOW3E7N4M2YBPUHMZD7PL65VRHRMO24BOVSBV5H3BQRSL";
 
         let dir = tempfile::tempdir().expect("temp dir");
-        let account = test_client(&dir)
+        let account = test_client(&dir, PASSPHRASE)
             .account(NoteOwnerAddress::new(DELEGATE), test_signer(DELEGATE))
             .expect("open account");
 
@@ -660,7 +687,7 @@ mod register_public_keys_tests {
                     .expect("open storage"),
             ),
             ContractConfig {
-                network_passphrase: None,
+                network_passphrase: Some("Test SDF Network ; September 2015".to_string()),
                 rpc_url: None,
                 network: "Test SDF Network ; September 2015".to_string(),
                 kdf_domain: kdf_domain.to_string(),

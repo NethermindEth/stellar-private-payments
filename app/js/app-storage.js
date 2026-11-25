@@ -19,13 +19,8 @@ function unwrapResponse(response) {
     return response;
 }
 
-export async function storageCall(storage, request, timeoutMs = 5_000) {
-    const response = unwrapResponse(await storage.call(request, timeoutMs));
-    return response;
-}
-
 /**
- * App-only persistence: settings, disclaimer, operation history, onboarding key probe.
+ * App-only persistence: settings, disclaimer, operation history.
  */
 export class AppStorage {
     #storage;
@@ -34,8 +29,8 @@ export class AppStorage {
         this.#storage = storage;
     }
 
-    async #call(request, timeoutMs = 5_000) {
-        return storageCall(this.#storage, request, timeoutMs);
+    async #call(request) {
+        return unwrapResponse(await this.#storage.call(request, 5_000));
     }
 
     async getSetting(key) {
@@ -69,18 +64,6 @@ export class AppStorage {
     async getDisclaimerState(address) {
         const response = await this.#call({ DisclaimerState: address });
         return response.DisclaimerState ?? null;
-    }
-
-    /** Whether privacy keys are stored locally for an address (onboarding only). */
-    async privacyKeysExist(address, kdfDomain) {
-        const response = await this.#call({ PrivacyKeys: [address, kdfDomain] }, 1_000);
-        return response.PrivacyKeys != null;
-    }
-
-    /** Public note/encryption keys only (onboarding; no ASP secret). */
-    async getPrivacyKeys(address, kdfDomain) {
-        const response = await this.#call({ PrivacyKeys: [address, kdfDomain] }, 1_000);
-        return response.PrivacyKeys ?? null;
     }
 
     async acceptDisclaimer(address, disclaimerHashHex) {

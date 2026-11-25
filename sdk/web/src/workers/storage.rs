@@ -65,6 +65,8 @@ impl Drop for DatabaseKeyTransport {
 }
 
 type Address = String;
+/// Storage key of the owner's privacy keys, from
+/// [`ContractConfig::key_derivation_message`].
 type KdfDomain = String;
 
 #[derive(Debug, Serialize, Deserialize)]

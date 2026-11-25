@@ -137,7 +137,7 @@ pub fn config_for(deployment: &Deployment, uri: &str) -> (ContractConfig, PoolCo
         gvk_authority_pub_key: None,
     };
     let config = ContractConfig {
-        network_passphrase: None,
+        network_passphrase: Some(sdk_tests::seed::TEST_NETWORK_PASSPHRASE.to_string()),
         rpc_url: None,
         network: uri.to_string(),
         kdf_domain: "tests".to_string(),

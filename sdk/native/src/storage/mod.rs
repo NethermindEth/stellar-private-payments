@@ -115,6 +115,9 @@ pub(crate) fn note_key_owner_lookup_from_storage(
 }
 
 /// Wallet reads and sync lifecycle for [`crate::pool::PrivatePool`].
+///
+/// A `kdf_domain` argument takes [`ContractConfig::key_derivation_message`],
+/// the key [`crate::Account`] stores privacy keys under.
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 pub trait Storage: crate::chain::ContractDataStorage {

@@ -63,8 +63,8 @@ CREATE INDEX idx_raw_contract_events_ledger_id ON raw_contract_events(ledger, id
 CREATE INDEX idx_raw_contract_events_contract_id ON raw_contract_events (contract_id, id);
 CREATE UNIQUE INDEX idx_raw_contract_events_chain ON raw_contract_events(contract_id, chain_count);
 
--- User accounts known to this local database, keyed by (address, kdf_domain): each domain
--- derives its own keys, so one Stellar address owns a separate set of notes per domain.
+-- User accounts keyed by (address, kdf_domain), where kdf_domain holds the key derivation
+-- message, so one Stellar address owns a separate set of notes per domain and network.
 CREATE TABLE accounts (
     id INTEGER PRIMARY KEY,
     address TEXT NOT NULL,

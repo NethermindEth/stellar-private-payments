@@ -48,6 +48,7 @@ export interface PoolConfigInput {
  */
 export interface ContractConfigInput {
   network: string;
+  /** Required for privacy-key operations; keys are derived for this network. */
   networkPassphrase?: string;
   rpcUrl?: string;
   kdf_domain: string;

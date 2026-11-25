@@ -18,6 +18,7 @@ static NOTE_SALT: AtomicUsize = AtomicUsize::new(0);
 
 const TEST_CONFIG_JSON: &str = r#"{
     "network": "test",
+    "networkPassphrase": "Test SDF Network ; September 2015",
     "kdf_domain": "tests",
     "deployer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
     "admin": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
@@ -117,7 +118,7 @@ pub fn test_recipient() -> TransferRecipient {
 fn test_signer() -> Result<SignerHandle> {
     Ok(SignerHandle::from(LocalSigner::new(
         TEST_SIGNER_SECRET,
-        "Test SDF Network ; September 2015",
+        seed::TEST_NETWORK_PASSPHRASE,
         SignerAddress::new(USER_ADDRESS),
     )?))
 }
