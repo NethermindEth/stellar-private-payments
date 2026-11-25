@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::{ArgAction, Parser, Subcommand};
+use sha2::{Digest, Sha256};
 use std::{
     ffi::OsString,
     fs,
@@ -46,13 +47,26 @@ struct SetupArgs {
     /// Powers of Tau file.
     #[arg(short = 'p', long = "ptau")]
     ptau: PathBuf,
+    /// Circuit lock holding the expected `.r1cs` hashes. If omitted, uses
+    /// `deployments/testnet/circuits.json` from the workspace root.
+    #[arg(long = "circuits-lock")]
+    circuits_lock: Option<PathBuf>,
 }
 
 impl SetupArgs {
-    /// Checks the ptau file exists and resolves the circuit path.
+    /// Checks the ptau file exists, resolves the circuit path and checks the
+    /// circuit against the lock.
     fn resolve(&self) -> Result<PathBuf> {
         assert_readable_file(&self.ptau, "ptau")?;
-        resolve_circuits(&self.circuits)
+        let circuit = resolve_circuits(&self.circuits)?;
+        let lock = match &self.circuits_lock {
+            Some(path) => path.clone(),
+            None => workspace_root()
+                .context("pass --circuits-lock explicitly")?
+                .join(DEFAULT_CIRCUITS_LOCK),
+        };
+        assert_circuit_locked(&circuit, &lock)?;
+        Ok(circuit)
     }
 }
 
@@ -440,6 +454,10 @@ fn resolve_snarkjs_circuit_path(path: &Path) -> Result<PathBuf> {
 /// Default name of the compiled circuit produced by `make circuits`.
 const DEFAULT_R1CS_NAME: &str = "policy_tx_2_2_AB.r1cs";
 
+/// Circuit lock used when `--circuits-lock` is omitted, relative to the
+/// workspace root.
+const DEFAULT_CIRCUITS_LOCK: &str = "deployments/testnet/circuits.json";
+
 /// Resolves the `--circuit` argument. If the user supplied an explicit path it
 /// is validated and returned. Otherwise we auto-discover the compiled `.r1cs`
 /// from `target/circuits-artifacts/`.
@@ -453,13 +471,13 @@ fn resolve_circuits(explicit: &Option<PathBuf>) -> Result<PathBuf> {
     Ok(discovered)
 }
 
-/// Searches `target/circuits-artifacts/` for a compiled `.r1cs` file.
-fn discover_r1cs(name: &str) -> Result<PathBuf> {
-    // Walk up from CWD to find the workspace root (contains Cargo.lock).
+/// Walks up from the current directory to the workspace root, the first
+/// directory holding a `Cargo.lock`.
+fn workspace_root() -> Result<PathBuf> {
     let mut root = std::env::current_dir().context("failed to determine current directory")?;
     loop {
         if root.join("Cargo.lock").is_file() {
-            break;
+            return Ok(root);
         }
         if !root.pop() {
             bail!(
@@ -468,8 +486,13 @@ fn discover_r1cs(name: &str) -> Result<PathBuf> {
             );
         }
     }
+}
 
-    let path = root.join("target/circuits-artifacts").join(name);
+/// Searches `target/circuits-artifacts/` for a compiled `.r1cs` file.
+fn discover_r1cs(name: &str) -> Result<PathBuf> {
+    let path = workspace_root()?
+        .join("target/circuits-artifacts")
+        .join(name);
     if path.is_file() {
         return Ok(path);
     }
@@ -478,6 +501,37 @@ fn discover_r1cs(name: &str) -> Result<PathBuf> {
         "no compiled circuit `{name}` found.\n\
          Run `make circuits` first, or pass --circuit <path> explicitly."
     )
+}
+
+/// Checks that the `.r1cs` sha256 matches the hash the lock records for its
+/// file stem.
+fn assert_circuit_locked(r1cs: &Path, lock: &Path) -> Result<()> {
+    let json = fs::read_to_string(lock)
+        .with_context(|| format!("failed to read circuit lock {}", lock.display()))?;
+    let entries: serde_json::Value = serde_json::from_str(&json)
+        .with_context(|| format!("failed to parse circuit lock {}", lock.display()))?;
+    let stem = r1cs
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow!("invalid circuit file name: {}", r1cs.display()))?;
+    let want = entries[stem]["r1cs"].as_str().ok_or_else(|| {
+        anyhow!(
+            "circuit lock {} has no r1cs hash for `{stem}`",
+            lock.display()
+        )
+    })?;
+
+    let bytes =
+        fs::read(r1cs).with_context(|| format!("failed to read circuit {}", r1cs.display()))?;
+    let got = hex::encode(Sha256::digest(&bytes));
+    if got != want {
+        bail!(
+            "circuit {} does not match {}: expected sha256 {want}, got {got}",
+            r1cs.display(),
+            lock.display()
+        );
+    }
+    Ok(())
 }
 
 /// Generates contribution entropy with OS CSPRNG and returns hex-encoded
@@ -612,19 +666,77 @@ mod tests {
         }
     }
 
-    /// Creates placeholder circuit and ptau files plus an empty output dir.
+    /// Creates placeholder circuit and ptau files, a circuit lock pinning the
+    /// circuit, and an empty output dir.
     fn setup_files(temp: &Path) -> Result<(SetupArgs, PathBuf)> {
         let circuit = temp.join("circuit.r1cs");
         let ptau = temp.join("powers.ptau");
+        let lock = temp.join("circuits.json");
         let out_dir = temp.join("out");
         fs::create_dir_all(&out_dir)?;
         fs::write(&circuit, "circuit")?;
         fs::write(&ptau, "ptau")?;
+        let hash = hex::encode(Sha256::digest("circuit"));
+        fs::write(&lock, format!(r#"{{"circuit": {{"r1cs": "{hash}"}}}}"#))?;
         let setup = SetupArgs {
             circuits: Some(circuit),
             ptau,
+            circuits_lock: Some(lock),
         };
         Ok((setup, out_dir))
+    }
+
+    /// Runs `init` and returns its result and the runner calls.
+    fn run_init(setup: SetupArgs, output: PathBuf) -> Result<(Result<()>, Vec<String>)> {
+        let runner = MockRunner::default();
+        let result = execute(
+            Cli {
+                command: Commands::Init(CeremonyArgs {
+                    setup,
+                    output,
+                    force: false,
+                }),
+            },
+            &runner,
+        );
+        Ok((result, runner.calls()?))
+    }
+
+    #[test]
+    fn rejects_circuit_not_matching_lock() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let (setup, _) = setup_files(temp.path())?;
+        let circuit = setup
+            .circuits
+            .clone()
+            .ok_or_else(|| anyhow!("no circuit"))?;
+        fs::write(&circuit, "modified circuit")?;
+
+        let (result, calls) = run_init(setup, temp.path().join("init.zkey"))?;
+
+        let err = result.err().ok_or_else(|| anyhow!("expected lock error"))?;
+        assert!(err.to_string().contains("does not match"));
+        assert!(calls.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_circuit_missing_from_lock() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let (setup, _) = setup_files(temp.path())?;
+        let other = temp.path().join("other.r1cs");
+        fs::write(&other, "circuit")?;
+        let setup = SetupArgs {
+            circuits: Some(other),
+            ..setup
+        };
+
+        let (result, calls) = run_init(setup, temp.path().join("init.zkey"))?;
+
+        let err = result.err().ok_or_else(|| anyhow!("expected lock error"))?;
+        assert!(err.to_string().contains("no r1cs hash for `other`"));
+        assert!(calls.is_empty());
+        Ok(())
     }
 
     #[test]

@@ -76,6 +76,8 @@ ceremony-cli init \
 
 The CLI auto-discovers the compiled `.r1cs` from the build output. You can override with `--circuit <path>` if needed.
 
+Every command checks the `.r1cs` sha256 against the hash recorded for its file stem in `deployments/testnet/circuits.json`, and refuses to run on a mismatch. Pass `--circuits-lock <path>` to use another lock, for example when running outside the repository.
+
 This executes:
 
 - `snarkjs groth16 setup ...`
