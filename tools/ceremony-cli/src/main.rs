@@ -4,6 +4,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{ArgAction, Parser, Subcommand};
 use std::{
     ffi::OsString,
+    fs,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::Instant,
@@ -196,17 +197,16 @@ fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
     let circuit = args.setup.resolve()?;
     assert_output_allowed(&args.output, args.force)?;
 
-    let cmd = vec![
-        OsString::from("groth16"),
-        OsString::from("setup"),
-        circuit.as_os_str().to_owned(),
-        args.setup.ptau.as_os_str().to_owned(),
-        args.output.as_os_str().to_owned(),
-    ];
-    runner.run("snarkjs", &cmd)?;
-    print_file_size(&args.output)?;
-
-    verify_zkey(runner, &circuit, &args.setup.ptau, &args.output)?;
+    produce_verified(runner, &circuit, &args.setup.ptau, &args.output, |zkey| {
+        let cmd = vec![
+            OsString::from("groth16"),
+            OsString::from("setup"),
+            circuit.as_os_str().to_owned(),
+            args.setup.ptau.as_os_str().to_owned(),
+            zkey.as_os_str().to_owned(),
+        ];
+        runner.run("snarkjs", &cmd)
+    })?;
 
     print_next_steps(
         &args.output,
@@ -224,25 +224,20 @@ fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
 
     verify_zkey(runner, &circuit, &args.setup.ptau, &args.zkey)?;
 
-    let entropy = generate_entropy_hex()?;
-    let entropy_flag = Zeroizing::new(format!("-e={}", entropy.as_str()));
-
-    let contribute_cmd = vec![
-        OsString::from("zkey"),
-        OsString::from("contribute"),
-        args.zkey.as_os_str().to_owned(),
-        args.output.as_os_str().to_owned(),
-        OsString::from(format!("--name={}", args.name)),
-        OsString::from("-v"),
-        OsString::from(entropy_flag.as_str()),
-    ];
-
-    runner.run("snarkjs", &contribute_cmd)?;
-    print_file_size(&args.output)?;
-    drop(entropy_flag);
-    drop(entropy);
-
-    verify_zkey(runner, &circuit, &args.setup.ptau, &args.output)?;
+    produce_verified(runner, &circuit, &args.setup.ptau, &args.output, |zkey| {
+        let entropy = generate_entropy_hex()?;
+        let entropy_flag = Zeroizing::new(format!("-e={}", entropy.as_str()));
+        let cmd = vec![
+            OsString::from("zkey"),
+            OsString::from("contribute"),
+            args.zkey.as_os_str().to_owned(),
+            zkey.as_os_str().to_owned(),
+            OsString::from(format!("--name={}", args.name)),
+            OsString::from("-v"),
+            OsString::from(entropy_flag.as_str()),
+        ];
+        runner.run("snarkjs", &cmd)
+    })?;
 
     print_next_steps(
         &args.output,
@@ -270,19 +265,18 @@ fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
 
     validate_beacon_hash(&args.beacon_hash)?;
 
-    let beacon_cmd = vec![
-        OsString::from("zkey"),
-        OsString::from("beacon"),
-        args.zkey.as_os_str().to_owned(),
-        final_zkey.as_os_str().to_owned(),
-        OsString::from(args.beacon_hash.clone()),
-        OsString::from(args.beacon_power.to_string()),
-        OsString::from("-n=Final Beacon phase2"),
-    ];
-    runner.run("snarkjs", &beacon_cmd)?;
-    print_file_size(&final_zkey)?;
-
-    verify_zkey(runner, &circuit, &args.setup.ptau, &final_zkey)?;
+    produce_verified(runner, &circuit, &args.setup.ptau, &final_zkey, |zkey| {
+        let cmd = vec![
+            OsString::from("zkey"),
+            OsString::from("beacon"),
+            args.zkey.as_os_str().to_owned(),
+            zkey.as_os_str().to_owned(),
+            OsString::from(args.beacon_hash.clone()),
+            OsString::from(args.beacon_power.to_string()),
+            OsString::from("-n=Final Beacon phase2"),
+        ];
+        runner.run("snarkjs", &cmd)
+    })?;
 
     let export_vkey_cmd = vec![
         OsString::from("zkey"),
@@ -323,9 +317,33 @@ fn verify_zkey(runner: &dyn CommandRunner, circuit: &Path, ptau: &Path, zkey: &P
     runner.run("snarkjs", &cmd)
 }
 
+/// Runs `produce` to write a zkey next to `output` under a temporary name,
+/// verifies it, and only then moves it to `output`. On failure the temporary
+/// file is removed, so an unverified zkey never sits at `output`.
+fn produce_verified(
+    runner: &dyn CommandRunner,
+    circuit: &Path,
+    ptau: &Path,
+    output: &Path,
+    produce: impl FnOnce(&Path) -> Result<()>,
+) -> Result<()> {
+    let unverified = output.with_extension("unverified.zkey");
+    let result = produce(&unverified)
+        .and_then(|()| print_file_size(&unverified))
+        .and_then(|()| verify_zkey(runner, circuit, ptau, &unverified))
+        .and_then(|()| {
+            fs::rename(&unverified, output)
+                .with_context(|| format!("failed to move zkey to {}", output.display()))
+        });
+    if result.is_err() {
+        fs::remove_file(&unverified).ok();
+    }
+    result
+}
+
 /// human-readable file size
 fn print_file_size(path: &Path) -> Result<()> {
-    let metadata = std::fs::metadata(path)
+    let metadata = fs::metadata(path)
         .with_context(|| format!("failed to read metadata for {}", path.display()))?;
     let bytes = metadata.len();
     let human = format_bytes_human(bytes);
@@ -668,16 +686,41 @@ mod tests {
                 .iter()
                 .any(|line| line.contains("zkey verify") && line.contains("init.zkey"))
         );
-        assert!(
-            calls
-                .iter()
-                .any(|line| line.contains("zkey verify") && line.contains("demo_final.zkey"))
-        );
+        assert!(calls.iter().any(
+            |line| line.contains("zkey verify") && line.contains("demo_final.unverified.zkey")
+        ));
 
         assert!(zkey0.exists());
         assert!(zkey1.exists());
         assert!(out_dir.join("demo_final.zkey").exists());
         assert!(out_dir.join("demo_verification_key.json").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn failed_verify_leaves_no_zkey() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let (setup, _) = setup_files(temp.path())?;
+        let output = temp.path().join("init.zkey");
+        let runner = MockRunner {
+            fail_verify: true,
+            ..MockRunner::default()
+        };
+
+        let result = execute(
+            Cli {
+                command: Commands::Init(CeremonyArgs {
+                    setup,
+                    output: output.clone(),
+                    force: false,
+                }),
+            },
+            &runner,
+        );
+
+        assert!(result.is_err());
+        assert!(!output.exists());
+        assert!(!temp.path().join("init.unverified.zkey").exists());
         Ok(())
     }
 
