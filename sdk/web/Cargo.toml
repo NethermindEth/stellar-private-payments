@@ -74,15 +74,15 @@ wasm-bindgen-futures = { workspace = true }
 web-sys = { workspace = true, features = ["DomException"] }
 zeroize = { workspace = true }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-sqlite-wasm-rs = { workspace = true }
-sqlite-wasm-vfs = { workspace = true }
-
 # `wasm-bindgen-rayon` refuses to compile without atomics, so it is only a
 # dependency of builds that have them.
 [target.'cfg(all(target_arch = "wasm32", target_feature = "atomics"))'.dependencies]
 rayon = { version = "1.12", default-features = false, optional = true }
 wasm-bindgen-rayon = { version = "1.3", default-features = false, features = ["no-bundler"], optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sqlite-wasm-rs = { workspace = true }
+sqlite-wasm-vfs = { workspace = true }
 
 [dev-dependencies]
 wasm-bindgen-test = { workspace = true }
