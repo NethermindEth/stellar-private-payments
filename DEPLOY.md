@@ -18,7 +18,7 @@ list; this file explains the pool spec syntax and walks through common cases.
 ## Pool spec syntax
 
 ```
---pool [<policy>:][<gvk-mode>:]<asset-spec>
+--pool [<policy>:][<gvk-mode>:][fee=<N>:][min=<N>:][max=<N>:]<asset-spec>
 ```
 
 `--pool` is repeatable — a single deployment can mix policies and GVK modes
@@ -29,6 +29,7 @@ verifier contract, since the verifying key is baked into the WASM.
 |---|---|
 | `<policy>` | See [ASP policies](#asp-policies) below. |
 | `<gvk-mode>` | Omit for `gvk-off`. See [Global View Key (GVK)](#global-view-key-gvk) below. |
+| `fee=<N>`, `min=<N>`, `max=<N>` | Optional, in any order. This pool's own fee, smallest deposit and maximum deposit, in its token's smallest unit. A pool that leaves one out takes `--fee`, `--min-deposit` or `--max-deposit` for it. See [Pool fee and smallest deposit](#pool-fee-and-smallest-deposit) below. |
 | `<asset-spec>` | `native:<TOKEN_CONTRACT_ID>` \| `classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>`. `<TOKEN_CONTRACT_ID>` must be the asset's own Stellar asset contract. `deploy.sh` warns about each flag that gives a classic issuer a power over the pool's balance. |
 
 If no `--pool` is given, one native XLM pool deploys by default.
@@ -40,9 +41,9 @@ If no `--pool` is given, one native XLM pool deploys by default.
 | `--deployer <NAME>` | Stellar identity or secret key used to deploy |
 | `--asp-levels <N>` | Merkle tree levels for asp-membership |
 | `--pool-levels <N>` | Merkle tree levels for pool |
-| `--fee <N>` | Fee every transaction pays, in the token's smallest unit |
-| `--min-deposit <N>` | Smallest amount a deposit may leave in notes after the fee, in the token's smallest unit |
-| `--max-deposit <N>` | Most a single deposit sends, fee included, in the token's smallest unit |
+| `--fee <N>` | Fee every transaction pays, in the token's smallest unit. Applies to each pool whose spec sets no `fee=` |
+| `--min-deposit <N>` | Smallest amount a deposit may leave in notes after the fee, in the token's smallest unit. Applies to each pool whose spec sets no `min=` |
+| `--max-deposit <N>` | Most a single deposit sends, fee included, in the token's smallest unit. Applies to each pool whose spec sets no `max=` |
 | `--kdf-domain <STRING>` | Privacy key derivation domain. Any chosen string. Shows in the message signed by users for key derivation |
 | `--policy-flags <SPEC>` | Default `<policy>` for `--pool` specs that omit one; required unless every spec includes its own |
 
@@ -127,13 +128,13 @@ a fee of 0.1 XLM (1,000,000 stroops) and a smallest deposit of 1 XLM.
 
 When you choose the values, weigh these effects:
 
-- `--min-deposit` applies to what a deposit leaves in notes after the fee, which
-  is the amount a user types in the app's Deposit form or in `spp deposit`.
-  Withdrawals have no minimum.
-- `--max-deposit` caps what a deposit sends, fee included, so a deposit leaves
-  at most the maximum deposit less the fee in notes. The fee plus the smallest
-  deposit must not exceed it. `deploy.sh` refuses values that break this before
-  it deploys anything, and the pool constructor refuses them with
+- The smallest deposit applies to what a deposit leaves in notes after the fee,
+  which is the amount a user types in the app's Deposit form or in
+  `spp deposit`. Withdrawals have no minimum.
+- The maximum deposit caps what a deposit sends, fee included, so a deposit
+  leaves at most the maximum deposit less the fee in notes. The fee plus the
+  smallest deposit must not exceed it. `deploy.sh` refuses values that break
+  this before it deploys anything, and the pool constructor refuses them with
   `Error(Contract, #6)`.
 - A note worth the fee or less can't move any value on its own, since the fee
   takes all of it or more. Its owner can use it only together with a second
@@ -143,6 +144,37 @@ When you choose the values, weigh these effects:
   commitment tree for the network fee alone, bringing the pool closer to a full
   tree, after which it takes no more transactions. A fee above 0 makes each
   such call pay it.
+
+### Different amounts per pool
+
+`--fee`, `--min-deposit` and `--max-deposit` are numbers in the smallest unit
+of whichever token a pool holds, and every pool of the deployment takes them
+unless its spec says otherwise. That is enough while all the pools hold one
+asset. Once a deployment has pools on two assets, the same number is a
+different amount of value in each: `--fee 1000000` charges 0.1 XLM in a native
+pool and 0.1 EURC in a EURC pool, because both tokens have seven decimals, and
+the two are not worth the same.
+
+To give a pool its own amounts, put `fee=`, `min=` or `max=` in front of its
+asset spec, after the policy and the GVK mode:
+
+```sh
+--fee 1000000 --min-deposit 10000000 --max-deposit 1000000000 \
+--pool blocklist:native:<XLM_TOKEN_ID> \
+--pool blocklist:fee=100000:min=1000000:classic:EURC:<ISSUER>:<EURC_TOKEN_ID>
+```
+
+The native pool takes the three options as they are. The EURC pool charges
+0.01 EURC and accepts deposits from 0.1 EURC. Its spec sets no `max=`, so it
+keeps `--max-deposit`, which is 100 EURC there. A spec can set any of the three,
+each at most once and in any order.
+
+The three options stay required when every spec sets its own amounts.
+`deploy.sh` applies the checks above to each pool's resulting amounts, the
+options and the spec's own values together: a pool that sets only `max=` is
+refused when `--fee` plus `--min-deposit` exceeds it. Each `deploy pool` step
+prints the amounts it deploys with. The manifest doesn't record them; a
+deployed pool's `get_fee` returns its fee.
 
 ## Template
 
@@ -158,7 +190,7 @@ deployments/scripts/deploy.sh <network> \
   --min-deposit <n> \
   --max-deposit <n> \
   --kdf-domain <string> \
-  --pool <policy>:<gvk-mode>:<asset-spec> \
+  --pool <policy>:<gvk-mode>:fee=<n>:min=<n>:max=<n>:<asset-spec> \
   --gvk-authority-pubkey-file <path>   # only if any pool uses gvk-viewonly/gvk-traceable
 ```
 
@@ -229,6 +261,24 @@ deployments/scripts/deploy.sh testnet \
   --kdf-domain Nethermind \
   --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
   --pool allowlist-blocklist:gvk-traceable:native:$(stellar contract id asset --asset native --network testnet)
+```
+
+A native XLM pool beside a pool on a classic asset that sets its own fee and
+smallest deposit, as [Different amounts per pool](#different-amounts-per-pool)
+describes. `<issuer>` is the account that issues the asset:
+
+```sh
+deployments/scripts/deploy.sh testnet \
+  --deployer <identity> \
+  --policy-flags blocklist \
+  --asp-levels 10 \
+  --pool-levels 20 \
+  --fee 1000000 \
+  --min-deposit 10000000 \
+  --max-deposit 1000000000 \
+  --kdf-domain Nethermind \
+  --pool native:$(stellar contract id asset --asset native --network testnet) \
+  --pool fee=100000:min=1000000:classic:EURC:<issuer>:$(stellar contract id asset --asset EURC:<issuer> --network testnet)
 ```
 
 ## Deploy from a release

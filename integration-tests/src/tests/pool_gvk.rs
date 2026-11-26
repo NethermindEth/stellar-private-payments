@@ -298,6 +298,7 @@ async fn policy_auditable() -> Result<()> {
         policy_flags: PolicyFlags::BLOCKLIST,
         gvk_mode: GvkMode::Traceable,
         asset: PoolAsset::Native,
+        ..PoolOptions::NONE
     };
     let (config, identity) = deploy(&[options]).await?;
     let alice = session((config.clone(), identity.clone())).await?;
