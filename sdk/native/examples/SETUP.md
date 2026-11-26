@@ -17,7 +17,7 @@ download automatically (see [Circuit artifacts](#circuit-artifacts)).
 4. [Circuit artifacts](#circuit-artifacts)
 5. [Onboard the wallets](#onboard-the-wallets)
 6. [Local bootnode](#local-bootnode)
-7. [ASP membership for allowlist pools](#asp-membership-for-allowlist-pools) (EURC pool only — skip for the default XLM pool)
+7. [ASP membership for allowlist pools](#asp-membership-for-allowlist-pools) (allowlist pools only — no testnet pool needs it)
 8. [Environment variables](#environment-variables)
 9. [Run the examples](#run-the-examples)
 10. [Troubleshooting](#troubleshooting)
@@ -203,11 +203,10 @@ http://127.0.0.1:8080`) and when running the examples by setting
 
 ## ASP membership for allowlist pools
 
-> **You can skip this section for the default pool.** The default testnet pool
-> (native XLM) is configured with only a `blocklist` policy flag, so it needs
-> no ASP membership setup. This step applies only to the second testnet pool
-> (EURC), which adds an `allowlist` flag — select it with
-> `SPP_POOL_CONTRACT_ID=CAJJT5YV4BMFTHEOO5FGO2G56TEJKM4G4FW7FS4DYBLLLLHSAYUZWT74`.
+> **You can skip this section on testnet.** Every testnet pool, the default
+> native XLM pool and the EURC pool included, is configured with only a
+> `blocklist` policy flag, so none needs ASP membership setup. This step applies
+> only to a pool deployed with the `allowlist` flag.
 
 Before a wallet can `deposit` or `transfer` through an allowlist pool, the
 pool admin must insert that wallet's ASP membership leaf into the
@@ -402,6 +401,29 @@ Onboard the wallet first (e.g. with the `spp` CLI) and re-run.
 From the repository root, run
 `spp --deployment deployments/testnet onboard --account <alias> --accept`
 for the account you are using.
+
+### No trustline for the pool's token
+
+A pool on a classic asset, such as the testnet EURC pool, takes a deposit from
+the paying account's trustline and pays a withdrawal into the recipient's. An
+account without the trustline gets `TrustlineMissing` on deposit, and a
+recipient without it gets `RecipientTrustlineMissing` on withdrawal, both before
+any proof is built. A trustline that holds less than the deposit and its pool
+fee gets `InsufficientBalance`.
+
+Select the EURC pool and read its asset from the deployment config:
+
+```bash
+export SPP_POOL_CONTRACT_ID=$(jq -r '.pools[] | select(.asset.code == "EURC") | .poolContractId' deployments/testnet/deployments.json)
+jq -r '.pools[] | select(.asset.code == "EURC") | .asset.issuer' deployments/testnet/deployments.json
+```
+
+Add the trustline with the issuer that prints, then get testnet EURC for the
+account from Circle's testnet faucet (<https://faucet.circle.com>):
+
+```bash
+stellar tx new change-trust --source-account <alias> --line EURC:<issuer> --network testnet
+```
 
 ### Missing circuit artifacts
 

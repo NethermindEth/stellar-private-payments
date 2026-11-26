@@ -159,8 +159,13 @@ async fn deposit_insufficient_balance() -> Result<()> {
         ))
         .await;
     assert!(
-        deposit.is_err(),
-        "depositing more than the wallet's classic balance must be rejected"
+        matches!(deposit, Err(Error::InsufficientBalance { .. })),
+        "depositing more than the wallet's classic balance must be refused: {deposit:?}"
+    );
+    assert_eq!(
+        session.transaction_prompts(),
+        0,
+        "a deposit refused before proving must never reach the wallet"
     );
 
     Ok(())

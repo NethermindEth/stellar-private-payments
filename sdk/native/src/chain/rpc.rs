@@ -733,6 +733,20 @@ impl Client {
         code: &str,
         issuer: &str,
     ) -> Result<u128, Error> {
+        Ok(self
+            .get_trustline(address, code, issuer)
+            .await?
+            .unwrap_or(0))
+    }
+
+    /// Trustline balance of `address` in the classic asset `code:issuer`, in
+    /// its smallest unit, or `None` if there is no such trustline.
+    pub async fn get_trustline(
+        &self,
+        address: &str,
+        code: &str,
+        issuer: &str,
+    ) -> Result<Option<u128>, Error> {
         let account_id = AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(
             stellar_strkey::ed25519::PublicKey::from_str(address)?.0,
         )));
@@ -755,12 +769,14 @@ impl Client {
         let response = self.get_ledger_entries(&[key]).await?;
         let entries = response.entries.unwrap_or_default();
         let Some(entry) = entries.first() else {
-            return Ok(0);
+            return Ok(None);
         };
         match LedgerEntryData::from_xdr_base64(&entry.xdr, Limits::none())? {
-            LedgerEntryData::Trustline(entry) => u128::try_from(entry.balance).map_err(|_| {
-                Error::UnexpectedScVal(format!("negative trustline balance: {}", entry.balance))
-            }),
+            LedgerEntryData::Trustline(entry) => {
+                u128::try_from(entry.balance).map(Some).map_err(|_| {
+                    Error::UnexpectedScVal(format!("negative trustline balance: {}", entry.balance))
+                })
+            }
             _ => Err(Error::UnexpectedScVal(
                 "expected trustline ledger entry".into(),
             )),

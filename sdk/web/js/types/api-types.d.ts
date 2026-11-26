@@ -191,7 +191,14 @@ export interface PoolRefusal extends Error {
     | 'NO_COMBINATION'
     | 'NO_SPENDABLE_NOTES'
     | 'NOT_BALANCED'
-    | 'WITHDRAWAL_TO_CONTRACT';
+    | 'WITHDRAWAL_TO_CONTRACT'
+    | 'TRUSTLINE_MISSING'
+    | 'INSUFFICIENT_BALANCE'
+    | 'RECIPIENT_TRUSTLINE_MISSING';
+  /** With `INSUFFICIENT_BALANCE`: what the deposit sends, pool fee included. */
+  needed?: bigint;
+  /** With `INSUFFICIENT_BALANCE`: what the paying account holds of the pool's token. */
+  available?: bigint;
   /** With `DEPOSIT_BELOW_MINIMUM`: the least a deposit leaves in notes after the pool fee. */
   minimum?: bigint;
   /** With `DEPOSIT_ABOVE_MAXIMUM`: the most a deposit sends, pool fee included. */

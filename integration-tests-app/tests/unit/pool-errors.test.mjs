@@ -146,3 +146,22 @@ test('the gap comes from the SDK, not from the form', () => {
 test('a balance refusal without the form has no sentence', () => {
   assert.equal(poolErrorMessage(refusal('NOT_BALANCED', { gap: -1000n }), terms), null);
 });
+
+test('a deposit the account cannot pay says what it holds and what the deposit sends', () => {
+  assert.equal(
+    poolErrorMessage(refusal('INSUFFICIENT_BALANCE', { needed: 11000000n, available: 4000000n }), terms),
+    'The account that pays holds 0.4 XLM, less than the 1.1 XLM this deposit sends, pool fee included.',
+  );
+});
+
+test('a missing trustline names the token and who has to add it', () => {
+  const eurc = { ...terms, label: 'EURC' };
+  assert.equal(
+    poolErrorMessage(refusal('TRUSTLINE_MISSING'), eurc),
+    'The account that pays has no trustline for EURC. Add EURC in your wallet, get some into the account, then deposit again.',
+  );
+  assert.equal(
+    poolErrorMessage(refusal('RECIPIENT_TRUSTLINE_MISSING'), eurc),
+    'The recipient has no trustline for EURC, so it can\'t receive this withdrawal. Ask them to add EURC in their wallet, or choose another recipient.',
+  );
+});
