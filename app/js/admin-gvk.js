@@ -28,8 +28,9 @@ const BATCH_SIZE = 20;
 const poolSelectEl = document.getElementById('gvkPoolSelect');
 const privateKeyEl = document.getElementById('gvkPrivateKey');
 const auditBtnEl = document.getElementById('gvkAuditBtn');
-const prevBtnEl = document.getElementById('gvkPrevBtn');
-const nextBtnEl = document.getElementById('gvkNextBtn');
+const bottomPagerEl = document.getElementById('gvkBottomPager');
+const prevButtons = ['gvkPrevBtn', 'gvkBottomPrevBtn'].map((id) => document.getElementById(id));
+const nextButtons = ['gvkNextBtn', 'gvkBottomNextBtn'].map((id) => document.getElementById(id));
 const viewTxBtnEl = document.getElementById('gvkViewTxBtn');
 const viewNoteBtnEl = document.getElementById('gvkViewNoteBtn');
 const viewGraphBtnEl = document.getElementById('gvkViewGraphBtn');
@@ -674,6 +675,7 @@ function showEmptyResults(message) {
   clearSelection();
   resultsEl.replaceChildren();
   resultsEl.hidden = true;
+  bottomPagerEl.hidden = true;
   emptyEl.hidden = false;
   emptyEl.textContent = message;
 }
@@ -707,6 +709,7 @@ function renderResults() {
 
   emptyEl.hidden = true;
   resultsEl.hidden = false;
+  bottomPagerEl.hidden = state.view !== 'tx' && state.view !== 'note';
   // Measured before clearing resultsEl below: reading layout (clientWidth) once
   // the container is mid-teardown forces a synchronous reflow while the page
   // is transiently shorter, which makes the browser clamp/jump scroll position.
@@ -2261,8 +2264,10 @@ function syncActionButtons() {
   const valid = !!state.audit && appliedFilters?.valid;
   const busy = fetchingPage || auditBtnEl?.ariaBusy === 'true' || !!filterTimer;
   const complete = state.exhausted && !drainPromise;
-  prevBtnEl.disabled = !valid || busy || state.page === 0;
-  nextBtnEl.disabled = !valid || busy || (complete && (state.page + 1) * BATCH_SIZE >= matches().length);
+  const prevDisabled = !valid || busy || state.page === 0;
+  const nextDisabled = !valid || busy || (complete && (state.page + 1) * BATCH_SIZE >= matches().length);
+  for (const button of prevButtons) button.disabled = prevDisabled;
+  for (const button of nextButtons) button.disabled = nextDisabled;
   exportBtnEl.disabled = !valid || busy || !!drainPromise || exportBtnEl.ariaBusy === 'true';
 }
 
@@ -2418,10 +2423,6 @@ function setView(view) {
   renderResults();
 }
 
-/**
- * Shows the matches among the rows loaded so far. A filter can match anywhere in the pool, so it also starts
- * a background scan that renders further matches as it finds them.
- */
 /** Applies the filter inputs from the first page, dropping the cached matches and any pending Next. */
 function resetMatches() {
   clearTimeout(filterTimer);
@@ -2433,6 +2434,10 @@ function resetMatches() {
   settlePageMatch();
 }
 
+/**
+ * Shows the matches among the rows loaded so far. A filter can match anywhere in the pool, so it also starts
+ * a background scan that renders further matches as it finds them.
+ */
 function applyFilters() {
   resetMatches();
   if (appliedFilters.valid && isFiltersActive(appliedFilters)) {
@@ -2642,12 +2647,12 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     }
   });
 
-  prevBtnEl.addEventListener('click', () => {
+  function goToPreviousPage() {
     state.page = Math.max(0, state.page - 1);
     refreshAuditDisplay();
-  });
+  }
 
-  nextBtnEl.addEventListener('click', async () => {
+  async function goToNextPage() {
     const audit = state.audit;
     const revision = filterRevision;
     const nextPage = state.page + 1;
@@ -2671,7 +2676,10 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       fetchingPage = false;
       syncActionButtons();
     }
-  });
+  }
+
+  for (const button of prevButtons) button.addEventListener('click', goToPreviousPage);
+  for (const button of nextButtons) button.addEventListener('click', goToNextPage);
 
   exportBtnEl?.addEventListener('click', async () => {
     if (!state.audit || !appliedFilters.valid) return;

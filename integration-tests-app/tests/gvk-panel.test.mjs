@@ -102,14 +102,21 @@ async function openPanel(t, { mode = 'traceable', count = 43, spendAt = null, bo
 
 test('GVK paging, filter scans and graph selection', async (t) => {
   const { page, errors, status, click, fill } = await openPanel(t);
+  const bottomPager = page.locator('#gvkBottomPager');
+  const bottomPrev = page.locator('#gvkBottomPrevBtn');
+  const bottomNext = page.locator('#gvkBottomNextBtn');
+  assert.equal(await bottomPager.isVisible(), true);
+  assert.equal(await bottomPrev.isDisabled(), true);
   await page.evaluate(() => { window.failAt = 23; });
-  await click('NextBtn');
+  await click('BottomNextBtn');
   await status('Cursor interrupted');
   await click('NextBtn');
   await status('Transactions 21–40');
   assert.equal(await page.locator('#gvkAuditResults article').count(), 20);
   const calls = await page.evaluate(() => window.calls);
-  await click('PrevBtn');
+  await click('BottomPrevBtn');
+  await status('Transactions 1–20');
+  assert.equal(await page.locator('#gvkPrevBtn').isDisabled(), true);
   await click('NextBtn');
   assert.equal(await page.evaluate(() => window.calls), calls);
 
@@ -118,6 +125,7 @@ test('GVK paging, filter scans and graph selection', async (t) => {
     ['ViewPkGraphBtn', 'path[data-gvk-pk-node]'],
   ]) {
     await click(button);
+    assert.equal(await bottomPager.isHidden(), true);
     const sameMark = await page.locator('#gvkAuditResults ' + mark).first().evaluate((node) => {
       node.dispatchEvent(new MouseEvent('click'));
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
@@ -132,13 +140,20 @@ test('GVK paging, filter scans and graph selection', async (t) => {
   await click('NextBtn');
   await status('Transactions 41–43 of 43');
   assert.equal(await page.locator('#gvkNextBtn').isDisabled(), true);
+  await click('ViewNoteBtn');
+  assert.equal(await bottomPager.isVisible(), true);
+  assert.equal(await bottomNext.isDisabled(), true);
+  await click('BottomPrevBtn');
+  await status('Transactions 21–40 of 43');
+  await click('BottomNextBtn');
+  await status('Transactions 41–43 of 43');
 
   await fill('FilterPk', 'missing');
   await click('FiltersClearBtn');
   await status('Transactions 1–20 of 43');
   await fill('FilterPk', 'missing');
   await status('No matching transactions');
-  await click('ViewNoteBtn');
+  assert.equal(await bottomPager.isHidden(), true);
   const download = page.waitForEvent('download');
   await click('ExportBtn');
   const csv = await readFile(await (await download).path(), 'utf8');
@@ -171,6 +186,8 @@ test('GVK filters show matches while the pool scan continues', async (t) => {
 
   // Next waits for a match on the next page, then the scan fills the page in.
   await click('NextBtn');
+  assert.equal(await next.isDisabled(), true);
+  assert.equal(await page.locator('#gvkBottomNextBtn').isDisabled(), true);
   await page.evaluate(() => window.resumeScan());
   await status('Transactions 21–40 of 90 (100 scanned)');
   assert.equal(await articles.count(), 20);
