@@ -1,4 +1,5 @@
 mod account;
+mod classic;
 mod deposit;
 mod disclosure;
 mod domain;

@@ -21,6 +21,11 @@ pub struct PoolOptions {
     pub policy_flags: PolicyFlags,
     pub gvk_mode: GvkMode,
     pub asset: PoolAsset,
+    /// The pool's own fee, smallest deposit and maximum deposit; `None` takes
+    /// the deployment's.
+    pub fee: Option<u128>,
+    pub min_deposit: Option<u128>,
+    pub max_deposit: Option<u128>,
 }
 
 impl PoolOptions {
@@ -28,15 +33,31 @@ impl PoolOptions {
         policy_flags: PolicyFlags::EMPTY,
         gvk_mode: GvkMode::Off,
         asset: PoolAsset::Native,
+        fee: None,
+        min_deposit: None,
+        max_deposit: None,
     };
 
     pub(crate) fn pool_spec(&self, native_token_id: Option<&str>) -> String {
         format!(
-            "{}:{}:{}",
+            "{}:{}:{}{}",
             self.policy_flags_spec(),
             self.gvk_mode_spec(),
+            self.amounts_spec(),
             self.asset_spec(native_token_id)
         )
+    }
+
+    /// The `fee=`, `min=` and `max=` prefixes of the amounts this pool sets.
+    fn amounts_spec(&self) -> String {
+        [
+            ("fee", self.fee),
+            ("min", self.min_deposit),
+            ("max", self.max_deposit),
+        ]
+        .into_iter()
+        .filter_map(|(name, amount)| amount.map(|amount| format!("{name}={amount}:")))
+        .collect()
     }
 
     fn policy_flags_spec(&self) -> String {

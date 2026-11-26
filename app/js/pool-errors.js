@@ -5,10 +5,17 @@ const NOTHING_YET = 'You have nothing to send yet. If you just deposited, try ag
 /**
  * The sentence for a refusal the SDK gave a `code`, or null. `feeIncluded` is
  * for an amount that already holds the fee, as the Advanced form's Public deposit.
- * `NOT_BALANCED` needs the Advanced form's `amounts`.
+ * `NOT_BALANCED` needs the Advanced form's `amounts`. `label` names the pool's
+ * token in the trustline refusals.
  */
-export function poolErrorMessage(error, { fee, format, feeIncluded = false, amounts }) {
+export function poolErrorMessage(error, { fee, format, feeIncluded = false, amounts, label = 'this token' }) {
   switch (error?.code) {
+    case 'TRUSTLINE_MISSING':
+      return `The account that pays has no trustline for ${label}. Add ${label} in your wallet, get some into the account, then deposit again.`;
+    case 'INSUFFICIENT_BALANCE':
+      return `The account that pays holds ${format(error.available)}, less than the ${format(error.needed)} this deposit sends${fee ? ', pool fee included' : ''}.`;
+    case 'RECIPIENT_TRUSTLINE_MISSING':
+      return `The recipient has no trustline for ${label}, so it can't receive this withdrawal. Ask them to add ${label} in their wallet, or choose another recipient.`;
     case 'NOT_BALANCED': {
       if (!amounts) return null;
       const { inputs, deposit, outputs, withdraw } = amounts;

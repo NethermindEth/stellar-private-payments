@@ -1,18 +1,21 @@
 //! Async per-pool private payments API
 
-use std::sync::OnceLock;
+use std::{str::FromStr, sync::OnceLock};
 
 use anyhow::Context;
 
 use crate::{
     planner::{SpendableNote, Transact},
-    types::{EncryptionPublicKey, NoteAmount, NotePublicKey, Sensitive, UserNoteSummary},
+    types::{
+        AssetDescriptor, EncryptionPublicKey, NoteAmount, NotePublicKey, Sensitive, UserNoteSummary,
+    },
 };
 
 use crate::chain::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
     PreparedTransaction,
+    account::native_balance,
     chain::RpcClient,
     core::{PoolCore, pool_transact_input, transact_step_for_plan},
     correlation::correlation_id_or_new,
@@ -189,10 +192,15 @@ impl PrivatePool {
     ///
     /// Returns the errors of [`Self::pool_info`], then
     /// [`Error::DepositsPaused`], [`Error::DepositAboveMaximum`], or
-    /// [`Error::DepositBelowMinimum`] in the pool's order.
+    /// [`Error::DepositBelowMinimum`] in the pool's order, then
+    /// [`Error::TrustlineMissing`] or [`Error::InsufficientBalance`] for an
+    /// account that cannot pay the deposit and its fee.
     pub async fn check_deposit(&self, amount: NoteAmount) -> Result<(), Error> {
-        DepositLimits::from(&self.pool_info().await?)
-            .check_note_amount(amount, &self.config.pool_contract_id)
+        let pool = self.pool_info().await?;
+        DepositLimits::from(&pool).check_note_amount(amount, &self.config.pool_contract_id)?;
+        let sent = transact::deposit_ext_amount(amount, pool.fee)
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("deposit amount out of range")))?;
+        self.check_deposit_funds(sent).await
     }
 
     /// Refuses a transaction that [`Self::transact`] would refuse before
@@ -200,7 +208,7 @@ impl PrivatePool {
     ///
     /// # Errors
     ///
-    /// Returns the deposit-limit, recipient, and balance errors of
+    /// Returns the deposit-limit, recipient, trustline, and balance errors of
     /// [`Self::transact`], an error for a commitment listed more often than the
     /// wallet holds unspent copies of it, and [`Error::MembershipSync`] at once
     /// for an input not yet synced.
@@ -210,6 +218,7 @@ impl PrivatePool {
         if step.ext_amount < ExtAmount::ZERO {
             self.core.check_withdrawal_recipient(&step.ext_recipient)?;
         }
+        self.check_token_settlement(step).await?;
         self.check_balance(step, pool.fee).await
     }
 
@@ -406,6 +415,9 @@ impl PrivatePool {
         amount: NoteAmount,
         recipient: impl Into<String>,
     ) -> Result<PreparedTransactionPlan, Error> {
+        let recipient = recipient.into();
+        // Before the plan, so a withdrawal of several steps is refused whole.
+        self.check_withdrawal_trustline(&recipient).await?;
         self.core
             .prepare_withdraw(wallet, amount, recipient, self.fee().await?)
     }
@@ -494,6 +506,7 @@ impl PrivatePool {
         if step.ext_amount < ExtAmount::ZERO {
             self.core.check_withdrawal_recipient(&step.ext_recipient)?;
         }
+        self.check_token_settlement(&step).await?;
         if plan.raw_transact_step().is_some() {
             self.check_balance(&step, chain.fee).await?;
         }
@@ -528,6 +541,102 @@ impl PrivatePool {
             step.ext_amount,
             fee,
         )
+    }
+
+    /// Refuses a step the pool's token contract would refuse to settle, after
+    /// the proof is built: a deposit its payer cannot fund, or a withdrawal
+    /// its recipient cannot receive.
+    async fn check_token_settlement(&self, step: &Transact) -> Result<(), Error> {
+        if step.ext_amount > ExtAmount::ZERO {
+            self.check_deposit_funds(step.ext_amount).await
+        } else if step.ext_amount < ExtAmount::ZERO {
+            self.check_withdrawal_trustline(&step.ext_recipient).await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Refuses a deposit sending `sent` from an account that cannot pay it.
+    ///
+    /// The signing account pays. Only an account's own holding is read: a
+    /// contract that pays, and a token that is a contract, are left to the
+    /// simulation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::TrustlineMissing`] when the pool's asset is classic and
+    /// the account has no trustline for it, [`Error::InsufficientBalance`] when
+    /// it holds less than `sent`, and [`Error::AccountNotFound`] when it is not
+    /// on the ledger.
+    async fn check_deposit_funds(&self, sent: ExtAmount) -> Result<(), Error> {
+        let payer = self.config.signer_address.as_str();
+        if !is_account_address(payer) {
+            return Ok(());
+        }
+        let pool = self
+            .config
+            .contract_config
+            .pool(&self.config.pool_contract_id)?;
+        let available = match &pool.asset {
+            AssetDescriptor::Native => native_balance(&self.rpc, payer).await?,
+            // The issuer mints what it sends, and holds no trustline.
+            AssetDescriptor::Classic { issuer, .. } if issuer == payer => return Ok(()),
+            AssetDescriptor::Classic { code, issuer } => {
+                match self.rpc.get_trustline(payer, code, issuer).await? {
+                    Some(balance) => balance,
+                    None => {
+                        return Err(Error::TrustlineMissing {
+                            account: payer.to_string(),
+                            code: code.clone(),
+                            issuer: issuer.clone(),
+                        });
+                    }
+                }
+            }
+            AssetDescriptor::Contract { .. } => return Ok(()),
+        };
+        let available = NoteAmount::from(available);
+        let needed = NoteAmount::try_from(sent)?;
+        if available < needed {
+            return Err(Error::InsufficientBalance { needed, available });
+        }
+        Ok(())
+    }
+
+    /// Refuses a withdrawal of a classic asset to an account that cannot
+    /// receive it.
+    ///
+    /// A contract holds its balance in the asset's contract and the issuer
+    /// burns what it receives, so neither needs a trustline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::RecipientTrustlineMissing`] when `recipient` is an
+    /// account with no trustline for the pool's classic asset.
+    async fn check_withdrawal_trustline(&self, recipient: &str) -> Result<(), Error> {
+        let pool = self
+            .config
+            .contract_config
+            .pool(&self.config.pool_contract_id)?;
+        let AssetDescriptor::Classic { code, issuer } = &pool.asset else {
+            return Ok(());
+        };
+        if issuer == recipient || !is_account_address(recipient) {
+            return Ok(());
+        }
+        if self
+            .rpc
+            .get_trustline(recipient, code, issuer)
+            .await?
+            .is_none()
+        {
+            return Err(Error::RecipientTrustlineMissing {
+                recipient: recipient.to_string(),
+                code: code.clone(),
+                issuer: issuer.clone(),
+            });
+        }
+        Ok(())
     }
 
     async fn fetch_transact_chain_context(&self) -> Result<TransactChainContext, Error> {
@@ -616,4 +725,10 @@ impl PrivatePool {
         self.core
             .deposit_transact_step(note_pub, enc_pub, amount, fee)
     }
+}
+
+/// Whether `address` is an account (`G...`), which holds a classic asset in a
+/// trustline, and not a contract or a muxed address.
+fn is_account_address(address: &str) -> bool {
+    stellar_strkey::ed25519::PublicKey::from_str(address).is_ok()
 }

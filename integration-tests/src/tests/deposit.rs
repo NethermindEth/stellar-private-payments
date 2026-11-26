@@ -8,8 +8,8 @@ use stellar_private_payments::{
 };
 
 use super::support::{
-    FEE_STROOPS, MIN_DEPOSIT_STROOPS, deploy_default, deploy_scoped, deploy_with_max_deposit,
-    session,
+    FEE_STROOPS, MIN_DEPOSIT_STROOPS, deploy, deploy_default, deploy_scoped,
+    deploy_with_max_deposit, session,
 };
 use crate::{network::LocalNetwork, pool::PoolOptions};
 
@@ -111,6 +111,42 @@ async fn deposit_at_max_deposit() -> Result<()> {
     Ok(())
 }
 
+/// A pool spec's `fee=`, `min=` and `max=` give that pool its own amounts, and
+/// a pool without them keeps the deployment's.
+#[tokio::test]
+async fn pool_amounts_override_the_deployment_defaults() -> Result<()> {
+    const OWN_FEE: u128 = 5_000;
+    const OWN_MIN_DEPOSIT: u128 = 20_000;
+    const OWN_MAX_DEPOSIT: u128 = 3_000_000;
+    let own = PoolOptions {
+        fee: Some(OWN_FEE),
+        min_deposit: Some(OWN_MIN_DEPOSIT),
+        max_deposit: Some(OWN_MAX_DEPOSIT),
+        ..PoolOptions::NONE
+    };
+    let session = session(deploy(&[PoolOptions::NONE, own]).await?).await?;
+
+    let default = session.pool_at(0)?.pool_info().await?;
+    assert_eq!(default.fee, NoteAmount::from(FEE_STROOPS));
+    assert_eq!(
+        default.minimum_deposit_amount,
+        NoteAmount::from(MIN_DEPOSIT_STROOPS)
+    );
+
+    let own = session.pool_at(1)?.pool_info().await?;
+    assert_eq!(own.fee, NoteAmount::from(OWN_FEE));
+    assert_eq!(
+        own.minimum_deposit_amount,
+        NoteAmount::from(OWN_MIN_DEPOSIT)
+    );
+    assert_eq!(
+        own.maximum_deposit_amount,
+        ExtAmount::try_from(NoteAmount::from(OWN_MAX_DEPOSIT))?
+    );
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn deposit_insufficient_balance() -> Result<()> {
     let session = session(deploy_default().await?).await?;
@@ -123,8 +159,13 @@ async fn deposit_insufficient_balance() -> Result<()> {
         ))
         .await;
     assert!(
-        deposit.is_err(),
-        "depositing more than the wallet's classic balance must be rejected"
+        matches!(deposit, Err(Error::InsufficientBalance { .. })),
+        "depositing more than the wallet's classic balance must be refused: {deposit:?}"
+    );
+    assert_eq!(
+        session.transaction_prompts(),
+        0,
+        "a deposit refused before proving must never reach the wallet"
     );
 
     Ok(())

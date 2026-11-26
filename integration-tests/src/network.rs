@@ -9,12 +9,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use stellar_private_payments::{
     chain::RpcClient,
-    types::{ContractConfig, Field, GvkAuthoritySetting, GvkMode, NotePublicKey},
+    types::{AssetDescriptor, ContractConfig, Field, GvkAuthoritySetting, GvkMode, NotePublicKey},
 };
 use stellar_strkey::ed25519;
 use tokio::process::Command;
 
-use crate::{keypair::TestKeypair, pool::PoolOptions};
+use crate::{
+    keypair::TestKeypair,
+    pool::{PoolAsset, PoolOptions},
+};
 
 /// Network passphrase `stellar/quickstart --local` always uses.
 pub const NETWORK_PASSPHRASE: &str = "Standalone Network ; February 2017";
@@ -26,6 +29,41 @@ const RPC_PORT: u16 = 8000;
 const STELLAR_CLI_NETWORK: &str = "local";
 
 const KDF_DOMAIN: &str = "tests";
+
+/// Code of the classic asset the suite issues for its classic-asset pool.
+pub const CLASSIC_ASSET_CODE: &str = "EURC";
+
+/// Seed of the account that issues [`CLASSIC_ASSET_CODE`]. Fixed, so every
+/// test process names the same asset and shares one pool deployment.
+const CLASSIC_ISSUER_SEED: [u8; 32] = [0xE0; 32];
+
+/// The suite's classic asset, with its Stellar asset contract deployed.
+#[derive(Clone)]
+pub struct ClassicAsset {
+    issuer: TestKeypair,
+    token_contract_id: String,
+}
+
+impl ClassicAsset {
+    pub fn issuer(&self) -> String {
+        self.issuer.address()
+    }
+
+    pub fn pool_asset(&self) -> PoolAsset {
+        PoolAsset::Classic {
+            code: CLASSIC_ASSET_CODE.to_string(),
+            issuer: self.issuer(),
+            token_contract_id: self.token_contract_id.clone(),
+        }
+    }
+
+    pub fn descriptor(&self) -> AssetDescriptor {
+        AssetDescriptor::Classic {
+            code: CLASSIC_ASSET_CODE.to_string(),
+            issuer: self.issuer(),
+        }
+    }
+}
 
 /// A `stellar/quickstart` local network, already running externally.
 pub struct LocalNetwork {
@@ -249,22 +287,7 @@ impl LocalNetwork {
     }
 
     pub async fn establish_trustline(&self, holder_secret: &str, code: &str) -> Result<()> {
-        let output = Command::new("stellar")
-            .args(["tx", "new", "change-trust"])
-            .args(["--source-account", holder_secret])
-            .args(["--line", &format!("{code}:{}", self.admin.address())])
-            .args(["--network", STELLAR_CLI_NETWORK])
-            .output()
-            .await
-            .context("run stellar tx new change-trust")?;
-        if !output.status.success() {
-            bail!(
-                "stellar tx new change-trust failed ({}):\n{}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        Ok(())
+        change_trust(holder_secret, code, &self.admin.address()).await
     }
 
     pub async fn send_classic_payment(
@@ -273,44 +296,57 @@ impl LocalNetwork {
         code: &str,
         amount: u128,
     ) -> Result<()> {
-        let output = Command::new("stellar")
-            .args(["tx", "new", "payment"])
-            .args(["--source-account", &self.admin.secret()])
-            .args(["--destination", dest_addr])
-            .args(["--asset", &format!("{code}:{}", self.admin.address())])
-            .args(["--amount", &amount.to_string()])
-            .args(["--network", STELLAR_CLI_NETWORK])
-            .output()
-            .await
-            .context("run stellar tx new payment")?;
-        if !output.status.success() {
-            bail!(
-                "stellar tx new payment failed ({}):\n{}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        Ok(())
+        classic_payment(&self.admin, dest_addr, code, amount).await
     }
 
     pub async fn deploy_asset_sac(&self, code: &str) -> Result<String> {
-        let asset = format!("{code}:{}", self.admin.address());
-        let output = Command::new("stellar")
-            .args(["contract", "asset", "deploy", "--asset", &asset])
-            .args(["--source-account", &self.admin.secret()])
-            .args(["--network", STELLAR_CLI_NETWORK])
-            .output()
-            .await
-            .context("run stellar contract asset deploy")?;
-        if !output.status.success() {
-            bail!(
-                "stellar contract asset deploy --asset {asset} failed ({}):\n{}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        extract_contract_id(&String::from_utf8_lossy(&output.stdout))
-            .context("parse contract id from stellar contract asset deploy output")
+        deploy_asset_contract(&self.admin, code).await
+    }
+
+    /// The suite's classic asset, issuing it and deploying its asset contract
+    /// on first use.
+    pub async fn classic_asset(&self) -> Result<ClassicAsset> {
+        let issuer = TestKeypair::from_seed(CLASSIC_ISSUER_SEED);
+        let key = format!("classic-asset-{CLASSIC_ASSET_CODE}");
+        let _guard = acquire_deploy_lock(&key).await?;
+
+        let token_contract_id = match std::fs::read_to_string(deploy_cache_path(&key)) {
+            Ok(id) => id,
+            Err(_) => {
+                self.fund(&issuer.address()).await?;
+                let id = deploy_asset_contract(&issuer, CLASSIC_ASSET_CODE).await?;
+                std::fs::write(deploy_cache_path(&key), &id)
+                    .context("write classic asset deploy marker")?;
+                id
+            }
+        };
+        Ok(ClassicAsset {
+            issuer,
+            token_contract_id,
+        })
+    }
+
+    /// Opens a trustline for `asset` on the holder's account.
+    pub async fn trust_classic_asset(
+        &self,
+        holder_secret: &str,
+        asset: &ClassicAsset,
+    ) -> Result<()> {
+        change_trust(holder_secret, CLASSIC_ASSET_CODE, &asset.issuer()).await
+    }
+
+    /// Pays `amount` of `asset` from its issuer to `dest_addr`, which must
+    /// hold a trustline for it.
+    pub async fn pay_classic_asset(
+        &self,
+        asset: &ClassicAsset,
+        dest_addr: &str,
+        amount: u128,
+    ) -> Result<()> {
+        // Every test pays from the one issuer, whose sequence number two
+        // payments at once would race for.
+        let _guard = acquire_deploy_lock("classic-asset-issuer").await?;
+        classic_payment(&asset.issuer, dest_addr, CLASSIC_ASSET_CODE, amount).await
     }
 
     /// Deploys an ASP membership contract that the deployer administers, and
@@ -497,6 +533,75 @@ impl LocalNetwork {
         }
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
+}
+
+/// Opens a trustline for `code:issuer` on the holder's account.
+async fn change_trust(holder_secret: &str, code: &str, issuer: &str) -> Result<()> {
+    let output = Command::new("stellar")
+        .args(["tx", "new", "change-trust"])
+        .args(["--source-account", holder_secret])
+        .args(["--line", &format!("{code}:{issuer}")])
+        .args(["--network", STELLAR_CLI_NETWORK])
+        .output()
+        .await
+        .context("run stellar tx new change-trust")?;
+    if !output.status.success() {
+        bail!(
+            "stellar tx new change-trust failed ({}):\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}
+
+/// Pays `amount` of the issuer's asset `code` to `dest_addr`.
+async fn classic_payment(
+    issuer: &TestKeypair,
+    dest_addr: &str,
+    code: &str,
+    amount: u128,
+) -> Result<()> {
+    let output = Command::new("stellar")
+        .args(["tx", "new", "payment"])
+        .args(["--source-account", &issuer.secret()])
+        .args(["--destination", dest_addr])
+        .args(["--asset", &format!("{code}:{}", issuer.address())])
+        .args(["--amount", &amount.to_string()])
+        .args(["--network", STELLAR_CLI_NETWORK])
+        .output()
+        .await
+        .context("run stellar tx new payment")?;
+    if !output.status.success() {
+        bail!(
+            "stellar tx new payment failed ({}):\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}
+
+/// Deploys the Stellar asset contract of the issuer's asset `code`, and
+/// returns the contract id.
+async fn deploy_asset_contract(issuer: &TestKeypair, code: &str) -> Result<String> {
+    let asset = format!("{code}:{}", issuer.address());
+    let output = Command::new("stellar")
+        .args(["contract", "asset", "deploy", "--asset", &asset])
+        .args(["--source-account", &issuer.secret()])
+        .args(["--network", STELLAR_CLI_NETWORK])
+        .output()
+        .await
+        .context("run stellar contract asset deploy")?;
+    if !output.status.success() {
+        bail!(
+            "stellar contract asset deploy --asset {asset} failed ({}):\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    extract_contract_id(&String::from_utf8_lossy(&output.stdout))
+        .context("parse contract id from stellar contract asset deploy output")
 }
 
 /// Deploys `target/stellar/<name>.wasm` with the deployer as its admin and

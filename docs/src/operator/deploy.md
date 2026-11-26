@@ -85,8 +85,8 @@ Replace the following:
   smallest unit. `10000000` is 1 XLM.
 - `KDF_DOMAIN`: a string naming your deployment, which users see in the message they sign.
 
-For the fee and the smallest deposit, more pools, GVK pools, classic assets, and a fork's own
-releases, see [Deploying pools](../deploy.md).
+For the fee and the smallest deposit, a pool's own amounts, more pools, GVK pools, classic assets,
+and a fork's own releases, see [Deploying pools](../deploy.md).
 
 `deploy.sh` first runs `gh attestation verify` to check that the repository's
 `contracts-release.yml` workflow built and signed the release, and stops when the check fails. It
