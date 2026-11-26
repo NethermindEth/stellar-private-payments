@@ -63,6 +63,13 @@ test('a contract code past the simulation wording gets its own message', () => {
   assert.equal(other.details, raw.replace('#24', '#6'));
 });
 
+test('a proof with the wrong nullifier count says how many notes a transaction spends', () => {
+  const raw = 'transaction simulation failed: HostError: Error(Contract, #25)';
+  const described = describeError(new Error(raw), 'Transfer');
+  assert.equal(described.message, 'Every pool transaction spends exactly two notes, and this proof does not.');
+  assert.equal(described.details, raw);
+});
+
 test('a spent note is not called a double-spend attempt', () => {
   const message = getFriendlyErrorMessage(new Error('HostError: Error(Contract, #9)'), 'Transfer');
   assert.match(message, /already been spent/);

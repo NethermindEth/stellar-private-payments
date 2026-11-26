@@ -16,7 +16,8 @@
 use crate::gvk::{self, BabyJubJubPoint, GvkCiphertext};
 use contract_types::Groth16Proof;
 use pool_core::{
-    ASPMembershipClient, ASPNonMembershipClient, CircomGroth16VerifierClient, amounts,
+    ASPMembershipClient, ASPNonMembershipClient, CircomGroth16VerifierClient, N_INPUT_NULLIFIERS,
+    amounts,
     clients::runs_wasm,
     events::{
         AspMembershipUpdated, AspNonMembershipUpdated, DepositPauseChanged, DepositPauseRepeated,
@@ -94,6 +95,8 @@ pub enum Error {
     InvalidClaimAmount = 23,
     /// A withdrawal or a fee claim pays the pool or its token contract
     InvalidPayee = 24,
+    /// The proof's nullifier count differs from the circuit's input count
+    WrongNullifierCount = 25,
 }
 
 impl From<MerkleError> for Error {
@@ -1038,7 +1041,13 @@ impl PoolGvkContract {
         if !MerkleTreeWithHistory::is_known_root(env, &proof.root)? {
             return Err(Error::UnknownRoot);
         }
-        // 3. Nullifier checks (prevent double-spending)
+        // 3. Nullifier count and spent checks (prevent double-spending). The
+        // count comes first. A proof with the wrong count would fail at the
+        // verifier anyway, but here it fails before the spent-nullifier reads
+        // and with its own code instead of `InvalidProof`.
+        if proof.input_nullifiers.len() != N_INPUT_NULLIFIERS {
+            return Err(Error::WrongNullifierCount);
+        }
         for n in proof.input_nullifiers.iter() {
             if Self::is_spent(env, &n)? {
                 return Err(Error::AlreadySpentNullifier);
