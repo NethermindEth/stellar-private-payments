@@ -109,6 +109,43 @@ pub enum Error {
     )]
     NotBalanced { gap: ExtAmount },
 
+    /// The account that pays a deposit has no trustline for the pool's
+    /// classic asset, so the asset's contract cannot take the deposit from
+    /// it. Refused before proving.
+    #[error(
+        "account {} has no trustline for {code}:{issuer}; add the trustline and fund it, then deposit again",
+        Sensitive(account)
+    )]
+    TrustlineMissing {
+        account: String,
+        code: String,
+        issuer: String,
+    },
+
+    /// The account that pays a deposit holds less of the pool's token than the
+    /// deposit sends. `needed` counts the pool fee. Refused before proving.
+    // Names no amount: the fields carry them for a client to show.
+    #[error(
+        "the paying account holds less of the pool's token than the deposit sends, pool fee included"
+    )]
+    InsufficientBalance {
+        needed: NoteAmount,
+        available: NoteAmount,
+    },
+
+    /// A withdrawal paid to an account with no trustline for the pool's
+    /// classic asset, which the asset's contract cannot pay. Refused before
+    /// proving.
+    #[error(
+        "withdrawal recipient {} has no trustline for {code}:{issuer}, so it cannot receive the withdrawal; withdraw to an account that holds one",
+        Sensitive(recipient)
+    )]
+    RecipientTrustlineMissing {
+        recipient: String,
+        code: String,
+        issuer: String,
+    },
+
     /// A withdrawal paid to a contract of this deployment.
     #[error(
         "cannot withdraw to a contract of this deployment, such as a pool or its token contract, because nobody could move the tokens out again; withdraw to an address outside this deployment"

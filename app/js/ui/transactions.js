@@ -21,6 +21,7 @@ import { parseAmountInput } from '../amount-input.js';
 import { poolErrorMessage } from '../pool-errors.js';
 import { disclosedCopy } from '../disclosure-notes.js';
 import { confirmAction } from './confirm.js';
+import { showTrustlineHelp } from './trustline-help.js';
 import { onEnter } from './keys.js';
 import { SigningAccount } from './signing-account.js';
 import { RecipientAccount } from './recipient-account.js';
@@ -42,6 +43,16 @@ function parseAmount(value, decimals) {
 function showErrorToast(error, label, origin, refusal = null) {
     const { message, details } = refusal ? { message: refusal, details: '' } : describeError(error, label);
     Toast.show(message, 'error', 7000, { origin, details });
+}
+
+// A deposit refused for want of a trustline opens the wallet instructions,
+// which hold more than a toast can; any other failure gets the toast.
+function showDepositFailure(error, pool, label, origin, refusal) {
+    if (error?.code === 'TRUSTLINE_MISSING' && pool?.tokenContractId) {
+        showTrustlineHelp({ label: Utils.poolLabel(pool), tokenContractId: pool.tokenContractId });
+        return;
+    }
+    showErrorToast(error, label, origin, refusal);
 }
 
 async function amountContext() {
@@ -129,7 +140,8 @@ function withdrawalRecipientWarning(owner) {
 // What poolErrorMessage needs to word a refusal in the pool's token.
 async function refusalTerms(pool, decimals) {
     const fee = await (await ensureAppPool()).fee();
-    return { fee, format: (amount) => Utils.formatTokenAmount(amount, Utils.poolLabel(pool), decimals) };
+    const label = Utils.poolLabel(pool);
+    return { fee, label, format: (amount) => Utils.formatTokenAmount(amount, label, decimals) };
 }
 
 // The refusals a spend's notes give.
@@ -459,10 +471,13 @@ export const Transactions = {
 
         async function runDeposit(button) {
             let terms = null;
+            let pool = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
-                const { pool, decimals } = await amountContext();
+                const context = await amountContext();
+                pool = context.pool;
+                const { decimals } = context;
                 setLoading(button, true, 'Reviewing transaction…');
                 const amount = parseAmount(depositAmountInput?.value, decimals);
                 if (!amount.ok || amount.value <= 0n) throw new UserFacingError(amount.error || 'Enter a deposit amount');
@@ -485,7 +500,7 @@ export const Transactions = {
                 SigningAccount.keep(signer);
                 await submitDeposit(button, amount.value, pool);
             } catch (error) {
-                showErrorToast(error, 'Deposit', 'deposit', terms && poolErrorMessage(error, terms));
+                showDepositFailure(error, pool, 'Deposit', 'deposit', terms && poolErrorMessage(error, terms));
             } finally {
                 setLoading(button, false);
                 // Keeps the button disabled if the pool was paused mid-deposit.
@@ -672,10 +687,13 @@ export const Transactions = {
             const button = event.currentTarget;
             let terms = null;
             let sums = null;
+            let pool = null;
             try {
                 requireWallet();
                 setLoading(button, true, 'Checking token precision…');
-                const { pool, decimals } = await amountContext();
+                const context = await amountContext();
+                pool = context.pool;
+                const { decimals } = context;
                 setLoading(button, true, 'Reviewing transaction…');
                 const deposit = parseAmount(
                     document.getElementById('advanced-public-deposit')?.value,
@@ -775,7 +793,7 @@ export const Transactions = {
                     updateSignerVisibility();
                 }
             } catch (error) {
-                showErrorToast(error, 'Advanced transaction', 'advanced',
+                showDepositFailure(error, pool, 'Advanced transaction', 'advanced',
                     terms && poolErrorMessage(error, { ...terms, feeIncluded: true, amounts: sums }));
             } finally {
                 setLoading(button, false);
