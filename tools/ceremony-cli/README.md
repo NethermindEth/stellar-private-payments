@@ -49,6 +49,8 @@ Other powers are available at `https://storage.googleapis.com/zkevm/ptau/powersO
 
 Alternative source: [PSE Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau) (80 contributions).
 
+Every command checks the ptau's blake2b-512 hash against the Hermez hashes published in the snarkjs README, and refuses to run with any other file. `zkey verify` only proves a zkey is consistent with the ptau it is given, so an unpinned ptau could come from a setup whose secrets are known. Pass `--allow-unpinned-ptau` to skip the check, for a test ceremony or another Phase-1 source you verified yourself.
+
 ---
 
 ## Coordinator runbook
@@ -76,6 +78,8 @@ ceremony-cli init \
 
 The CLI auto-discovers the compiled `.r1cs` from the build output. You can override with `--circuit <path>` if needed.
 
+Every command checks the `.r1cs` sha256 against the hash recorded for its file stem in `deployments/testnet/circuits.json`, and refuses to run on a mismatch. Pass `--circuits-lock <path>` to use another lock, for example when running outside the repository.
+
 This executes:
 
 - `snarkjs groth16 setup ...`
@@ -92,6 +96,7 @@ Each contributor returns a new `.zkey` to pass to the next contributor.
 ```bash
 ceremony-cli finalize \
   --zkey circuit_final_contrib.zkey \
+  --ptau powersOfTau28_hez_final_16.ptau \
   --beacon-hash $BEACON_HASH \
   --beacon-power 10 \
   --out-dir ./artifacts \
@@ -101,6 +106,7 @@ ceremony-cli finalize \
 This executes:
 
 - `snarkjs zkey beacon ...`
+- `snarkjs zkey verify ...` (verifies the final zkey)
 - `snarkjs zkey export verificationkey ...`
 
 Outputs:
@@ -117,6 +123,7 @@ If you want the web prover and deployment files to use the final ceremony key ma
 ```bash
 ceremony-cli export-deployment \
   --zkey ./artifacts/circuit_final.zkey \
+  --ptau powersOfTau28_hez_final_16.ptau \
   --out-dir ./deployments/testnet/circuit_keys \
   --basename policy_tx_2_2_AB \
   --force
@@ -135,7 +142,15 @@ Why this step exists:
 - the app prover also needs `policy_tx_2_2_AB_proving_key.bin`, which is an arkworks-serialized `ProvingKey<Bn254>`, not a `snarkjs` `.zkey`
 - `vk_soroban.bin` and `vk_const.rs` are alternate verifier encodings used by this repo
 
-Internally, the helper exports the `.zkey` to JSON with `snarkjs`, reconstructs the arkworks proving key, writes `proving_key.bin`, and emits the verifier artifacts in the same formats as `tools/circuit-compiler`.
+The helper first parses the `.zkey` directly, so a malformed key fails before
+the slow verify. Parsing rejects verification keys with identity points and
+keys whose delta equals gamma, which is what `init` produces before any
+contribution and would let anyone forge proofs. It then runs `snarkjs zkey verify` against the circuit and ptau and
+refuses to export a zkey that fails it. Only then does it write
+`proving_key.bin` and emit the verifier artifacts in the same formats as
+`tools/circuit-compiler`. As with the other commands, `--circuit` defaults to
+the compiled `policy_tx_2_2_AB.r1cs`, pass it explicitly when exporting keys for
+another circuit.
 
 ---
 
