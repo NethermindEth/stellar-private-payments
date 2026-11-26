@@ -186,14 +186,9 @@
                         <h2 id="global-view-heading" class="section-title mt-2">Global View</h2>
                         <p class="mt-2 text-sm text-slate-400">Decrypt and verify pool transacts with the admin authority key. No wallet required.</p>
                     </div>
-                    <div class="flex flex-wrap gap-2">
-                        <button type="button" id="gvkAuditBtn" class="btn-primary px-4 py-2">
-                            Sync &amp; Audit
-                        </button>
-                        <button type="button" id="gvkLoadMoreBtn" class="btn-secondary px-4 py-2 enabled:border-cyan-300/50 enabled:bg-cyan-400/10 enabled:text-cyan-100 aria-busy:border-cyan-300/50 aria-busy:bg-cyan-400/10 aria-busy:text-cyan-100" disabled>
-                            Load more
-                        </button>
-                    </div>
+                    <button type="button" id="gvkAuditBtn" class="btn-primary px-4 py-2">
+                        Sync &amp; Audit
+                    </button>
                 </div>
 
                 <div class="grid gap-4 md:grid-cols-2">
@@ -270,7 +265,13 @@
                     </div>
                 </div>
 
-                <div id="gvkAuditStatus" class="rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300 data-[tone=ok]:border-emerald-500/20 data-[tone=ok]:bg-emerald-500/10 data-[tone=ok]:text-emerald-200 data-[tone=fail]:border-rose-500/20 data-[tone=fail]:bg-rose-500/10 data-[tone=fail]:text-rose-200" hidden></div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <div id="gvkAuditStatus" role="status" class="flex-1 rounded-xl border border-white/10 bg-ink-900/70 px-4 py-3 text-sm text-slate-300 data-[tone=ok]:border-emerald-500/20 data-[tone=ok]:bg-emerald-500/10 data-[tone=ok]:text-emerald-200 data-[tone=fail]:border-rose-500/20 data-[tone=fail]:bg-rose-500/10 data-[tone=fail]:text-rose-200" hidden></div>
+                    <nav class="ml-auto flex gap-2" aria-label="Audit result pages">
+                        <button type="button" id="gvkPrevBtn" class="btn-secondary px-4 py-2" aria-controls="gvkAuditResults" disabled>Previous</button>
+                        <button type="button" id="gvkNextBtn" class="btn-secondary px-4 py-2" aria-controls="gvkAuditResults" disabled>Next</button>
+                    </nav>
+                </div>
 
                 <div id="gvkOwnersNotice" class="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100" role="status" hidden>
                     <div class="flex flex-wrap items-center justify-between gap-3">
@@ -286,6 +287,12 @@
                 </div>
 
                 <div id="gvkAuditResults" class="space-y-3" hidden></div>
+                <nav id="gvkBottomPager" aria-label="Audit result pages at bottom" hidden>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" id="gvkBottomPrevBtn" class="btn-secondary px-4 py-2" aria-controls="gvkAuditResults" disabled>Previous</button>
+                        <button type="button" id="gvkBottomNextBtn" class="btn-secondary px-4 py-2" aria-controls="gvkAuditResults" disabled>Next</button>
+                    </div>
+                </nav>
             </section>
 
             <!-- 5. Pools Tab -->

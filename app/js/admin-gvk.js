@@ -14,7 +14,7 @@ import { parseAmountRange } from './amount-filter.js';
 import { chargeSpend, classifyTx, emptyPkNode, withdrawalsByPk } from './gvk-classify.js';
 import { queueCursorOp, releaseCursor } from './gvk-cursor.js';
 import { client, getCurrentRpcUrl, isStorageUnlocked, parseTokenAmount, readTokenDecimals, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';
-import { amountByPk, collectNotes, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteLinks, noteRowId, parseFieldAmount, unspentByPk } from './gvk-notes.js';
+import { amountByPk, createNoteIndex, normalizedInputs, normalizedOutputs, normalizeFieldKey, noteRowId, parseFieldAmount } from './gvk-notes.js';
 import {
   applyOwnerLookup, createOwnerBook, createOwnersRetry, nextOwnersRetry, ownerAddresses as registeredAddresses,
   ownerCsvFields, ownerStatus, ownersRetryState, pendingPks,
@@ -28,7 +28,9 @@ const BATCH_SIZE = 20;
 const poolSelectEl = document.getElementById('gvkPoolSelect');
 const privateKeyEl = document.getElementById('gvkPrivateKey');
 const auditBtnEl = document.getElementById('gvkAuditBtn');
-const loadMoreBtnEl = document.getElementById('gvkLoadMoreBtn');
+const bottomPagerEl = document.getElementById('gvkBottomPager');
+const prevButtons = ['gvkPrevBtn', 'gvkBottomPrevBtn'].map((id) => document.getElementById(id));
+const nextButtons = ['gvkNextBtn', 'gvkBottomNextBtn'].map((id) => document.getElementById(id));
 const viewTxBtnEl = document.getElementById('gvkViewTxBtn');
 const viewNoteBtnEl = document.getElementById('gvkViewNoteBtn');
 const viewGraphBtnEl = document.getElementById('gvkViewGraphBtn');
@@ -60,8 +62,8 @@ const state = {
   poolFee: 0n,
   txCounter: 0,
   exhausted: false,
-  noteLinks: new Map(),
-  filteredVisibleCount: BATCH_SIZE,
+  notes: createNoteIndex(),
+  page: 0,
   view: 'tx',
   selectedNoteId: null,
   graphNotes: null,
@@ -69,6 +71,7 @@ const state = {
   selectedFlow: null,
   selectedDot: null,
   owners: createOwnerBook(),
+  pendingOwnerKeys: new Set(),
   ownersRetry: createOwnersRetry(),
   ownersRetryTimer: null,
   pkGraphNodes: null,
@@ -149,7 +152,7 @@ function formatUtcDatetimeLocal(unixTime) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
 }
 
-async function updateTimeFilterLedgers() {
+async function updateTimeFilterLedgers(revision) {
   const fromUnix = parseUtcDatetimeLocal(filterTimeFromEl?.value);
   const toUnix = parseUtcDatetimeLocal(filterTimeToEl?.value);
 
@@ -161,6 +164,7 @@ async function updateTimeFilterLedgers() {
 
   try {
     const bounds = await fetchLedgerTimeBounds();
+    if (revision !== timeRevision) return;
     const from = fromUnix != null ? ledgerForTime(bounds, fromUnix) : null;
     const to = toUnix != null ? ledgerForTime(bounds, toUnix) : null;
     state.timeFilterLedgers = { from, to };
@@ -169,6 +173,7 @@ async function updateTimeFilterLedgers() {
         `≈ ledger ${from ?? bounds.oldest.ledger}–${to ?? bounds.latest.ledger} (~${secondsPerLedger(bounds).toFixed(2)}s/ledger)`;
     }
   } catch (err) {
+    if (revision !== timeRevision) return;
     state.timeFilterLedgers = { from: null, to: null };
     if (filterTimeHintEl) filterTimeHintEl.textContent = friendlyErrorMessage(err?.message || String(err));
   }
@@ -396,19 +401,9 @@ function restoreBaseHighlight() {
 
 function noteHighlightFor(noteId) {
   const cells = queryNoteCells(noteId);
-  const linkedId = state.noteLinks.get(noteId);
+  const linkedId = state.notes.links.get(noteId);
   if (linkedId) cells.push(...queryNoteCells(linkedId));
   return cells;
-}
-
-function linkNotes(a, b) {
-  state.noteLinks.set(a, b);
-  state.noteLinks.set(b, a);
-}
-
-function rebuildNoteLinks() {
-  state.noteLinks = new Map();
-  for (const [a, b] of noteLinks(state.rows)) linkNotes(a, b);
 }
 
 function bindResultHighlights() {
@@ -603,55 +598,122 @@ function rowMatchesFilters(row, filters) {
   return txNotes(tx).some((note) => noteMatchesAmountAndPk(note, filters));
 }
 
-function computeFilteredRows(filters) {
-  return state.rows.filter((row) => rowMatchesFilters(row, filters));
+let appliedFilters;
+// Rows matching `appliedFilters`, the rows tested so far, and the owner keys still pending when a PK filter
+// tested their rows: settling one of those re-tests every row.
+let matchCache = null;
+// Rows below this index had their owner keys looked up, whatever the answer.
+let ownersQueriedThrough = 0;
+let filterTimer;
+let filterRevision = 0;
+let timeRevision = 0;
+let refreshSelection;
+let fetchingPage = false;
+let renderedPage = null;
+let pendingPageMatch = null;
+
+/** The distinct normalized PKs of `tx` whose registry owners were never looked up. */
+function unownedPks(tx) {
+  return pendingPks(state.owners, txNotes(tx).map((note) => note.note.pk));
 }
 
-/** The tx rows any view/export should use: filtered + paginated, same as the tables. */
-function computeVisibleRows(filters) {
-  if (!filters.valid) return [];
-  const filteredRows = computeFilteredRows(filters);
-  return isFiltersActive(filters) ? filteredRows.slice(0, state.filteredVisibleCount) : state.rows;
+/**
+ * The rows matching the applied filters, extended as rows are appended. A PK filter also matches registered
+ * addresses, so it stops at the first row whose owners were never looked up, unless lookups are on hold.
+ */
+function matches() {
+  if (!isFiltersActive(appliedFilters)) return state.rows;
+  matchCache ??= { rows: [], through: 0, pendingKeys: new Set() };
+  const holdForOwners = ownersRetryState(state.ownersRetry) === 'ok';
+  for (; matchCache.through < state.rows.length; matchCache.through += 1) {
+    const row = state.rows[matchCache.through];
+    if (appliedFilters.pk && state.pendingOwnerKeys.size) {
+      const pending = unownedPks(row.tx);
+      if (pending.length && holdForOwners && matchCache.through >= ownersQueriedThrough) break;
+      for (const key of pending) matchCache.pendingKeys.add(key);
+    }
+    if (rowMatchesFilters(row, appliedFilters)) matchCache.rows.push(row);
+  }
+  return matchCache.rows;
+}
+
+/**
+ * Resolves once `count` rows match, or when the scan ends, the filters change or the audit resets.
+ * Rejects when the scan fails.
+ */
+function waitForMatches(count) {
+  if (matches().length >= count) return Promise.resolve();
+  return new Promise((resolve, reject) => { pendingPageMatch = { count, resolve, reject }; });
+}
+
+function nextPageHasMatch() {
+  return pendingPageMatch && matches().length >= pendingPageMatch.count;
+}
+
+function settlePageMatch(error = null) {
+  if (!pendingPageMatch) return;
+  const { resolve, reject } = pendingPageMatch;
+  pendingPageMatch = null;
+  if (error) reject(error);
+  else resolve();
+}
+
+/** True when the rendered page has room for rows that now match. */
+function pageHasNewRows() {
+  if (!renderedPage) return false;
+  const count = renderedPage.transactions.size;
+  return count < BATCH_SIZE && matches().length > renderedPage.page * BATCH_SIZE + count;
+}
+
+function clearSelection() {
+  state.selectedNoteId = state.selectedPk = state.selectedFlow = state.selectedDot = null;
+  state.graphNotes = state.pkGraphNodes = null;
+}
+
+function showEmptyResults(message) {
+  clearAllHighlights();
+  clearSelection();
+  resultsEl.replaceChildren();
+  resultsEl.hidden = true;
+  bottomPagerEl.hidden = true;
+  emptyEl.hidden = false;
+  emptyEl.textContent = message;
 }
 
 function renderResults() {
   if (!resultsEl || !emptyEl) return;
 
-  const filters = readFilters();
+  refreshSelection = null;
+  appliedFilters ??= readFilters();
+  const filters = appliedFilters;
   filterAmountMinEl?.setCustomValidity(filters.errors[0]);
   filterAmountMaxEl?.setCustomValidity(filters.errors[1]);
   if (!filters.valid) {
-    resultsEl.hidden = true;
-    emptyEl.hidden = false;
-    emptyEl.textContent = 'Correct the amount filters to view results.';
+    renderedPage = null;
+    showEmptyResults('Correct the amount filters to view results.');
     return;
   }
-  const filtersActive = isFiltersActive(filters);
-  const visibleRows = computeVisibleRows(filters);
-
-  if (state.rows.length === 0) {
-    resultsEl.hidden = true;
-    emptyEl.hidden = false;
-    emptyEl.textContent = 'Select a pool, enter the authority key, then run Sync & Audit.';
-    return;
-  }
-
-  if (visibleRows.length === 0) {
-    resultsEl.hidden = true;
-    emptyEl.hidden = false;
-    emptyEl.textContent = filtersActive
-      ? 'No transactions match the current filters.'
-      : 'Select a pool, enter the authority key, then run Sync & Audit.';
+  const rows = matches();
+  state.page = Math.min(state.page, Math.max(0, Math.ceil(rows.length / BATCH_SIZE) - 1));
+  const start = state.page * BATCH_SIZE;
+  const visibleRows = rows.slice(start, start + BATCH_SIZE);
+  renderedPage = { page: state.page, transactions: new Set(visibleRows.map((row) => row.index)), stale: false };
+  if (!visibleRows.length) {
+    let message = 'Select a pool, enter the authority key, then run Sync & Audit.';
+    if (state.audit && isFiltersActive(filters)) {
+      message = drainPromise ? 'Scanning the pool for matching transactions…' : 'No transactions match the current filters.';
+    }
+    showEmptyResults(message);
     return;
   }
 
+  emptyEl.hidden = true;
+  resultsEl.hidden = false;
+  bottomPagerEl.hidden = state.view !== 'tx' && state.view !== 'note';
   // Measured before clearing resultsEl below: reading layout (clientWidth) once
   // the container is mid-teardown forces a synchronous reflow while the page
   // is transiently shorter, which makes the browser clamp/jump scroll position.
   const containerWidth = resultsEl.clientWidth;
-
-  emptyEl.hidden = true;
-  resultsEl.hidden = false;
   clearAllHighlights();
   resultsEl.replaceChildren();
 
@@ -664,9 +726,6 @@ function renderResults() {
   } else {
     renderTxCards(visibleRows);
   }
-
-  rebuildNoteLinks();
-  applySelectionHighlight();
 }
 
 function renderTxCards(rows) {
@@ -745,18 +804,6 @@ function renderTxCards(rows) {
     card.appendChild(details);
     resultsEl.appendChild(card);
   }
-}
-
-let fullPkGraphCache = null;
-
-/** The unfiltered graph over every loaded row — rebuilt only when rows are appended or reset. */
-function fullPkGraph() {
-  if (fullPkGraphCache?.rows !== state.rows || fullPkGraphCache.count !== state.rows.length) {
-    // Balances come from unspent notes: the flows can't attribute a multi-key spend or a spend's own deposit.
-    const balances = unspentByPk(collectNotes(state.rows));
-    fullPkGraphCache = { rows: state.rows, count: state.rows.length, graph: { ...buildPkGraph(state.rows, NO_FILTERS), balances } };
-  }
-  return fullPkGraphCache.graph;
 }
 
 const NO_FILTERS = { amountMin: null, amountMax: null, ledgerFrom: null, ledgerTo: null, pk: null };
@@ -971,12 +1018,13 @@ function txLabel(txIndex, ledger) {
 
 /** View-only pools never decrypt inputs, so an unlinked note may still have been spent: its status is unknown, not unspent. */
 function noteStatus(note) {
-  if (note.spentTxIndex != null) return 'Spent';
-  return state.poolGvkMode === 'traceable' ? 'Unspent' : 'Unknown';
+  if (note.knownSpent) return 'Spent';
+  if (state.poolGvkMode !== 'traceable') return 'Unknown';
+  return state.exhausted ? 'Unspent' : 'No spend seen yet';
 }
 
 function renderNoteTable(rows, filters) {
-  const notes = collectNotes(state.rows, rows).filter((note) => noteMatchesAmountAndPk(note.audited, filters));
+  const notes = state.notes.visibleNotes(rows).filter((note) => noteMatchesAmountAndPk(note.audited, filters));
   const headers = ['Created', 'Owner', 'Amount', 'Commitment', 'Status', 'Spent', 'Nullifier'];
   const wrap = el('div', 'overflow-x-auto rounded-2xl border border-white/8 bg-ink-900/70');
   const grid = el('div', 'grid gap-px bg-white/6 text-2xs');
@@ -1090,20 +1138,22 @@ function assignGraphLanes(notes, xScale, minGapPx) {
 
 function selectGraphNote(noteId) {
   state.selectedNoteId = state.selectedNoteId === noteId ? null : noteId;
-  renderResults();
+  refreshSelection?.();
 }
 
 async function applyGraphBrushRange(fromLedger, toLedger) {
   if (filterLedgerFromEl) filterLedgerFromEl.value = String(fromLedger);
   if (filterLedgerToEl) filterLedgerToEl.value = String(toLedger);
-  state.filteredVisibleCount = BATCH_SIZE;
-  applyFiltersAndRender();
+  state.timeFilterLedgers = { from: null, to: null };
+  applyFilters();
+  const revision = ++timeRevision;
 
   try {
     const bounds = await fetchLedgerTimeBounds();
+    if (revision !== timeRevision) return;
     if (filterTimeFromEl) filterTimeFromEl.value = formatUtcDatetimeLocal(timeForLedger(bounds, fromLedger));
     if (filterTimeToEl) filterTimeToEl.value = formatUtcDatetimeLocal(timeForLedger(bounds, toLedger));
-    await updateTimeFilterLedgers();
+    await updateTimeFilterLedgers(revision);
   } catch {
     // Timestamp fields are best-effort; the ledger filter above already applied.
   }
@@ -1116,7 +1166,7 @@ function moveGraphSelection(delta) {
   const currentIndex = notes.findIndex((note) => note.noteId === state.selectedNoteId);
   const nextIndex = currentIndex === -1 ? 0 : Math.min(notes.length - 1, Math.max(0, currentIndex + delta));
   state.selectedNoteId = notes[nextIndex].noteId;
-  renderResults();
+  refreshSelection?.();
 }
 
 function renderGraphDetailPanel(container, notes) {
@@ -1230,7 +1280,7 @@ function renderGraphLegend() {
 }
 
 function renderGraph(rows, containerWidth, filters) {
-  const notes = collectNotes(state.rows, rows)
+  const notes = state.notes.visibleNotes(rows)
     .filter((note) => noteMatchesAmountAndPk(note.audited, filters))
     .sort((a, b) => noteSortKey(a) - noteSortKey(b));
   state.graphNotes = notes;
@@ -1336,7 +1386,7 @@ function renderGraph(rows, containerWidth, filters) {
   const primaryKind = (d) => (d.createdTxIndex != null ? d.createdKind : d.spentKind);
   const primaryRadius = (d) => (d.noteId === state.selectedNoteId ? 8 : 6);
 
-  svg.append('g')
+  const primaryMarks = svg.append('g')
     .selectAll('path')
     .data(notes)
     .join('path')
@@ -1349,10 +1399,7 @@ function renderGraph(rows, containerWidth, filters) {
       const rotate = primaryKind(d) === 'deposit' ? ' rotate(180)' : '';
       return `translate(${xScale(d.createdLedger ?? d.spentLedger)}, ${yFor(d)})${rotate}`;
     })
-    .attr('d', (d) => noteMarkPath(primaryKind(d), primaryRadius(d)))
     .style('fill', colorForNote)
-    .style('stroke', (d) => (d.noteId === state.selectedNoteId ? 'var(--color-sky-100)' : 'var(--color-ink-900)'))
-    .attr('stroke-width', (d) => (d.noteId === state.selectedNoteId ? 2 : 1))
     .style('cursor', 'pointer')
     .on('click', (_event, d) => selectGraphNote(d.noteId));
 
@@ -1422,7 +1469,16 @@ function renderGraph(rows, containerWidth, filters) {
     .style('pointer-events', 'none')
     .attr('class', 'opacity-0 data-highlight:opacity-100');
 
-  renderGraphDetailPanel(outer, notes);
+  refreshSelection = () => {
+    primaryMarks
+      .attr('d', (d) => noteMarkPath(primaryKind(d), primaryRadius(d)))
+      .style('stroke', (d) => (d.noteId === state.selectedNoteId ? 'var(--color-sky-100)' : 'var(--color-ink-900)'))
+      .attr('stroke-width', (d) => (d.noteId === state.selectedNoteId ? 2 : 1));
+    graphWrap.nextElementSibling?.remove();
+    renderGraphDetailPanel(outer, notes);
+    restoreBaseHighlight();
+  };
+  refreshSelection();
 }
 
 function pkGraphNeighborEdges(pk, edges) {
@@ -1433,7 +1489,7 @@ function selectPkGraphNode(pk) {
   state.selectedFlow = null;
   state.selectedDot = null;
   state.selectedPk = state.selectedPk === pk ? null : pk;
-  renderResults();
+  refreshSelection?.();
 }
 
 function sameFlow(a, b) {
@@ -1444,7 +1500,7 @@ function selectPkGraphFlow(flow) {
   state.selectedPk = null;
   state.selectedDot = null;
   state.selectedFlow = sameFlow(state.selectedFlow, flow) ? null : flow;
-  renderResults();
+  refreshSelection?.();
 }
 
 function sameDot(a, b) {
@@ -1457,7 +1513,7 @@ function selectPkGraphDot(dot) {
   const same = sameDot(state.selectedDot, dot);
   state.selectedDot = same ? null : { pk: dot.pk, txIndex: dot.txIndex };
   state.selectedPk = same ? null : dot.pk;
-  renderResults();
+  refreshSelection?.();
 }
 
 function movePkGraphSelection(delta) {
@@ -1469,7 +1525,7 @@ function movePkGraphSelection(delta) {
   const currentIndex = nodes.findIndex((node) => node.pk === state.selectedPk);
   const nextIndex = currentIndex === -1 ? 0 : Math.min(nodes.length - 1, Math.max(0, currentIndex + delta));
   state.selectedPk = nodes[nextIndex].pk;
-  renderResults();
+  refreshSelection?.();
 }
 
 function renderPkGraphLegend() {
@@ -1543,14 +1599,17 @@ function pkGraphDetailPkRow(label, pk) {
 }
 
 /** A real balance needs spends, which only traceable pools expose; view-only can only total what came in. */
-function pkGraphDetailBalanceRow(node) {
+function pkGraphDetailBalanceRow(pk) {
   const traceable = state.poolGvkMode === 'traceable';
   const row = el('div');
-  row.appendChild(el('div', 'table-head', traceable ? 'Current balance' : 'Total received'));
+  const label = state.exhausted
+    ? (traceable ? 'Current balance' : 'Total received')
+    : (traceable ? 'Balance in scanned transactions' : 'Received in scanned transactions');
+  row.appendChild(el('div', 'table-head', label));
   row.appendChild(el(
     'div',
     'font-mono text-sm text-white',
-    formatTokenAmount(traceable ? (fullPkGraph().balances.get(node.pk) ?? 0n) : node.received + node.deposited + node.transferIn),
+    formatTokenAmount(traceable ? state.notes.balanceOf(pk) : state.notes.receivedBy(pk)),
   ));
   return row;
 }
@@ -1607,7 +1666,7 @@ function renderPkGraphFlowDetailPanel(container, flow) {
   container.appendChild(panel);
 }
 
-function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selectedDot, fullNodeByPk) {
+function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selectedDot) {
   if (selectedFlow) {
     renderPkGraphFlowDetailPanel(container, selectedFlow);
     return;
@@ -1627,7 +1686,7 @@ function renderPkGraphDetailPanel(container, nodes, edges, selectedFlow, selecte
 
   header.appendChild(pkGraphDetailPkRow('Owner', node.pk));
   if (selectedDot) header.appendChild(pkGraphDetailSelectedDotRow(selectedDot));
-  header.appendChild(pkGraphDetailBalanceRow(fullNodeByPk?.get(node.pk) ?? node));
+  header.appendChild(pkGraphDetailBalanceRow(node.pk));
 
   // Scrolls internally instead of growing the panel (see PK_GRAPH_PANEL_HEIGHT).
   const history = el('div', 'thin-scroll min-h-0 flex-1 space-y-3 overflow-y-auto pt-3');
@@ -1720,9 +1779,6 @@ function renderPkGraph(rows, containerWidth, filters) {
   const { dots, flows } = filterPkTimelineByPk(builtTimeline.dots, builtTimeline.flows, filters.pk);
   const nodeByPk = new Map(nodes.map((n) => [n.pk, n]));
 
-  // Current balance ignores active filters — always the full loaded audit.
-  const fullNodeByPk = new Map(fullPkGraph().nodes.map((n) => [n.pk, n]));
-
   // Chronological (by first appearance) so the lane order reads like a story,
   // stable by PK so the layout doesn't jitter on re-render.
   const firstLedgerOf = new Map();
@@ -1755,7 +1811,7 @@ function renderPkGraph(rows, containerWidth, filters) {
 
   if (orderedPks.length === 0) {
     graphWrap.appendChild(el('p', 'text-sm text-slate-400', 'No owners to plot.'));
-    renderPkGraphDetailPanel(outer, nodes, edges, selectedFlow, selectedDot, fullNodeByPk);
+    renderPkGraphDetailPanel(outer, nodes, edges, selectedFlow, selectedDot);
     return;
   }
 
@@ -1851,15 +1907,14 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('height', laneAreaHeight)
     .style('display', 'block');
 
-  labelsSvg.append('g')
+  const labelStripes = labelsSvg.append('g')
     .selectAll('rect')
     .data(orderedPks)
     .join('rect')
     .attr('x', 0)
     .attr('y', (pk) => topPad + laneIndexOf.get(pk) * rowHeight)
     .attr('width', PK_TIMELINE_LABEL_WIDTH)
-    .attr('height', rowHeight)
-    .style('fill', laneStripeFill);
+    .attr('height', rowHeight);
 
   labelsSvg.append('g')
     .selectAll('text')
@@ -1886,15 +1941,14 @@ function renderPkGraph(rows, containerWidth, filters) {
 
   // Lane rows: alternating stripes for readability, selected PK's lane lit —
   // matches the label column's stripes so a lane reads as one continuous row.
-  svg.append('g')
+  const plotStripes = svg.append('g')
     .selectAll('rect')
     .data(orderedPks)
     .join('rect')
     .attr('x', 0)
     .attr('y', (pk) => topPad + laneIndexOf.get(pk) * rowHeight)
     .attr('width', plotWidth)
-    .attr('height', rowHeight)
-    .style('fill', laneStripeFill);
+    .attr('height', rowHeight);
 
   // Behind the marks (same drag-to-zoom-by-ledger-range as the Note graph),
   // so it and click-to-select coexist — marks appended after it stay on top.
@@ -1925,11 +1979,7 @@ function renderPkGraph(rows, containerWidth, filters) {
     return { flow: f, x, shaftStartY, shaftEndY: headBaseY, tipY, headBaseY, color: colorForPk(f.fromPk) };
   });
 
-  const isSelectedFlow = (f) => (
-    state.selectedFlow?.txIndex === f.txIndex
-    && state.selectedFlow?.fromPk === f.fromPk
-    && state.selectedFlow?.toPk === f.toPk
-  );
+  const isSelectedFlow = (f) => sameFlow(state.selectedFlow, f);
 
   const flowGroups = svg.append('g')
     .selectAll('g')
@@ -1947,22 +1997,19 @@ function renderPkGraph(rows, containerWidth, filters) {
     .attr('stroke', 'transparent')
     .attr('stroke-width', 14);
 
-  flowGroups.append('line')
+  const shafts = flowGroups.append('line')
     .attr('x1', (g) => g.x)
     .attr('x2', (g) => g.x)
     .attr('y1', (g) => g.shaftStartY)
     .attr('y2', (g) => g.shaftEndY)
     .style('stroke', (g) => g.color)
-    .attr('stroke-width', (g) => (isSelectedFlow(g.flow) ? FLOW_STROKE_WIDTH + 2 : FLOW_STROKE_WIDTH))
     .attr('stroke-linecap', 'round')
-    .attr('class', MARK_SELECTED)
-    .attr('data-highlight', (g) => (isSelectedFlow(g.flow) ? '' : null));
+    .attr('class', MARK_SELECTED);
 
-  flowGroups.append('path')
+  const heads = flowGroups.append('path')
     .attr('d', (g) => `M ${g.x - FLOW_HEAD_HALF_WIDTH} ${g.headBaseY} L ${g.x + FLOW_HEAD_HALF_WIDTH} ${g.headBaseY} L ${g.x} ${g.tipY} Z`)
     .style('fill', (g) => g.color)
-    .attr('class', MARK_SELECTED)
-    .attr('data-highlight', (g) => (isSelectedFlow(g.flow) ? '' : null));
+    .attr('class', MARK_SELECTED);
 
   flowGroups.append('title')
     .text((g) => `tx ${g.flow.txIndex} · ledger ${g.flow.ledger}\n${ownerShort(g.flow.fromPk)} → ${ownerShort(g.flow.toPk)}\n${formatTokenAmount(g.flow.amount)}`);
@@ -1972,9 +2019,9 @@ function renderPkGraph(rows, containerWidth, filters) {
   const trianglePathD = roundedTrianglePath(DOT_RADIUS * 1.35, DOT_RADIUS * 0.6);
   const dotPathD = (d) => (d.deposited > 0n || d.withdrawn > 0n ? trianglePathD : circlePathD);
 
-  const isSelectedDot = (d) => !!selectedDot && selectedDot.pk === d.pk && selectedDot.txIndex === d.txIndex;
+  const isSelectedDot = (d) => sameDot(state.selectedDot, d);
 
-  svg.append('g')
+  const dotMarks = svg.append('g')
     .selectAll('path')
     .data(dots)
     .join('path')
@@ -1985,13 +2032,10 @@ function renderPkGraph(rows, containerWidth, filters) {
     })
     .attr('d', dotPathD)
     .style('fill', (d) => colorForPk(d.pk))
-    .style('stroke', (d) => (isSelectedDot(d) || d.pk === state.selectedPk ? 'var(--color-sky-100)' : 'var(--color-ink-900)'))
-    .attr('stroke-width', (d) => (isSelectedDot(d) ? 3 : d.pk === state.selectedPk ? 2.5 : 1))
     .style('cursor', 'pointer')
     .attr('class', MARK_SELECTED)
-    .attr('data-highlight', (d) => (isSelectedDot(d) ? '' : null))
-    .on('click', (_event, d) => selectPkGraphDot(d))
-    .append('title')
+    .on('click', (_event, d) => selectPkGraphDot(d));
+  dotMarks.append('title')
     .text((d) => {
       const label = d.deposited > 0n
         ? `Deposited ${formatTokenAmount(d.deposited)}`
@@ -2003,14 +2047,38 @@ function renderPkGraph(rows, containerWidth, filters) {
       return [ownerTitle(d.pk), `tx ${d.txIndex} · ledger ${d.ledger}`, label].filter(Boolean).join('\n');
     });
 
-  renderPkGraphDetailPanel(outer, nodes, edges, selectedFlow, selectedDot, fullNodeByPk);
+  refreshSelection = () => {
+    labelStripes.style('fill', laneStripeFill);
+    plotStripes.style('fill', laneStripeFill);
+    const highlightFlow = (g) => isSelectedFlow(g.flow) ? '' : null;
+    heads.attr('data-highlight', highlightFlow);
+    shafts.attr('data-highlight', highlightFlow)
+      .attr('stroke-width', (g) => isSelectedFlow(g.flow) ? FLOW_STROKE_WIDTH + 2 : FLOW_STROKE_WIDTH);
+    dotMarks
+      .style('stroke', (d) => (isSelectedDot(d) || d.pk === state.selectedPk ? 'var(--color-sky-100)' : 'var(--color-ink-900)'))
+      .attr('stroke-width', (d) => (isSelectedDot(d) ? 3 : d.pk === state.selectedPk ? 2.5 : 1))
+      .attr('data-highlight', (d) => (isSelectedDot(d) ? '' : null));
+    graphWrap.nextElementSibling?.remove();
+    const dot = dots.find(isSelectedDot);
+    renderPkGraphDetailPanel(outer, nodes, edges, state.selectedFlow, dot);
+  };
+  refreshSelection();
 }
 
 function pushTx(tx) {
   state.txCounter += 1;
   const index = state.txCounter;
   const kind = state.poolGvkMode === 'traceable' ? txKind(tx) : null;
-  state.rows.push({ tx, index, kind });
+  const row = { tx, index, kind };
+  state.rows.push(row);
+  const changedTransactions = state.notes.append(row);
+  for (const changedIndex of changedTransactions) {
+    if (renderedPage?.transactions.has(changedIndex)) {
+      renderedPage.stale = true;
+      break;
+    }
+  }
+  for (const pk of unownedPks(tx)) state.pendingOwnerKeys.add(pk);
 }
 
 /** Plain `{ noteKey, address }` pairs of a lookup answer, freeing every WASM owner. */
@@ -2032,7 +2100,8 @@ async function resolvePkOwners() {
   const audit = state.audit;
   if (!audit) return false;
   const retryBefore = ownersRetryState(state.ownersRetry);
-  const queried = pendingPks(state.owners, state.rows.flatMap(({ tx }) => txNotes(tx).map((note) => note.note?.pk)));
+  const queried = [...state.pendingOwnerKeys];
+  const queriedThrough = state.rows.length;
   let settled = false;
   let outcome = 'settled';
 
@@ -2043,8 +2112,11 @@ async function resolvePkOwners() {
         if (state.audit !== audit) return false;
         // An unsynced answer settles nothing, so its owners are not even read.
         settled = lookup.registryFullySynced;
-        if (settled) applyOwnerLookup(state.owners, queried, readLookupOwners(lookup));
-        else outcome = 'waiting';
+        if (settled) {
+          applyOwnerLookup(state.owners, queried, readLookupOwners(lookup));
+          for (const key of queried) state.pendingOwnerKeys.delete(key);
+          if (queried.some((key) => matchCache?.pendingKeys.has(key))) matchCache = null;
+        } else outcome = 'waiting';
       } finally {
         lookup.free();
       }
@@ -2054,6 +2126,7 @@ async function resolvePkOwners() {
       outcome = 'error';
     }
   }
+  ownersQueriedThrough = Math.max(ownersQueriedThrough, queriedThrough);
 
   const delayMs = nextOwnersRetry(state.ownersRetry, outcome);
   if (delayMs != null) scheduleOwnersRetry(delayMs);
@@ -2069,7 +2142,7 @@ function scheduleOwnersRetry(delayMs) {
   state.ownersRetryTimer = setTimeout(async () => {
     state.ownersRetryTimer = null;
     if (state.audit !== audit) return;
-    if (await resolvePkOwners()) refreshOwnersDisplay();
+    if (await resolvePkOwners()) refreshAuditDisplay();
   }, delayMs);
 }
 
@@ -2078,7 +2151,7 @@ function clearOwnersRetryTimer() {
   state.ownersRetryTimer = null;
 }
 
-function refreshOwnersDisplay() {
+function refreshAuditDisplay() {
   renderResults();
   updateStatus();
   syncActionButtons();
@@ -2094,15 +2167,17 @@ async function retryOwnerLookup() {
   if (!state.audit) return;
   state.ownersRetry = createOwnersRetry();
   updateOwnersNotice();
-  if (await resolvePkOwners()) refreshOwnersDisplay();
+  if (await resolvePkOwners()) refreshAuditDisplay();
 }
 
 /** Pulls up to `limit` transactions off the cursor, leaving their owners unresolved. */
 function fetchRows(limit) {
+  const audit = state.audit;
   return queueCursorOp(async () => {
     let fetched = 0;
-    while (fetched < limit) {
-      const tx = await state.audit.nextTx();
+    while (audit && state.audit === audit && !state.exhausted && fetched < limit) {
+      const tx = await audit.nextTx();
+      if (audit !== state.audit) break;
       if (tx == null) {
         state.exhausted = true;
         break;
@@ -2114,58 +2189,86 @@ function fetchRows(limit) {
   });
 }
 
+async function resolveNewOwners(audit) {
+  if (state.audit === audit && state.pendingOwnerKeys.size) await resolvePkOwners();
+}
+
 async function fetchBatch(limit) {
-  const fetched = await fetchRows(limit);
-  if (fetched > 0) await resolvePkOwners();
-  return fetched;
+  const audit = state.audit;
+  try {
+    return await fetchRows(limit);
+  } finally {
+    await resolveNewOwners(audit);
+  }
 }
 
 let drainPromise = null;
 
-/** Exhausts the audit cursor so filters can see the full result set, not just what's paged in so far. */
-async function ensureFullyLoaded() {
-  if (!state.audit || state.exhausted) return;
-  if (!drainPromise) {
-    drainPromise = (async () => {
-      // Nothing renders mid-drain, so the owners are looked up once, for all the rows it pulled.
-      let fetched = 0;
-      try {
-        while (!state.exhausted) {
-          fetched += await fetchRows(BATCH_SIZE);
-        }
-      } finally {
-        if (fetched > 0) await resolvePkOwners();
+const DRAIN_TICK_MS = 250;
+
+/** Looks up new owners, wakes Next, and refreshes the page if its rows or notes changed. */
+async function drainTick(audit) {
+  // A lookup on hold is retried by its own timer.
+  if (state.pendingOwnerKeys.size && ownersRetryState(state.ownersRetry) === 'ok') await resolvePkOwners();
+  if (state.audit !== audit) return;
+  if (nextPageHasMatch()) settlePageMatch();
+  if ((isFiltersActive(appliedFilters) && !matchCache) || renderedPage?.stale || pageHasNewRows()) renderResults();
+  updateStatus();
+  syncActionButtons();
+}
+
+async function drainCursor(audit) {
+  let lastYield = performance.now();
+  let lastTick = lastYield;
+  try {
+    while (state.audit === audit && !state.exhausted) {
+      await fetchRows(BATCH_SIZE);
+      if (performance.now() - lastTick >= DRAIN_TICK_MS || pageHasNewRows() || nextPageHasMatch()) {
+        await drainTick(audit);
+        lastTick = performance.now();
       }
-    })().finally(() => {
-      drainPromise = null;
-    });
+      // A local cursor can resolve in microtasks for many consecutive batches.
+      if (performance.now() - lastYield >= 16) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        lastYield = performance.now();
+      }
+    }
+  } finally {
+    await resolveNewOwners(audit);
   }
-  await drainPromise;
 }
 
-function updateLoadMoreButton() {
-  if (!loadMoreBtnEl) return;
-  if (!state.audit) {
-    loadMoreBtnEl.disabled = true;
-    return;
-  }
-
-  const filters = readFilters();
-  const hasMore = filters.valid && (isFiltersActive(filters)
-    ? state.filteredVisibleCount < computeFilteredRows(filters).length
-    : !state.exhausted);
-
-  loadMoreBtnEl.disabled = !hasMore;
-}
-
-function updateExportButton() {
-  if (!exportBtnEl) return;
-  exportBtnEl.disabled = !state.audit || !readFilters().valid;
+/**
+ * Exhausts the audit cursor so filters and exports see the whole pool. The scan runs in the background,
+ * rendering matches as it finds them, and reports its own failure in the status line.
+ */
+function ensureFullyLoaded() {
+  if (drainPromise) return drainPromise;
+  if (!state.audit || state.exhausted) return Promise.resolve();
+  const audit = state.audit;
+  const finish = (err) => {
+    if (state.audit !== audit) return;
+    drainPromise = null;
+    refreshAuditDisplay();
+    if (err) setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
+    settlePageMatch(err);
+  };
+  drainPromise = drainCursor(audit).then(() => finish(null), (err) => {
+    finish(err);
+    throw err;
+  });
+  return drainPromise;
 }
 
 function syncActionButtons() {
-  updateLoadMoreButton();
-  updateExportButton();
+  const valid = !!state.audit && appliedFilters?.valid;
+  const busy = fetchingPage || auditBtnEl?.ariaBusy === 'true' || !!filterTimer;
+  const complete = state.exhausted && !drainPromise;
+  const prevDisabled = !valid || busy || state.page === 0;
+  const nextDisabled = !valid || busy || (complete && (state.page + 1) * BATCH_SIZE >= matches().length);
+  for (const button of prevButtons) button.disabled = prevDisabled;
+  for (const button of nextButtons) button.disabled = nextDisabled;
+  exportBtnEl.disabled = !valid || busy || !!drainPromise || exportBtnEl.ariaBusy === 'true';
 }
 
 function csvEscape(value) {
@@ -2222,7 +2325,7 @@ function buildNoteViewCsvRows() {
     'created_tx_index', 'created_ledger', 'spent_tx_index', 'spent_ledger',
     'pk', 'owner_addresses', 'owner_status', 'amount_base_units', 'commitment', 'status', 'nullifier',
   ];
-  return [header, ...collectNotes(state.rows).map(noteToCsvRow)];
+  return [header, ...state.notes.auditedNotes().map(noteToCsvRow)];
 }
 
 /** One row per transfer edge, plus one row per PK for its deposit/withdraw/fee totals (which have no edge). Always the full set, ignoring active filters (see buildNotesCsvRows). */
@@ -2231,7 +2334,7 @@ function buildPkGraphCsvRows() {
     'kind', 'from_pk', 'from_addresses', 'from_owner_status', 'to_pk', 'to_addresses', 'to_owner_status',
     'count', 'amount_base_units',
   ];
-  const { nodes, edges } = fullPkGraph();
+  const { nodes, edges } = buildPkGraph(state.rows, NO_FILTERS);
   const rows = [header];
   const pushRow = (kind, from, to, count, amount) => {
     rows.push([
@@ -2266,7 +2369,7 @@ function downloadCsv(filename, rows) {
 
 function updateStatus() {
   updateOwnersNotice();
-  const filters = readFilters();
+  const filters = appliedFilters;
   if (!filters.valid) {
     setPanelStatus(filters.errors.filter(Boolean).join('; '), 'error');
     return;
@@ -2282,22 +2385,26 @@ function updateStatus() {
     return;
   }
 
-  if (isFiltersActive(filters)) {
-    const filteredRows = computeFilteredRows(filters);
-    const shown = Math.min(state.filteredVisibleCount, filteredRows.length);
-    const more = shown < filteredRows.length ? ' — more available, click Load more.' : '';
-    setPanelStatus(
-      `Showing ${shown} of ${filteredRows.length} matching transaction(s) (${state.rows.length} scanned).${more}${hint}`,
-      'ok',
-    );
+  const total = matches().length;
+  const start = state.page * BATCH_SIZE;
+  const scanned = state.rows.length;
+  const filtering = isFiltersActive(filters);
+  if (!total) {
+    setPanelStatus(drainPromise
+      ? `Scanning for matching transactions… ${scanned} scanned, none found yet.${hint}`
+      : `No matching transactions (${scanned} scanned).${hint}`, 'info');
     return;
   }
-
-  if (state.exhausted) {
-    setPanelStatus(`Showing ${state.rows.length} transaction(s). Audit complete.${hint}`, 'ok');
+  const range = `Transactions ${start + 1}–${Math.min(total, start + BATCH_SIZE)}`;
+  let count;
+  if (drainPromise) {
+    count = filtering
+      ? ` of ${total} found so far (${scanned} scanned, still scanning)`
+      : ` · loading the whole pool (${scanned} scanned)`;
   } else {
-    setPanelStatus(`Showing ${state.rows.length} transaction(s) — more available, click Load more.${hint}`, 'ok');
+    count = (state.exhausted ? ` of ${total}` : ' · more available') + (filtering ? ` (${scanned} scanned)` : '');
   }
+  setPanelStatus(`${range}${count}.${hint}`, 'ok');
 }
 
 function updateViewButtons() {
@@ -2316,30 +2423,28 @@ function setView(view) {
   renderResults();
 }
 
-function setFilterControlsDisabled(disabled) {
-  for (const filterEl of [
-    filterAmountMinEl, filterAmountMaxEl, filterLedgerFromEl, filterLedgerToEl,
-    filterPkEl, filterTimeFromEl, filterTimeToEl, filtersClearBtnEl,
-  ]) {
-    if (filterEl) filterEl.disabled = disabled || (state.tokenDecimals == null && [filterAmountMinEl, filterAmountMaxEl].includes(filterEl));
-  }
+/** Applies the filter inputs from the first page, dropping the cached matches and any pending Next. */
+function resetMatches() {
+  clearTimeout(filterTimer);
+  filterTimer = null;
+  ++filterRevision;
+  appliedFilters = readFilters();
+  matchCache = null;
+  state.page = 0;
+  settlePageMatch();
 }
 
-/** Drains the cursor first (if a filter needs the full result set), then re-renders. */
-async function applyFiltersAndRender() {
-  const filters = readFilters();
-  if (filters.valid && isFiltersActive(filters) && state.audit && !state.exhausted) {
-    setFilterControlsDisabled(true);
-    setPanelStatus('Loading full result set to apply filters…', 'info');
-    try {
-      await ensureFullyLoaded();
-    } finally {
-      setFilterControlsDisabled(false);
-    }
+/**
+ * Shows the matches among the rows loaded so far. A filter can match anywhere in the pool, so it also starts
+ * a background scan that renders further matches as it finds them.
+ */
+function applyFilters() {
+  resetMatches();
+  if (appliedFilters.valid && isFiltersActive(appliedFilters)) {
+    // ensureFullyLoaded reports a failed scan itself.
+    ensureFullyLoaded().catch(() => {});
   }
-  renderResults();
-  syncActionButtons();
-  updateStatus();
+  refreshAuditDisplay();
 }
 
 async function populatePools() {
@@ -2374,8 +2479,15 @@ function resetAuditState() {
   for (const input of [filterAmountMinEl, filterAmountMaxEl]) {
     if (input) { input.value = ''; input.disabled = true; input.setCustomValidity(''); }
   }
+  ++timeRevision;
+  drainPromise = null;
+  resetMatches();
+  ownersQueriedThrough = 0;
+  renderedPage = null;
+  state.notes = createNoteIndex();
   state.rows = [];
   state.owners = createOwnerBook();
+  state.pendingOwnerKeys.clear();
   state.ownersRetry = createOwnersRetry();
   clearOwnersRetryTimer();
   updateOwnersNotice();
@@ -2383,14 +2495,7 @@ function resetAuditState() {
   state.poolFee = 0n;
   state.txCounter = 0;
   state.exhausted = false;
-  state.filteredVisibleCount = BATCH_SIZE;
-  state.selectedNoteId = null;
-  state.graphNotes = null;
-  state.selectedPk = null;
-  state.selectedFlow = null;
-  state.selectedDot = null;
-  state.pkGraphNodes = null;
-  fullPkGraphCache = null;
+  clearSelection();
 }
 
 async function readPoolFee(poolContractId) {
@@ -2412,16 +2517,20 @@ async function startAudit(privateKey) {
   resetAuditState();
   renderResults();
 
+  const auditRows = state.rows;
   const poolEntry = state.pools.find((entry) => entry.poolContractId === poolContractId);
   const [decimals, fee] = await Promise.all([
     readDisplayDecimals({ tokenDecimals: () => readTokenDecimals(getCurrentRpcUrl(), poolEntry.tokenContractId) }),
     readPoolFee(poolContractId),
   ]);
+  if (state.rows !== auditRows) return false;
   const authority = client().gvkAuthority(privateKey);
   try {
-    // An overlapping Sync & Audit may have opened a cursor during the awaits.
     const audit = await authority.audit(poolContractId);
-    if (state.audit) releaseCursor(state.audit);
+    if (state.rows !== auditRows) {
+      releaseCursor(audit);
+      return false;
+    }
     state.audit = audit;
   } finally {
     authority.free();
@@ -2430,10 +2539,11 @@ async function startAudit(privateKey) {
   state.poolFee = fee;
   state.auditedPoolContractId = poolContractId;
   state.tokenSymbol = tokenLabel(poolEntry);
-  setFilterControlsDisabled(false);
+  for (const input of [filterAmountMinEl, filterAmountMaxEl]) input.disabled = decimals == null;
   state.poolGvkMode = poolEntry?.gvkMode ?? null;
 
   await fetchBatch(BATCH_SIZE);
+  return state.rows === auditRows;
 }
 
 export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
@@ -2463,22 +2573,29 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
 
   for (const filterEl of [filterAmountMinEl, filterAmountMaxEl, filterLedgerFromEl, filterLedgerToEl, filterPkEl]) {
     filterEl?.addEventListener('input', () => {
-      state.filteredVisibleCount = BATCH_SIZE;
-      applyFiltersAndRender();
-      if ([filterAmountMinEl, filterAmountMaxEl].includes(filterEl)) filterEl.reportValidity();
+      clearTimeout(filterTimer);
+      ++filterRevision;
+      filterTimer = setTimeout(() => {
+        applyFilters();
+        if ([filterAmountMinEl, filterAmountMaxEl].includes(filterEl)) filterEl.reportValidity();
+      }, 250);
+      syncActionButtons();
     });
   }
 
   for (const filterEl of [filterTimeFromEl, filterTimeToEl]) {
     filterEl?.addEventListener('change', async () => {
-      state.filteredVisibleCount = BATCH_SIZE;
-      await updateTimeFilterLedgers();
-      applyFiltersAndRender();
+      ++filterRevision;
+      const revision = ++timeRevision;
+      clearTimeout(filterTimer);
+      filterTimer = null;
+      await updateTimeFilterLedgers(revision);
+      if (revision === timeRevision) applyFilters();
     });
   }
 
   poolSelectEl?.addEventListener('change', () => {
-    if (!state.audit || poolSelectEl.value === state.auditedPoolContractId) return;
+    if (poolSelectEl.value === state.auditedPoolContractId) return;
     resetAuditState();
     renderResults();
     syncActionButtons();
@@ -2492,12 +2609,10 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     ]) {
       if (filterEl) filterEl.value = '';
     }
+    ++timeRevision;
     state.timeFilterLedgers = { from: null, to: null };
     if (filterTimeHintEl) filterTimeHintEl.textContent = TIME_FILTER_HINT_DEFAULT;
-    state.filteredVisibleCount = BATCH_SIZE;
-    renderResults();
-    syncActionButtons();
-    updateStatus();
+    applyFilters();
   });
 
   let panelReady = false;
@@ -2516,12 +2631,11 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     try {
       auditBtnEl.disabled = true;
       auditBtnEl.ariaBusy = true;
-      loadMoreBtnEl.disabled = true;
+      syncActionButtons();
       auditBtnEl.textContent = 'Syncing…';
       setPanelStatus('Syncing chain data and opening audit cursor…', 'info');
       await ensurePanelReady({ unlock: true });
-      await startAudit(privateKey);
-      await applyFiltersAndRender();
+      if (await startAudit(privateKey)) applyFilters();
     } catch (err) {
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
       showToast?.(`Global View audit failed: ${err?.message || err}`, 'error');
@@ -2533,38 +2647,44 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
     }
   });
 
-  loadMoreBtnEl?.addEventListener('click', async () => {
-    if (!readFilters().valid) return;
-    // Filters already forced a full drain, so "load more" just widens the
-    // locally-visible window instead of touching the cursor.
-    if (isFiltersActive(readFilters())) {
-      state.filteredVisibleCount += BATCH_SIZE;
-      renderResults();
-      syncActionButtons();
-      updateStatus();
-      return;
-    }
+  function goToPreviousPage() {
+    state.page = Math.max(0, state.page - 1);
+    refreshAuditDisplay();
+  }
 
-    const originalText = loadMoreBtnEl.textContent;
+  async function goToNextPage() {
+    const audit = state.audit;
+    const revision = filterRevision;
+    const nextPage = state.page + 1;
+    fetchingPage = true;
+    syncActionButtons();
     try {
-      loadMoreBtnEl.disabled = true;
-      loadMoreBtnEl.textContent = 'Loading…';
-      loadMoreBtnEl.ariaBusy = true;
-      await fetchBatch(BATCH_SIZE);
-      await applyFiltersAndRender();
+      if (drainPromise || (!state.exhausted && isFiltersActive(appliedFilters))) {
+        // Turns the page at its first match; the scan fills it in.
+        ensureFullyLoaded().catch(() => {});
+        await waitForMatches(nextPage * BATCH_SIZE + 1);
+      } else if (!state.exhausted) {
+        const missing = (nextPage + 1) * BATCH_SIZE - matches().length;
+        if (missing > 0) await fetchBatch(missing);
+      }
+      if (audit !== state.audit || revision !== filterRevision) return;
+      if (nextPage * BATCH_SIZE < matches().length) state.page = nextPage;
+      refreshAuditDisplay();
     } catch (err) {
-      setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
-      showToast?.(`Load more failed: ${err?.message || err}`, 'error');
+      if (audit === state.audit) setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
     } finally {
-      loadMoreBtnEl.textContent = originalText;
-      loadMoreBtnEl.ariaBusy = false;
+      fetchingPage = false;
       syncActionButtons();
     }
-  });
+  }
+
+  for (const button of prevButtons) button.addEventListener('click', goToPreviousPage);
+  for (const button of nextButtons) button.addEventListener('click', goToNextPage);
 
   exportBtnEl?.addEventListener('click', async () => {
-    if (!state.audit || !readFilters().valid) return;
+    if (!state.audit || !appliedFilters.valid) return;
 
+    const audit = state.audit;
     const originalText = exportBtnEl.textContent;
     try {
       exportBtnEl.disabled = true;
@@ -2572,7 +2692,8 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       exportBtnEl.ariaBusy = true;
       if (!state.exhausted) setPanelStatus('Loading full result set to export…', 'info');
       await ensureFullyLoaded();
-      if (!readFilters().valid) throw new Error('Correct the amount filters before exporting.');
+      if (state.audit !== audit) return;
+      if (!appliedFilters.valid) throw new Error('Correct the amount filters before exporting.');
 
       const poolContractId = poolSelectEl?.value?.trim() || 'pool';
       const rows = state.view === 'note'
@@ -2583,6 +2704,7 @@ export async function initGvkAuditPanel({ ensureCryptoReady, showToast }) {
       downloadCsv(`gvk-notes-${poolContractId.slice(0, 8)}-${Date.now()}.csv`, rows);
       updateStatus();
     } catch (err) {
+      if (state.audit !== audit) return;
       setPanelStatus(friendlyErrorMessage(err?.message || String(err)), 'error');
       showToast?.(`Export failed: ${err?.message || err}`, 'error');
     } finally {
