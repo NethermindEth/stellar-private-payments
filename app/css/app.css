@@ -129,6 +129,7 @@
   .chip[data-tone=info] { @apply border-cyan-300/30 bg-cyan-400/10 text-cyan-100 ring-cyan-300/30; }
   .chip[data-tone=key] { @apply border-violet-300/30 bg-violet-300/10 text-violet-200 ring-violet-300/30; }
   .chip[data-tone=fail] { @apply border-rose-400/30 bg-rose-400/10 text-rose-200; }
+  .chip[data-tone=warn] { @apply border-amber-300/30 bg-amber-300/10 text-amber-200 ring-amber-300/30; }
   .sync-dot { @apply h-2 w-2 rounded-full bg-slate-500; }
   .sync-dot[data-tone=ok] { @apply bg-emerald-400; box-shadow: 0 0 18px --alpha(var(--color-emerald-400) / 70%); }
   .sync-dot[data-tone=warn] { @apply bg-amber-300 animate-pulse-dot; }

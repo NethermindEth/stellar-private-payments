@@ -240,7 +240,8 @@ pub trait Storage: crate::chain::ContractDataStorage {
     ) -> Result<Vec<GvkEvent>, Error>;
 
     /// Compares the event chain over the events saved for `contract_id` with
-    /// the chain the contract `published`.
+    /// the chain the contract `published`, and marks the saved events that
+    /// chain covers as checked.
     async fn check_event_chain(
         &self,
         contract_id: &str,
