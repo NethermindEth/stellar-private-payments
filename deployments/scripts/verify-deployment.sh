@@ -60,8 +60,11 @@ Checks:
     reads an allowlist the manifest names. A manifest without the hashes, from
     before pools stored them, skips these checks with a notice.
   - Every tree a pool reads that the manifest does not name, such as a
-    blocklist the pool was re-pointed to, has no pending admin transfer. Its
-    admin prints as a notice when it is not the manifest's.
+    blocklist the pool was re-pointed to, runs the tree code the manifest
+    records, not an executable reference, and has no pending admin transfer.
+    Its admin prints as a notice when it is not the manifest's. A manifest
+    without contracts_release has the code of the trees it names checked the
+    same way.
   - Every contract the manifest names, other than an added allowlist, runs the
     code contracts_release.code records for it, and every added allowlist runs
     asp_membership_wasm_hash. A contract with no code entry fails.
@@ -168,9 +171,12 @@ unit_key() { printf '{"vec":[{"symbol":"%s"}]}' "$1" | stellar xdr encode --type
 read_address() { read_entry "$1" "$(unit_key "$2")" | jq -r '.address // "none"'; }
 
 # Prints the hash of the code a contract runs. AAAAFA== is the key of its instance entry, which
-# names its code.
+# names its code. A contract running an executable reference has no fixed hash: the reference's
+# owner can point it at other code at any time, so it never matches an expected hash.
 code_hash() {
-  read_entry "$1" AAAAFA== | jq -r '.contract_instance.executable.wasm // "none"' || echo unreadable
+  read_entry "$1" AAAAFA== | jq -r '.contract_instance.executable | .wasm? //
+    if type == "object" and has("external_ref") then "an executable reference" else "none" end' \
+    || echo unreadable
 }
 
 # Prints the address or u32 that an instance entry from `read_entry` stores under a unit-variant
@@ -254,6 +260,15 @@ HASHES="$(jq -c 'select(has("asp_membership_wasm_hash") or has("asp_non_membersh
 # Trees the admin checks above cover. A re-pointed pool can read others, checked once below.
 CHECKED="$(jq -r '.asp_membership, (.added_asp_memberships // [])[].contractId,
   .asp_non_membership' "$MANIFEST")"
+# With a release, the release code checks below cover these trees. Without one, nothing else would
+# catch a tree running an executable reference, since the pool resolves it to its target's code.
+if [[ -n "$HASHES" && "$HAS_RELEASE" == false ]]; then
+  step "checking the code of the trees the manifest names"
+  while read -r tree index <&3; do
+    check "$tree" "tree code" "$(jq -r ".[$index]" <<<"$HASHES")" "$(code_hash "$tree")"
+  done 3< <(jq -r '"\(.asp_membership) 0", ((.added_asp_memberships // [])[].contractId | "\(.) 0"),
+    "\(.asp_non_membership) 1"' "$MANIFEST")
+fi
 
 step "checking that no verifier is listed twice"
 # One contract listed under two key names would pass as either key's verifier.
@@ -331,9 +346,15 @@ for pool in $POOLS; do
       "$(grep -qxF "$tree" <<<"$ALLOWLISTS" && echo "an allowlist the manifest names" \
         || echo "${tree:-none}")"
   fi
-  for tree in $(stored "$instance" ASPMembership) $(stored "$instance" ASPNonMembership); do
-    ! grep -qxF "$tree" <<<"$CHECKED" || continue
+  for kind in ASPMembership ASPNonMembership; do
+    tree="$(stored "$instance" "$kind")"
+    [[ -n "$tree" ]] && ! grep -qxF "$tree" <<<"$CHECKED" || continue
     CHECKED+=$'\n'"$tree"
+    # The pool checked this code when it was re-pointed, but a tree running an executable
+    # reference can change its code after that.
+    [[ -z "$HASHES" ]] || check "$tree" "code (read by $pool)" \
+      "$(jq -r --arg kind "$kind" 'if $kind == "ASPMembership" then .[0] else .[1] end' <<<"$HASHES")" \
+      "$(code_hash "$tree")"
     # A tree another party runs keeps its own admin, which no manifest entry names.
     check "$tree" "Admin (read by $pool)" "$ADMIN" \
       "$(read_address "$tree" Admin || echo unreadable)" notice

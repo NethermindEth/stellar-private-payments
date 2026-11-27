@@ -135,10 +135,17 @@ test('historyStart reads an added allowlist from its entry and refuses one the m
 test('codeLine compares an allowlist with the pool\'s first hash and a blocklist with its second', () => {
   const [allowlistHash, blocklistHash] = [Buffer.alloc(32, 1), Buffer.alloc(32, 2)];
   const accepted = [allowlistHash, blocklistHash];
-  assert.equal(codeLine(accepted, blocklistHash, false), 'the pool accepts it');
-  assert.throws(() => codeLine(accepted, allowlistHash, false), { message: 'the pool can\'t use it, since its code is different' });
-  assert.equal(codeLine(accepted, allowlistHash, true), 'the pool accepts it');
-  assert.throws(() => codeLine(accepted, undefined, true), /its code is different/);
+  assert.equal(codeLine(accepted, { wasmHash: blocklistHash }, false), 'the pool accepts it');
+  assert.throws(() => codeLine(accepted, { wasmHash: allowlistHash }, false), { message: 'the pool can\'t use it, since its code is different' });
+  assert.equal(codeLine(accepted, { wasmHash: allowlistHash }, true), 'the pool accepts it');
+  assert.throws(() => codeLine(accepted, { wasmHash: undefined }, true), /its code is different/);
+});
+
+test('codeLine refuses a tree running an executable reference', () => {
+  const accepted = [Buffer.alloc(32, 1), Buffer.alloc(32, 2)];
+  assert.throws(() => codeLine(accepted, { wasmHash: undefined, reference: true }, true), {
+    message: 'it runs an executable reference, so its owner could change its code later',
+  });
 });
 
 test('replacesLine fails the contract the pool already uses', () => {
@@ -229,8 +236,18 @@ test('readInstance keys the storage by variant name and gives no hash for a Stel
 
 test('readInstance returns the hash of the Wasm a contract runs', async () => {
   const server = instanceServer(xdr.ContractExecutable.contractExecutableWasm(Buffer.alloc(32, 7)));
-  const { wasmHash } = await readInstance(server, CONTRACT);
+  const { wasmHash, reference } = await readInstance(server, CONTRACT);
   assert.deepEqual(Buffer.from(wasmHash), Buffer.alloc(32, 7));
+  assert.equal(reference, false);
+});
+
+test('readInstance reports an executable reference, with no hash', async () => {
+  const server = instanceServer(xdr.ContractExecutable.contractExecutableExternalRef(
+    new xdr.ContractExecutableExternalRef({ executableOwner: new Address(CONTRACT).toScAddress(), tag: 'tree' }),
+  ));
+  const { wasmHash, reference } = await readInstance(server, CONTRACT);
+  assert.equal(wasmHash, undefined);
+  assert.equal(reference, true);
 });
 
 // Nothing for a hash `nodes` lacks.

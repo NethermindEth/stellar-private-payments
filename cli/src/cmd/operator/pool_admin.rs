@@ -120,8 +120,9 @@ pub fn run(config: &CliConfig, command: PoolAdminCommands, json: bool) -> Result
     }
 }
 
-/// Runs the admin page's re-point checks, except the entry comparison. The
-/// pool itself checks only the tree's code.
+/// Runs the admin page's re-point checks, except the entry comparison and the
+/// executable reference check. The pool itself checks only the tree's code,
+/// which an executable reference to that code passes.
 fn check_repoint(
     config: &CliConfig,
     rpc_url: &str,

@@ -3,12 +3,16 @@ import { Address, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk
 
 import { hex, shortAddress } from './admin-transactions.js';
 
-/** Wasm hash (none for an asset contract) and stored values by `DataKey` name. */
+/**
+ * Wasm hash (none for an asset contract or an executable reference), whether the contract runs an
+ * executable reference, and stored values by `DataKey` name.
+ */
 export async function readInstance(server, contractId) {
   const { val } = await server.getContractData(contractId, xdr.ScVal.scvLedgerKeyContractInstance());
   const { executable, storage } = val.contractData.val.instance;
   return {
     wasmHash: executable.wasmHash?.value,
+    reference: executable.type === 'contractExecutableExternalRef',
     stored: new Map((storage ?? []).map(({ key, val: value }) => [scValToNative(key)[0], scValToNative(value)])),
   };
 }
@@ -52,9 +56,14 @@ export function unusedListWarning(list, usedLists, allowlist) {
     : `No pool uses blocklist ${shortAddress(list)}, so this change has no effect yet. Continue anyway?`;
 }
 
-export function codeLine(acceptedHashes, treeHash, allowlist) {
+// The pool would accept a tree running an executable reference whose target has its code, but the
+// reference's owner could then point it at other code without the pool noticing.
+export function codeLine(acceptedHashes, tree, allowlist) {
+  if (tree.reference) {
+    throw new Error('it runs an executable reference, so its owner could change its code later');
+  }
   const accepted = hex(acceptedHashes[allowlist ? 0 : 1]);
-  const runs = treeHash ? hex(treeHash) : 'no Wasm';
+  const runs = tree.wasmHash ? hex(tree.wasmHash) : 'no Wasm';
   if (runs !== accepted) throw new Error('the pool can\'t use it, since its code is different');
   return 'the pool accepts it';
 }

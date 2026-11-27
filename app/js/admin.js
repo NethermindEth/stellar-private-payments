@@ -1023,7 +1023,7 @@ async function checkRepoint() {
         if (!client.get_asp_wasm_hashes) {
           throw new Error('the pool has no get_asp_wasm_hashes entry point, so it accepts a contract running any code');
         }
-        return codeLine((await client.get_asp_wasm_hashes()).result.unwrap(), treeInstance.wasmHash, allowlist);
+        return codeLine((await client.get_asp_wasm_hashes()).result.unwrap(), treeInstance, allowlist);
       }],
     ]);
     const lines = !code.ok ? [replaces, code] : [replaces, code, ...(await run([
