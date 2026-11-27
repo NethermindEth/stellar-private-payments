@@ -37,6 +37,7 @@ export const CONTRACT_ERRORS = {
         3: 'A key is already on the blocklist.',
         4: 'ASP non-membership proof verification failed.',
         7: 'No admin transfer is pending.',
+        8: 'The key is not a valid BN254 field element.',
     },
     // ASP Membership errors
     aspMembership: {

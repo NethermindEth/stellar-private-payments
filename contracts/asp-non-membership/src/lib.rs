@@ -32,7 +32,9 @@ use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
     vec,
 };
-use soroban_utils::{AdminError, extend_instance, poseidon2_compress, poseidon2_hash2};
+use soroban_utils::{
+    AdminError, constants::bn256_modulus, extend_instance, poseidon2_compress, poseidon2_hash2,
+};
 
 /// Storage keys for contract data
 ///
@@ -79,6 +81,7 @@ pub enum Error {
     NotInitialized = 5,
     Overflow = 6,
     NoPendingAdmin = 7,
+    KeyOutOfRange = 8,
 }
 
 impl From<AdminError> for Error {
@@ -259,6 +262,15 @@ impl ASPNonMembership {
     /// # Returns
     ///
     /// Returns a vector of 256 boolean values representing the key's bits
+    /// Rejects keys outside the BN254 scalar field. Such a key aliases a field
+    /// element but takes a different path through the tree.
+    fn check_key(env: &Env, key: &U256) -> Result<(), Error> {
+        if *key >= bn256_modulus(env) {
+            return Err(Error::KeyOutOfRange);
+        }
+        Ok(())
+    }
+
     fn split_bits(env: &Env, key: &U256) -> Vec<bool> {
         let mut bits = Vec::new(env);
         let mut k = key.clone();
@@ -408,7 +420,9 @@ impl ASPNonMembership {
     ///
     /// * `Error::KeyNotFound` - Database operations failed or invalid node
     ///   structure
+    /// * `Error::KeyOutOfRange` - Key is not below the BN254 scalar modulus
     pub fn find_key(env: Env, key: U256) -> Result<FindResult, Error> {
+        Self::check_key(&env, &key)?;
         let store = env.storage().persistent();
         let root: U256 = env
             .storage()
@@ -441,6 +455,7 @@ impl ASPNonMembership {
     ///
     /// * `Error::KeyAlreadyExists` - Key already exists in the tree
     /// * `Error::KeyNotFound` - Database operations failed
+    /// * `Error::KeyOutOfRange` - Key is not below the BN254 scalar modulus
     pub fn insert_leaf(env: Env, key: U256, value: U256) -> Result<(), Error> {
         soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
         Self::insert(&env, key, value)
@@ -457,8 +472,9 @@ impl ASPNonMembership {
     /// # Errors
     ///
     /// Returns [`Error::KeyAlreadyExists`] if a key is in the tree or repeated,
-    /// [`Error::KeyNotFound`] if a stored node is missing or malformed, and
-    /// [`Error::NotInitialized`] if no admin is stored.
+    /// [`Error::KeyNotFound`] if a stored node is missing or malformed,
+    /// [`Error::KeyOutOfRange`] if a key is not below the BN254 scalar
+    /// modulus, and [`Error::NotInitialized`] if no admin is stored.
     ///
     /// # Panics
     ///
@@ -473,6 +489,7 @@ impl ASPNonMembership {
     /// Inserts one key-value pair without checking authorization.
     #[allow(clippy::cast_possible_truncation)]
     fn insert(env: &Env, key: U256, value: U256) -> Result<(), Error> {
+        Self::check_key(env, &key)?;
         let store = env.storage().persistent();
         let instance = env.storage().instance();
         let root: U256 = instance
@@ -627,9 +644,11 @@ impl ASPNonMembership {
     ///
     /// * `Error::KeyNotFound` - Key does not exist in the tree or database
     ///   operations failed
+    /// * `Error::KeyOutOfRange` - Key is not below the BN254 scalar modulus
     pub fn delete_leaf(env: Env, key: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
         soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
+        Self::check_key(&env, &key)?;
         let instance = env.storage().instance();
         let root: U256 = instance.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
 
@@ -651,7 +670,7 @@ impl ASPNonMembership {
         store.remove(&DataKey::Node(rt_old.clone()));
 
         let mut rt_new: U256;
-        let mut siblings_to_use = find_result.siblings.clone();
+        let mut promoted = false;
 
         // Check if the last sibling is a leaf that should be promoted
         if let Some(last_sibling) = find_result.siblings.last() {
@@ -661,9 +680,7 @@ impl ASPNonMembership {
                 if node_data.len() == 3 && node_data.get(0).ok_or(Error::KeyNotFound)? == one {
                     // Last sibling is a leaf - promote it
                     rt_new = last_sibling.clone();
-                    // Remove the last sibling from the list since we're
-                    // promoting it
-                    siblings_to_use.pop_back();
+                    promoted = true;
                 } else if node_data.len() == 2 {
                     // Last sibling is an internal node - replace with zero
                     rt_new = zero.clone();
@@ -680,14 +697,19 @@ impl ASPNonMembership {
 
         // Rebuild the tree from the deletion point upwards
         let mut mixed = false;
-        let siblings_len = siblings_to_use.len();
+        let siblings_len = find_result.siblings.len();
+        let last_level = siblings_len.saturating_sub(1);
 
         for level_idx in 0..siblings_len {
-            let level = siblings_len.saturating_sub(1).saturating_sub(level_idx); // Process from leaf to root
-            let sibling = siblings_to_use.get(level).ok_or(Error::KeyNotFound)?;
+            let level = last_level.saturating_sub(level_idx); // Process from leaf to root
+            let sibling = find_result.siblings.get(level).ok_or(Error::KeyNotFound)?;
 
-            // Use actual sibling value
-            let new_sibling = sibling.clone();
+            // The promoted leaf moves up, so its old slot becomes empty
+            let new_sibling = if promoted && level == last_level {
+                zero.clone()
+            } else {
+                sibling.clone()
+            };
 
             // Delete old internal node along the old path
             let bit = key_bits.get(level).ok_or(Error::KeyNotFound)?;
@@ -752,6 +774,12 @@ impl ASPNonMembership {
     ///
     /// Returns `Ok(true)` if non-membership is verified, `Ok(false)` if the key
     /// actually exists in the tree.
+    ///
+    /// # Errors
+    ///
+    /// * `Error::InvalidProof` - The proof does not match the stored tree
+    /// * `Error::KeyNotFound` - A stored node is missing or malformed
+    /// * `Error::KeyOutOfRange` - Key is not below the BN254 scalar modulus
     #[allow(clippy::cast_possible_truncation)]
     pub fn verify_non_membership(
         env: Env,
@@ -760,6 +788,7 @@ impl ASPNonMembership {
         not_found_key: U256,
         not_found_value: U256,
     ) -> Result<bool, Error> {
+        Self::check_key(&env, &key)?;
         let store = env.storage().persistent();
         let root: U256 = env
             .storage()
