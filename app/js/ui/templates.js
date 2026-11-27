@@ -37,7 +37,17 @@ export const Templates = {
         Utils.setExplorerLink(tokenLink, Utils.explorerContractUrl(balance.tokenContractId));
         tokenLink.title = balance.tokenContractId;
         el.querySelector('.balance-amount').textContent = Utils.formatPoolAmount(balance.amount, balance.poolContractId);
-        el.querySelector('.balance-notes').textContent = `${balance.noteCount} note${balance.noteCount === 1 ? '' : 's'}`;
+        const pending = el.querySelector('.balance-pending');
+        const pendingAmount = BigInt(balance.pendingAmount ?? 0);
+        pending.hidden = pendingAmount === 0n;
+        pending.querySelector('.balance-pending-text').textContent = pending.hidden
+            ? ''
+            : `${Utils.formatPoolAmount(pendingAmount, balance.poolContractId)} being verified…`;
+        // Pending notes are listed with the rest, so count them too.
+        const pendingNotes = balance.pendingNoteCount ?? 0;
+        const notes = balance.noteCount + pendingNotes;
+        el.querySelector('.balance-notes').textContent = `${notes} note${notes === 1 ? '' : 's'}`
+            + (pendingNotes > 0 ? ` · ${pendingNotes} pending` : '');
         const poolLink = el.querySelector('.balance-pool');
         poolLink.textContent = Utils.shortAddress(balance.poolContractId, 6, 4);
         Utils.setExplorerLink(poolLink, Utils.explorerContractUrl(balance.poolContractId));
@@ -59,7 +69,7 @@ export const Templates = {
     createNoteRow(note, opts = {}) {
         const row = App.templates.noteRow.content.cloneNode(true).firstElementChild;
         row.dataset.noteId = note.id;
-        row.dataset.noteState = note.spent ? 'spent' : 'available';
+        row.dataset.noteState = note.spent ? 'spent' : note.pending ? 'pending' : 'available';
         row.dataset.noteLedger = String(note.createdAtLedger || 0);
         row.querySelector('.note-token').textContent = note.tokenLabel || 'Token';
         row.querySelector('.note-id').textContent = Utils.truncateHex(note.id, 10, 8);
@@ -68,12 +78,12 @@ export const Templates = {
         row.querySelector('.note-ledger').textContent = `Ledger ${note.createdAtLedger || 0}`;
         row.querySelector('.note-pool').textContent = Utils.shortAddress(note.poolContractId, 6, 4);
 
-        row.querySelector('.note-status').replaceWith(createStatusBadge(note.spent));
+        row.querySelector('.note-status').replaceWith(createStatusBadge(note.spent, note.pending));
 
-        // A spent note can't be used as a transact input — hide its Use button.
+        // A spent or pending note can't be used as a transact input — hide its Use button.
         const useBtn = row.querySelector('.note-use');
         if (useBtn) {
-            if (note.spent) {
+            if (note.spent || note.pending) {
                 useBtn.hidden = true;
             } else {
                 useBtn.addEventListener('click', () => opts.onUse?.(note));

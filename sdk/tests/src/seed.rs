@@ -585,6 +585,12 @@ fn insert_user_notes(
                 amount.to_string(),
             ],
         )?;
+        // A seeded note stands for pool history its event chain has checked.
+        tx.execute(
+            "UPDATE raw_contract_events SET checked = 1
+             WHERE id = (SELECT event_id FROM pool_commitments WHERE id = ?1)",
+            params![commitment_id],
+        )?;
     }
 
     tx.commit()?;

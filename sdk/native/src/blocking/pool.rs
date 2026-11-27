@@ -167,6 +167,10 @@ impl PrivatePool {
         block_on(self.inner.balance())
     }
 
+    pub fn pending_balance(&self) -> Result<NoteAmount, Error> {
+        block_on(self.inner.pending_balance())
+    }
+
     pub fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), Error> {
         block_on(self.inner.simulate(prepared))
     }

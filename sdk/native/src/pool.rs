@@ -102,15 +102,26 @@ impl PrivatePool {
             .await?)
     }
 
+    /// Unspent amount of this account's notes in the pool, from synced
+    /// events the pool's event chain has checked. Notes still waiting for that
+    /// check are left out; see [`Self::pending_balance`].
     pub async fn balance(&self) -> Result<NoteAmount, Error> {
         let wallet = self.spendable_notes().await?;
-        wallet
-            .iter()
-            .map(|note| note.amount)
-            .try_fold(NoteAmount::ZERO, |sum, amount| {
-                sum.checked_add(amount)
-                    .ok_or_else(|| Error::Other(anyhow::anyhow!("wallet balance overflow")))
-            })
+        sum_amounts(wallet.iter().map(|note| note.amount))
+    }
+
+    /// Unspent amount of this account's pending notes in the pool: notes from
+    /// synced events the pool's event chain has not checked yet, which
+    /// [`Self::balance`] leaves out. A sync that checks them moves them into
+    /// the balance; see [`UserNoteSummary::pending`].
+    pub async fn pending_balance(&self) -> Result<NoteAmount, Error> {
+        let notes = self.notes().await?;
+        sum_amounts(
+            notes
+                .iter()
+                .filter(|note| note.pending && !note.spent)
+                .map(|note| note.amount),
+        )
     }
 
     pub async fn notes(&self) -> Result<Vec<UserNoteSummary>, Error> {
@@ -725,6 +736,13 @@ impl PrivatePool {
         self.core
             .deposit_transact_step(note_pub, enc_pub, amount, fee)
     }
+}
+
+fn sum_amounts(mut amounts: impl Iterator<Item = NoteAmount>) -> Result<NoteAmount, Error> {
+    amounts.try_fold(NoteAmount::ZERO, |sum, amount| {
+        sum.checked_add(amount)
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("wallet balance overflow")))
+    })
 }
 
 /// Whether `address` is an account (`G...`), which holds a classic asset in a

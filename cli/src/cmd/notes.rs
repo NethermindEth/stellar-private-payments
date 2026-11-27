@@ -267,6 +267,7 @@ mod tests {
                 leaf_index: 1,
                 created_at_ledger: 2,
                 spent: false,
+                pending: false,
                 gvk_ciphertext: None,
             }],
             &deployment,

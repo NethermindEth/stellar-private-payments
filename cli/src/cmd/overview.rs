@@ -378,6 +378,8 @@ mod tests {
             token_label: "XLM".into(),
             amount: NoteAmount::from(1u128),
             note_count: 1,
+            pending_amount: NoteAmount::ZERO,
+            pending_note_count: 0,
         }
     }
 
@@ -396,6 +398,8 @@ mod tests {
             token_label: "XLM".into(),
             amount: NoteAmount::from(123u128),
             note_count: 1,
+            pending_amount: NoteAmount::ZERO,
+            pending_note_count: 0,
         }]
     }
 

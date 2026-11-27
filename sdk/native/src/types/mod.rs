@@ -198,6 +198,11 @@ pub struct UserNoteSummary {
     pub created_at_ledger: u32,
     /// Whether the note has been spent (nullifier observed).
     pub spent: bool,
+    /// Whether the note comes from synced events its pool's event chain has
+    /// not covered yet. A pending note counts toward no balance and cannot be
+    /// spent until a sync checks it; one the chain never covers was not the
+    /// pool's.
+    pub pending: bool,
     /// Admin audit ciphertext from the commitment event, if the pool emits GVK
     /// data.
     pub gvk_ciphertext: Option<GlobalViewKeyCiphertext>,
@@ -216,8 +221,14 @@ pub struct PortfolioBalance {
     pub pool_contract_id: String,
     pub token_contract_id: String,
     pub token_label: String,
+    /// Unspent amount of the checked notes.
     pub amount: NoteAmount,
+    /// Unspent checked notes.
     pub note_count: u32,
+    /// Unspent amount of the pending notes; see [`UserNoteSummary::pending`].
+    pub pending_amount: NoteAmount,
+    /// Unspent pending notes.
+    pub pending_note_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

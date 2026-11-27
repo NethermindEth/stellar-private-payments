@@ -73,7 +73,15 @@ export function filterNotes(notes, { status = 'all', poolId = null } = {}) {
 // Status badge — one source of truth for the Spent/Available pill.
 // ---------------------------------------------------------------------------
 
-export function createStatusBadge(spent) {
+// A pending note waits for a sync to check it against its pool's event history:
+// it counts toward no balance and cannot be spent yet.
+export function createStatusBadge(spent, pending = false) {
+  if (!spent && pending) {
+    const badge = el('span', 'chip', 'Pending');
+    badge.dataset.tone = 'warn';
+    badge.title = 'Waiting for the pool history check. Not in your balance yet.';
+    return badge;
+  }
   const badge = el('span', 'chip', spent ? 'Spent' : 'Available');
   badge.dataset.tone = spent ? 'fail' : 'info';
   return badge;
@@ -147,7 +155,7 @@ export function createNoteRow(note, opts = {}) {
 
   // Right cluster: status badge + amount + any caller actions.
   const rightItems = [];
-  if (showBadge) rightItems.push(createStatusBadge(note.spent));
+  if (showBadge) rightItems.push(createStatusBadge(note.spent, note.pending));
   const amountLabel = el(
     'div',
     'text-xs font-medium whitespace-nowrap text-slate-300 group-has-checked:text-cyan-200',

@@ -131,6 +131,7 @@ async function loadNotes() {
       poolContractId: n.poolContractId,
       amount: n.amount,
       spent: !!n.spent,
+      pending: !!n.pending,
       leafIndex: n.leafIndex ?? 0,
       createdAtLedger: n.createdAtLedger ?? 0,
     }));
