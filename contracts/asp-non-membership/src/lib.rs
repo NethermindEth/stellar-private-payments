@@ -32,7 +32,9 @@ use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
     vec,
 };
-use soroban_utils::{AdminError, extend_instance, poseidon2_compress, poseidon2_hash2};
+use soroban_utils::{
+    AdminError, constants::bn256_modulus, extend_instance, poseidon2_compress, poseidon2_hash2,
+};
 
 /// Storage keys for contract data
 ///
@@ -79,6 +81,7 @@ pub enum Error {
     NotInitialized = 5,
     Overflow = 6,
     NoPendingAdmin = 7,
+    KeyOutOfRange = 8,
 }
 
 impl From<AdminError> for Error {
@@ -259,6 +262,15 @@ impl ASPNonMembership {
     /// # Returns
     ///
     /// Returns a vector of 256 boolean values representing the key's bits
+    /// Rejects keys outside the BN254 scalar field. Such a key aliases a field
+    /// element but takes a different path through the tree.
+    fn check_key(env: &Env, key: &U256) -> Result<(), Error> {
+        if *key >= bn256_modulus(env) {
+            return Err(Error::KeyOutOfRange);
+        }
+        Ok(())
+    }
+
     fn split_bits(env: &Env, key: &U256) -> Vec<bool> {
         let mut bits = Vec::new(env);
         let mut k = key.clone();
@@ -408,7 +420,9 @@ impl ASPNonMembership {
     ///
     /// * `Error::KeyNotFound` - Database operations failed or invalid node
     ///   structure
+    /// * `Error::KeyOutOfRange` - Key is not below the BN254 scalar modulus
     pub fn find_key(env: Env, key: U256) -> Result<FindResult, Error> {
+        Self::check_key(&env, &key)?;
         let store = env.storage().persistent();
         let root: U256 = env
             .storage()
@@ -441,6 +455,7 @@ impl ASPNonMembership {
     ///
     /// * `Error::KeyAlreadyExists` - Key already exists in the tree
     /// * `Error::KeyNotFound` - Database operations failed
+    /// * `Error::KeyOutOfRange` - Key is not below the BN254 scalar modulus
     pub fn insert_leaf(env: Env, key: U256, value: U256) -> Result<(), Error> {
         soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
         Self::insert(&env, key, value)
@@ -457,8 +472,9 @@ impl ASPNonMembership {
     /// # Errors
     ///
     /// Returns [`Error::KeyAlreadyExists`] if a key is in the tree or repeated,
-    /// [`Error::KeyNotFound`] if a stored node is missing or malformed, and
-    /// [`Error::NotInitialized`] if no admin is stored.
+    /// [`Error::KeyNotFound`] if a stored node is missing or malformed,
+    /// [`Error::KeyOutOfRange`] if a key is not below the BN254 scalar
+    /// modulus, and [`Error::NotInitialized`] if no admin is stored.
     ///
     /// # Panics
     ///
@@ -473,6 +489,7 @@ impl ASPNonMembership {
     /// Inserts one key-value pair without checking authorization.
     #[allow(clippy::cast_possible_truncation)]
     fn insert(env: &Env, key: U256, value: U256) -> Result<(), Error> {
+        Self::check_key(env, &key)?;
         let store = env.storage().persistent();
         let instance = env.storage().instance();
         let root: U256 = instance
@@ -627,9 +644,11 @@ impl ASPNonMembership {
     ///
     /// * `Error::KeyNotFound` - Key does not exist in the tree or database
     ///   operations failed
+    /// * `Error::KeyOutOfRange` - Key is not below the BN254 scalar modulus
     pub fn delete_leaf(env: Env, key: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
         soroban_utils::get_admin(&env, &DataKey::Admin)?.require_auth();
+        Self::check_key(&env, &key)?;
         let instance = env.storage().instance();
         let root: U256 = instance.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
 
@@ -755,6 +774,12 @@ impl ASPNonMembership {
     ///
     /// Returns `Ok(true)` if non-membership is verified, `Ok(false)` if the key
     /// actually exists in the tree.
+    ///
+    /// # Errors
+    ///
+    /// * `Error::InvalidProof` - The proof does not match the stored tree
+    /// * `Error::KeyNotFound` - A stored node is missing or malformed
+    /// * `Error::KeyOutOfRange` - Key is not below the BN254 scalar modulus
     #[allow(clippy::cast_possible_truncation)]
     pub fn verify_non_membership(
         env: Env,
@@ -763,6 +788,7 @@ impl ASPNonMembership {
         not_found_key: U256,
         not_found_value: U256,
     ) -> Result<bool, Error> {
+        Self::check_key(&env, &key)?;
         let store = env.storage().persistent();
         let root: U256 = env
             .storage()

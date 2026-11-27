@@ -2,7 +2,7 @@
 
 use super::*;
 use soroban_sdk::{
-    Address, Bytes, Env, IntoVal, InvokeError, TryFromVal, U256,
+    Address, Bytes, Env, IntoVal, TryFromVal, U256,
     testutils::{Address as _, Deployer as _, MockAuth, MockAuthInvoke, storage::Persistent as _},
 };
 use soroban_utils::{MAX_EXTENSION_LEDGERS, constants::bn256_modulus};
@@ -239,8 +239,8 @@ fn test_duplicate_insert_fails() {
     ));
 }
 
-/// The host reduces Poseidon2 inputs modulo `r`, so only the leaf hash's range
-/// check stops a key of `r` hashing as 0. The control `r − 1` inserts.
+/// The host reduces Poseidon2 inputs modulo `r`, so a key of `r` would hash as
+/// 0. The control `r − 1` inserts.
 #[test]
 fn insert_leaf_refuses_a_key_at_the_field_modulus() {
     let env = test_env();
@@ -252,13 +252,54 @@ fn insert_leaf_refuses_a_key_at_the_field_modulus() {
     let below_r = r.sub(&U256::from_u32(&env, 1u32));
     let value = U256::from_u32(&env, 42u32);
 
-    assert!(matches!(
+    assert_eq!(
         client.try_insert_leaf(&r, &value),
-        Err(Err(InvokeError::Abort))
-    ));
+        Err(Ok(Error::KeyOutOfRange))
+    );
+    assert_eq!(
+        client.try_insert_leaves(&vec![&env, (r.clone(), value.clone())]),
+        Err(Ok(Error::KeyOutOfRange))
+    );
 
     client.insert_leaf(&below_r, &value);
     assert!(client.find_key(&below_r).found);
+}
+
+/// `k + r` is the same field element as a listed key `k` but takes a different
+/// bit path, so every entry point must refuse it rather than report it absent.
+#[test]
+fn every_entry_point_refuses_a_key_aliasing_a_listed_key() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+    let key = U256::from_u32(&env, 5u32);
+    let value = U256::from_u32(&env, 9u32);
+    client.insert_leaf(&key, &value);
+    client.insert_leaf(&U256::from_u32(&env, 6u32), &value);
+
+    let alias = key.add(&bn256_modulus(&env));
+    let zero = U256::from_u32(&env, 0u32);
+    let root = client.get_root();
+
+    assert!(matches!(
+        client.try_find_key(&alias),
+        Err(Ok(Error::KeyOutOfRange))
+    ));
+    assert_eq!(
+        client.try_verify_non_membership(&alias, &Vec::new(&env), &zero, &zero),
+        Err(Ok(Error::KeyOutOfRange))
+    );
+    assert_eq!(
+        client.try_delete_leaf(&alias),
+        Err(Ok(Error::KeyOutOfRange))
+    );
+    assert_eq!(
+        client.try_insert_leaf(&alias, &value),
+        Err(Ok(Error::KeyOutOfRange))
+    );
+    assert_eq!(client.get_root(), root);
 }
 
 /// Test that matches the circuits test: insert key=1, value=42

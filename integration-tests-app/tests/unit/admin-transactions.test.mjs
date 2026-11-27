@@ -408,6 +408,13 @@ test('explainFailure names a blocklist key that is already listed', () => {
   );
 });
 
+test('explainFailure names a blocklist key outside the field', () => {
+  assert.equal(
+    explainFailure(new Error('HostError: Error(Contract, #8)'), 'asp-non-membership'),
+    'The key is not a valid BN254 field element.',
+  );
+});
+
 test('explainFailure names a call too large for one transaction', () => {
   assert.equal(
     explainFailure(new Error('HostError: Error(Budget, ExceededLimit)'), 'asp-non-membership'),
