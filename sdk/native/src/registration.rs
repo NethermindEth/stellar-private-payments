@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct RegistrationRequest {
     pub user_address: String,
+    /// Storage key of the owner's privacy keys, from
+    /// [`crate::types::ContractConfig::key_derivation_message`].
     pub kdf_domain: String,
     pub public_key_registry: String,
 }

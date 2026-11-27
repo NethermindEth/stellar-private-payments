@@ -45,6 +45,10 @@ const DISCLOSE_MAX_RETRIES: u32 = 50;
 /// Main entry point for a single privacy pool.
 ///
 /// Construct via [`crate::Account::pool`].
+///
+/// Every method that reads privacy keys fails if the deployment config has no
+/// `networkPassphrase`; see
+/// [`crate::types::ContractConfig::key_derivation_message`].
 pub struct PrivatePool {
     rpc: RpcClient,
     config: PrivatePoolConfig,
@@ -119,7 +123,7 @@ impl PrivatePool {
             .notes(
                 &self.config.pool_contract_id,
                 self.config.user_address.as_str(),
-                &self.config.contract_config.kdf_domain,
+                &self.config.contract_config.key_derivation_message()?,
             )
             .await
     }
@@ -299,7 +303,7 @@ impl PrivatePool {
 
             let inputs_req = DisclosureInputsRequest {
                 user_address: self.config.user_address.as_str().to_string(),
-                kdf_domain: self.config.contract_config.kdf_domain.clone(),
+                kdf_domain: self.config.contract_config.key_derivation_message()?,
                 pool_address: self.config.pool_contract_id.clone(),
                 selected_commitments: selected_commitments.clone(),
                 pool_root: Some(pool_root),
@@ -383,7 +387,7 @@ impl PrivatePool {
             .spendable_notes(
                 &self.config.pool_contract_id,
                 self.config.user_address.as_str(),
-                &self.config.contract_config.kdf_domain,
+                &self.config.contract_config.key_derivation_message()?,
             )
             .await
     }
@@ -513,7 +517,7 @@ impl PrivatePool {
         let req = transact_request_from_step(
             &step,
             self.config.user_address.as_str(),
-            &self.config.contract_config.kdf_domain,
+            &self.config.contract_config.key_derivation_message()?,
             &self.config.pool_contract_id,
             &chain,
         );
@@ -532,7 +536,7 @@ impl PrivatePool {
             .spendable_notes(
                 &self.config.pool_contract_id,
                 self.config.user_address.as_str(),
-                &self.config.contract_config.kdf_domain,
+                &self.config.contract_config.key_derivation_message()?,
             )
             .await?;
         transact::check_balance(
@@ -644,7 +648,7 @@ impl PrivatePool {
             .storage
             .privacy_keys(
                 self.config.user_address.as_str(),
-                &self.config.contract_config.kdf_domain,
+                &self.config.contract_config.key_derivation_message()?,
             )
             .await?;
         self.fetcher
@@ -719,7 +723,7 @@ impl PrivatePool {
             .storage
             .privacy_keys(
                 self.config.user_address.as_str(),
-                &self.config.contract_config.kdf_domain,
+                &self.config.contract_config.key_derivation_message()?,
             )
             .await?;
         self.core

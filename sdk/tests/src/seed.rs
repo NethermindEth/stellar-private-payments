@@ -46,6 +46,7 @@ pub const POOL_MERKLE_LEVELS: u32 = 20;
 pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
 pub const TEST_NETWORK: &str = "test";
 pub const TEST_KDF_DOMAIN: &str = "tests";
+pub const TEST_NETWORK_PASSPHRASE: &str = "Test SDF Network ; September 2015";
 const TEST_LEDGER: u32 = 1;
 
 fn test_derivation_signature() -> KeyDerivationSignature {
@@ -97,7 +98,7 @@ pub fn seed_prove_wallet(
 
     storage.save_encryption_and_note_keypairs(
         user_address,
-        TEST_KDF_DOMAIN,
+        &encryption::key_derivation_message(TEST_KDF_DOMAIN, TEST_NETWORK_PASSPHRASE),
         &note_keypair,
         &encryption_keypair,
         &membership_blinding,

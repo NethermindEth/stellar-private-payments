@@ -78,6 +78,9 @@ to `CircuitStore::open(artifacts_dir, lock)`. Separate stores can use different
 bundles in the same process. `ensure()` retains its optional download behavior;
 local `artifacts()` reads and verifies files without downloading.
 
+Privacy key operations need `networkPassphrase` in the `ContractConfig`. Keys
+are derived for that network, and local storage keeps each network's keys apart.
+
 For the browser SDK, pass `contractConfig`, `circuitsBaseUrl`, and `circuitLock`
 (the parsed `circuits.json` object) to `Client.new`. Walletless disclosure
 verification takes the same bundle settings. A supplied, already-configured

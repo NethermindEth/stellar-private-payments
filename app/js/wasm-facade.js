@@ -7,7 +7,7 @@ import { startAutoLock, loadAutoLockSetting, clearAutoLockSetting, autoLockMinut
  * `client().backgroundSync` → `client().openAccount` → `account().pool`.
  *
  * Privacy key reads use the SDK (`account().privacyKeys`, `account().aspSecret`, etc.).
- * App-only persistence (disclaimer, explorer, bootnode, op history, key probe) stays on `storage()`.
+ * App-only persistence (disclaimer, explorer, bootnode, op history) stays on `storage()`.
  */
 
 import init, {

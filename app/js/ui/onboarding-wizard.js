@@ -217,10 +217,10 @@ export async function runOnboardingWizard({
 
     const storage = client().storage();
     const disclaimerState = await storage.getDisclaimerState(address);
-    const storedPublicKeys = await storage
-        .getPrivacyKeys(address, client().contractConfig().kdf_domain)
+    const storedPublicKeys = await client()
+        .openAccount({ networkPassphrase, userAddress: address }, signer)
+        .then(() => client().account().privacyKeys())
         .catch(() => null);
-    const keysExist = !!storedPublicKeys?.noteKeypair?.public;
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();
     const registryLookup = await client().recipientLookup(address).catch(() => null);
@@ -241,7 +241,7 @@ export async function runOnboardingWizard({
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
         ...(needsNotificationStep || !bootnodeSetting || bootnodeUnresolved ? ['retention'] : []),
         ...(needsStorageStep ? ['storage'] : []),
-        ...(!keysExist ? ['keys'] : []),
+        ...(!storedPublicKeys ? ['keys'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
         // Only offer registration when the registry is fully synced AND there's no
         // entry. If the local registry hasn't synced yet, the lookup can't prove the
@@ -272,10 +272,10 @@ export async function runOnboardingWizard({
     document.getElementById('onboarding-modal').oncancel = cancelOnboarding;
 
     const state = {
-        keys: keysExist
+        keys: storedPublicKeys
             ? {
-                pubKey: storedPublicKeys.noteKeypair.public,
-                encryptionKeypair: { publicKey: storedPublicKeys.encryptionKeypair.public },
+                pubKey: storedPublicKeys.notePublicKey,
+                encryptionKeypair: { publicKey: storedPublicKeys.encryptionPublicKey },
             }
             : null,
         explorerBaseUrl: explorerPreference() || explorerSetting?.baseUrl || deploymentDefaults.explorerUrl,

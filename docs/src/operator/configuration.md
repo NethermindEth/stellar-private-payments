@@ -18,7 +18,7 @@ asking users to move.
 | Pool fee | `--fee`, or `fee=` in a `--pool` spec | An amount in the token's smallest unit | What every transaction pays the pool. A deposit sends it on top of what it leaves in notes; a transfer or withdrawal pays it from the notes it spends. `1000000` is 0.1 XLM. To choose it, see [Pool fee and smallest deposit](../deploy.md#pool-fee-and-smallest-deposit). |
 | Smallest deposit | `--min-deposit`, or `min=` in a `--pool` spec | An amount in the token's smallest unit | The least a deposit can leave in notes after the pool fee. `10000000` is 1 XLM. Withdrawals have no minimum. |
 | Maximum deposit | `--max-deposit`, or `max=` in a `--pool` spec | An amount in the token's smallest unit | The most a single deposit sends, pool fee included. `1000000000` is 100 XLM. The limit is per transaction, so a user can split a larger amount. Withdrawals have no limit. |
-| KDF domain | `--kdf-domain` | Any string | Part of the message users sign to derive their keys. The same wallet gets different keys under another domain. |
+| KDF domain | `--kdf-domain` | Any string | Part of the message users sign to derive their keys. The same wallet gets different keys under another domain or on another network. |
 | Pool depth | `--pool-levels` | `20` | The committed circuits prove against 20 levels. See [Limits](features-and-limits.md#limits) for the capacity this gives. |
 | Allowlist depth | `--asp-levels` | `10` | The committed circuits prove against 10 levels. |
 | Verifier | Picked from the release by `deploy.sh`, or built by it without `--release-dir` | One per policy and GVK mode in use | The verifying key is built into the verifier, and a pool's verifier is fixed. |

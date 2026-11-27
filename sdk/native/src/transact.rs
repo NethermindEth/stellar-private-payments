@@ -25,6 +25,8 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct TransactRequest {
     pub user_address: String,
+    /// Storage key of the owner's privacy keys, from
+    /// [`crate::types::ContractConfig::key_derivation_message`].
     pub kdf_domain: String,
     pub pool_root: Option<Field>,
     pub pool_next_index: u32,

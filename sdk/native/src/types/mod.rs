@@ -414,15 +414,30 @@ impl From<&PoolConfigEntry> for PortfolioPoolEntry {
 impl ContractConfig {
     /// Reject missing identity metadata and connections to another network.
     pub fn validate_network(&self, passphrase: &str) -> Result<()> {
-        let expected = self
-            .network_passphrase
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| anyhow!("deployment config is missing networkPassphrase"))?;
-        if expected != passphrase {
+        if self.required_passphrase()? != passphrase {
             return Err(anyhow!("network passphrase mismatch for {}", self.network));
         }
         Ok(())
+    }
+
+    /// Returns the message the owner signs to derive privacy keys for this
+    /// deployment's KDF domain and network.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `networkPassphrase` is missing or blank.
+    pub fn key_derivation_message(&self) -> Result<String> {
+        Ok(crate::zk::encryption::key_derivation_message(
+            &self.kdf_domain,
+            self.required_passphrase()?,
+        ))
+    }
+
+    fn required_passphrase(&self) -> Result<&str> {
+        self.network_passphrase
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow!("deployment config is missing networkPassphrase"))
     }
 
     pub fn enabled_pools(&self) -> impl Iterator<Item = &PoolConfigEntry> {
@@ -886,9 +901,12 @@ mod network_config_tests {
     }
     #[test]
     fn old_schema_loads_but_cannot_skip_network_validation() {
-        let config = legacy();
+        let mut config = legacy();
         assert!(config.network_passphrase.is_none());
         assert!(config.validate_network("anything").is_err());
+        assert!(config.key_derivation_message().is_err());
+        config.network_passphrase = Some("  ".into());
+        assert!(config.key_derivation_message().is_err());
     }
     #[test]
     fn network_identity_uses_passphrase_not_name() {
@@ -897,6 +915,10 @@ mod network_config_tests {
         config.rpc_url = Some("http://localhost:8000/rpc".into());
         assert!(config.validate_network("custom passphrase").is_ok());
         assert!(config.validate_network("different").is_err());
+        assert_eq!(
+            config.key_derivation_message().expect("passphrase set"),
+            crate::zk::encryption::key_derivation_message("tests", "custom passphrase")
+        );
         let value = serde_json::to_value(&config).expect("valid config fixture");
         assert_eq!(value["networkPassphrase"], "custom passphrase");
         let parsed: ContractConfig = serde_json::from_value(value).expect("valid config fixture");
