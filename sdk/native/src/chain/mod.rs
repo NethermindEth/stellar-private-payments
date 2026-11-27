@@ -19,7 +19,7 @@ pub use signer::{
 };
 pub use stellar_xdr::{Limits, ReadXdr, TransactionEnvelope, WriteXdr};
 
-pub(crate) use contract_state::OnchainProofPublicInputs;
+pub(crate) use contract_state::{OnchainProofPublicInputs, check_tree_code};
 pub(crate) use conversions::{
     ParsedContractEvent, event_name, field_to_scval_u256, parse_event_metadata,
     scval_to_address_string, scval_to_bytes, scval_to_global_view_key_ciphertext,

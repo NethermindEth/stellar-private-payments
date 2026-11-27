@@ -5,7 +5,10 @@ use stellar_xdr as xdr;
 
 use crate::{
     Error,
-    chain::{ContractDataBulkRequest, RpcClient, scval_to_address_string, scval_to_policy_flags},
+    chain::{
+        ContractDataBulkRequest, RpcClient, check_tree_code, scval_to_address_string,
+        scval_to_policy_flags,
+    },
     types::PolicyFlags,
 };
 
@@ -84,18 +87,42 @@ impl PoolAdmin {
     }
 
     /// Points the pool at membership tree `tree`, sourced by the pool admin.
-    /// The pool refuses a tree that does not run its allowlist code.
+    /// The pool refuses a tree that does not run its allowlist code, and this
+    /// refuses one that runs an executable reference, which the pool accepts.
     pub async fn repoint_allowlist(&self, tree: &str) -> Result<UnsignedOperatorCall, Error> {
-        let tree = address_arg(tree)?;
-        self.admin_call("update_asp_membership", vec![tree]).await
+        let arg = address_arg(tree)?;
+        self.check_tree_code(tree, "ASPMembershipWasmHash").await?;
+        self.admin_call("update_asp_membership", vec![arg]).await
     }
 
     /// Points the pool at non-membership tree `tree`, sourced by the pool
-    /// admin. The pool refuses a tree that does not run its blocklist code.
+    /// admin. The pool refuses a tree that does not run its blocklist code,
+    /// and this refuses one that runs an executable reference.
     pub async fn repoint_blocklist(&self, tree: &str) -> Result<UnsignedOperatorCall, Error> {
-        let tree = address_arg(tree)?;
-        self.admin_call("update_asp_non_membership", vec![tree])
+        let arg = address_arg(tree)?;
+        self.check_tree_code(tree, "ASPNonMembershipWasmHash")
+            .await?;
+        self.admin_call("update_asp_non_membership", vec![arg])
             .await
+    }
+
+    async fn check_tree_code(&self, tree: &str, hash_key: &str) -> Result<(), Error> {
+        let requests =
+            [self.contract_id.as_str(), tree].map(|contract_id| ContractDataBulkRequest {
+                contract_id,
+                enum_keys: Vec::new(),
+            });
+        let (state, _) = self.rpc.get_contract_data_bulk(&requests).await?;
+        let empty = HashMap::new();
+        let pool_state = state.get(&self.contract_id).unwrap_or(&empty);
+        check_tree_code(
+            &self.contract_id,
+            pool_state,
+            tree,
+            state.get(tree),
+            hash_key,
+        )?;
+        Ok(())
     }
 
     /// Stops deposits; transfers and withdrawals continue.
@@ -156,5 +183,144 @@ mod tests {
         state.remove("ASPNonMembership");
         let err = PoolLists::from_instance("pool", &state).expect_err("missing blocklist");
         assert!(err.to_string().contains("ASPNonMembership"), "{err}");
+    }
+}
+
+// The mocked RPC is native-only.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod rpc_tests {
+    use serde_json::{Value, json};
+    use stellar_xdr::{Limits, WriteXdr};
+    use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::method};
+
+    use super::*;
+    use crate::types::ContractConfig;
+
+    fn contract(byte: u8) -> String {
+        stellar_strkey::Contract([byte; 32])
+            .to_string()
+            .as_str()
+            .to_owned()
+    }
+
+    /// The instance entry of contract `byte`, as `getLedgerEntries` returns it.
+    fn instance_entry(
+        byte: u8,
+        executable: xdr::ContractExecutable,
+        storage: Vec<(&str, xdr::ScVal)>,
+    ) -> Value {
+        let contract = xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash([byte; 32])));
+        let storage: Vec<_> = storage
+            .into_iter()
+            .map(|(name, val)| {
+                let name = xdr::ScVal::Symbol(name.try_into().expect("symbol"));
+                xdr::ScMapEntry {
+                    key: xdr::ScVal::Vec(Some(vec![name].try_into().expect("key"))),
+                    val,
+                }
+            })
+            .collect();
+        let key = xdr::ScVal::LedgerKeyContractInstance;
+        let durability = xdr::ContractDataDurability::Persistent;
+        let ledger_key = xdr::LedgerKey::ContractData(xdr::LedgerKeyContractData {
+            contract: contract.clone(),
+            key: key.clone(),
+            durability,
+        });
+        let entry = xdr::LedgerEntryData::ContractData(xdr::ContractDataEntry {
+            ext: xdr::ExtensionPoint::V0,
+            contract,
+            key,
+            durability,
+            val: xdr::ScVal::ContractInstance(xdr::ScContractInstance {
+                executable,
+                storage: Some(storage.try_into().expect("storage")),
+            }),
+        });
+        json!({
+            "key": ledger_key.to_xdr_base64(Limits::none()).expect("key XDR"),
+            "xdr": entry.to_xdr_base64(Limits::none()).expect("entry XDR"),
+            "lastModifiedLedgerSeq": 1,
+        })
+    }
+
+    /// The admin of a pool, contract 1, that stores `[7; 32]` as both trees'
+    /// code, and a tree, contract 2, that runs `tree_code`.
+    async fn admin_with_tree(tree_code: xdr::ContractExecutable) -> (MockServer, PoolAdmin) {
+        let pinned = xdr::ScVal::Bytes(vec![7; 32].try_into().expect("hash"));
+        let pool_code = xdr::ContractExecutable::Wasm(xdr::Hash([0; 32]));
+        let entries = [
+            instance_entry(
+                1,
+                pool_code,
+                vec![
+                    ("ASPMembershipWasmHash", pinned.clone()),
+                    ("ASPNonMembershipWasmHash", pinned),
+                ],
+            ),
+            instance_entry(2, tree_code, Vec::new()),
+        ];
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(move |request: &Request| {
+                let body: Value = request.body_json().expect("JSON-RPC request");
+                assert_eq!(body["method"], "getLedgerEntries");
+                let keys = body["params"]["keys"].as_array().expect("requested keys");
+                let requested: Vec<_> = entries
+                    .iter()
+                    .filter(|entry| keys.contains(&entry["key"]))
+                    .collect();
+                ResponseTemplate::new(200).set_body_json(json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": { "latestLedger": 42, "entries": requested },
+                }))
+            })
+            .mount(&server)
+            .await;
+        let rpc = RpcClient::new(&server.uri()).expect("RPC");
+        let admin = PoolAdmin::new(rpc, ContractConfig::default(), &contract(1));
+        (server, admin)
+    }
+
+    #[tokio::test]
+    async fn repointing_refuses_a_tree_running_an_executable_reference() {
+        let reference = xdr::ContractExecutable::ExternalRef(xdr::ContractExecutableExternalRef {
+            executable_owner: xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash([9; 32]))),
+            tag: b"tree".to_vec().try_into().expect("tag"),
+        });
+        let (_server, admin) = admin_with_tree(reference).await;
+        for result in [
+            admin.repoint_allowlist(&contract(2)).await,
+            admin.repoint_blocklist(&contract(2)).await,
+        ] {
+            let err = result.expect_err("reference tree");
+            assert!(err.to_string().contains("executable reference"), "{err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn repointing_refuses_a_tree_running_other_wasm() {
+        let other = xdr::ContractExecutable::Wasm(xdr::Hash([8; 32]));
+        let (_server, admin) = admin_with_tree(other).await;
+        for result in [
+            admin.repoint_allowlist(&contract(2)).await,
+            admin.repoint_blocklist(&contract(2)).await,
+        ] {
+            let err = result.expect_err("other code");
+            assert!(err.to_string().contains("runs other code"), "{err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_tree_running_the_pinned_wasm_passes_the_repoint_check() {
+        let pinned = xdr::ContractExecutable::Wasm(xdr::Hash([7; 32]));
+        let (_server, admin) = admin_with_tree(pinned).await;
+        for hash_key in ["ASPMembershipWasmHash", "ASPNonMembershipWasmHash"] {
+            admin
+                .check_tree_code(&contract(2), hash_key)
+                .await
+                .expect("pinned code");
+        }
     }
 }
