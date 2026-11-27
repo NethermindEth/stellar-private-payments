@@ -473,7 +473,8 @@ than the RPC's event retention, about seven days on the public testnet RPC:
    call waits for signers in the Admin Transaction card, and Done once the card sees it land.
 
 With the CLI, `spp pool-admin repoint --pool POOL --allowlist TREE`, or `--blocklist TREE`, runs
-the panel's checks except the entry comparison. It refuses the tree the pool already uses, and an
+the panel's checks except the entry comparison and the executable reference check, so use the
+panel for a tree another party deployed. It refuses the tree the pool already uses, and an
 allowlist the deployment config doesn't name or whose levels differ from the current one's. It asks
 before a tree whose admin is not the pool's; `--yes` answers for scripts. Compare the entries with
 your records before running it.
