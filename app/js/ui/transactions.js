@@ -18,7 +18,7 @@ import { Dashboard } from './dashboard.js';
 import { PoolDepositStatus } from './pool-deposit-status.js';
 import { describeError, UserFacingError } from './errors.js';
 import { parseAmountInput } from '../amount-input.js';
-import { poolErrorMessage } from '../pool-errors.js';
+import { noteLimitWarning, poolErrorMessage } from '../pool-errors.js';
 import { disclosedCopy } from '../disclosure-notes.js';
 import { confirmAction } from './confirm.js';
 import { showTrustlineHelp } from './trustline-help.js';
@@ -141,7 +141,8 @@ function withdrawalRecipientWarning(owner) {
 async function refusalTerms(pool, decimals) {
     const fee = await (await ensureAppPool()).fee();
     const label = Utils.poolLabel(pool);
-    return { fee, label, format: (amount) => Utils.formatTokenAmount(amount, label, decimals) };
+    const noteCount = App.state.balances.find(b => b.poolContractId === pool.poolContractId)?.noteCount;
+    return { fee, label, noteCount, format: (amount) => Utils.formatTokenAmount(amount, label, decimals) };
 }
 
 // The refusals a spend's notes give.
@@ -267,17 +268,22 @@ function updatePoolLabels() {
 let maxSpendCall = 0;
 let maxSpendPoolId = null;
 
-// Show the balance of the currently selected token in Move Funds, and the most
-// one transfer or withdrawal can send from it after the pool fees.
+// Show the balance of the currently selected token in Move Funds, the most one
+// transfer or withdrawal can send from it after the pool fees, and a warning
+// when the balance is spread over more notes than one can spend.
 async function updateMoveFundsBalance() {
     const el = document.getElementById('move-funds-balance');
     const maxEl = document.getElementById('move-funds-max-spend');
-    if (!el || !maxEl) return;
+    const limitEl = document.getElementById('move-funds-note-limit');
+    if (!el || !maxEl || !limitEl) return;
     const call = ++maxSpendCall;
     const poolId = App.state.selectedPoolId;
     const balance = (App.state.balances || []).find(b => b.poolContractId === poolId);
     el.textContent = balance ? Utils.formatPoolAmount(balance.amount, balance.poolContractId) : '—';
-    if (poolId !== maxSpendPoolId) maxEl.textContent = '—';
+    if (poolId !== maxSpendPoolId) {
+        maxEl.textContent = '—';
+        limitEl.hidden = true;
+    }
     maxSpendPoolId = poolId;
     let maxSpend = null;
     try {
@@ -287,6 +293,8 @@ async function updateMoveFundsBalance() {
     }
     if (call !== maxSpendCall) return;
     maxEl.textContent = maxSpend == null ? '—' : Utils.formatPoolAmount(maxSpend, poolId);
+    limitEl.textContent = maxSpend ? noteLimitWarning(balance.noteCount) : null;
+    limitEl.hidden = !limitEl.textContent;
 }
 
 // Name the pool fee and the smallest deposit under the deposit amount, and the

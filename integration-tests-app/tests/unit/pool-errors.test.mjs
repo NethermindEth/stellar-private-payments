@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { poolErrorMessage } from '../../../app/js/pool-errors.js';
+import { noteLimitWarning, poolErrorMessage } from '../../../app/js/pool-errors.js';
 import { formatAmount } from '../../../app/js/ui/notes-view.js';
 
 const terms = { fee: 1000n, format: (amount) => formatAmount(amount, 'XLM', 7) };
@@ -24,6 +25,22 @@ test('each refusal names its amount in the pool token', () => {
     poolErrorMessage(refusal('NO_COMBINATION', { maxSpend: 99000n }), terms),
     'You can send at most 0.0099 XLM. Each transaction pays a 0.0001 XLM pool fee.',
   );
+});
+
+test('a spend held back by the note limit names it instead of the fee', () => {
+  const limit = 'Your balance is split across 11 notes. One transfer or withdrawal can spend at most 10 of them, so send larger amounts in parts.';
+  assert.equal(noteLimitWarning(11), limit);
+  assert.equal(
+    poolErrorMessage(refusal('NO_COMBINATION', { maxSpend: 991000n }), { ...terms, noteCount: 11 }),
+    `You can send at most 0.0991 XLM. ${limit}`,
+  );
+});
+
+test('the note limit is TRANSACTION_LIMIT in the SDK planner', async () => {
+  const planner = await readFile(new URL('../../../sdk/native/src/planner/plan/combination.rs', import.meta.url), 'utf8');
+  const limit = Number(planner.match(/TRANSACTION_LIMIT: usize = (\d+);/)[1]);
+  assert.equal(noteLimitWarning(limit), null);
+  assert.match(noteLimitWarning(limit + 1), new RegExp(`across ${limit + 1} notes\\. .*at most ${limit} of them`));
 });
 
 test('a deposit that already holds the fee is bounded by the maximum and the minimum after the fee', () => {
