@@ -154,12 +154,7 @@ impl PoolAdmin {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
-    use stellar_xdr::{Limits, WriteXdr};
-    use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::method};
-
     use super::*;
-    use crate::types::ContractConfig;
 
     const TREE: &str = "CA3D5KRYM6CB7OWQ6TWYRR3Z4T7GNZLKERYNZGGA5SOAOPIFY6YQGAXE";
 
@@ -189,6 +184,17 @@ mod tests {
         let err = PoolLists::from_instance("pool", &state).expect_err("missing blocklist");
         assert!(err.to_string().contains("ASPNonMembership"), "{err}");
     }
+}
+
+// The mocked RPC is native-only.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod rpc_tests {
+    use serde_json::{Value, json};
+    use stellar_xdr::{Limits, WriteXdr};
+    use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers::method};
+
+    use super::*;
+    use crate::types::ContractConfig;
 
     fn contract(byte: u8) -> String {
         stellar_strkey::Contract([byte; 32])
