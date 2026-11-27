@@ -1,14 +1,24 @@
 import { CONTRACT_ERRORS } from './ui/errors.js';
 
 const NOTHING_YET = 'You have nothing to send yet. If you just deposited, try again in a few seconds; otherwise, deposit first.';
+// The SDK planner's TRANSACTION_LIMIT.
+const NOTE_LIMIT = 10;
+
+// The warning for more notes than one transfer or withdrawal can spend, or null.
+export function noteLimitWarning(noteCount) {
+  return noteCount > NOTE_LIMIT
+    ? `Your balance is split across ${noteCount} notes. One transfer or withdrawal can spend at most ${NOTE_LIMIT} of them, so send larger amounts in parts.`
+    : null;
+}
 
 /**
  * The sentence for a refusal the SDK gave a `code`, or null. `feeIncluded` is
  * for an amount that already holds the fee, as the Advanced form's Public deposit.
  * `NOT_BALANCED` needs the Advanced form's `amounts`. `label` names the pool's
- * token in the trustline refusals.
+ * token in the trustline refusals. `noteCount` counts the user's unspent notes
+ * in the pool.
  */
-export function poolErrorMessage(error, { fee, format, feeIncluded = false, amounts, label = 'this token' }) {
+export function poolErrorMessage(error, { fee, format, feeIncluded = false, amounts, label = 'this token', noteCount }) {
   switch (error?.code) {
     case 'TRUSTLINE_MISSING':
       return `The account that pays has no trustline for ${label}. Add ${label} in your wallet, get some into the account, then deposit again.`;
@@ -50,7 +60,10 @@ export function poolErrorMessage(error, { fee, format, feeIncluded = false, amou
           ? `You have nothing to send. Each transaction spends at most two of your notes, and its ${format(fee)} pool fee would use them up. If you just deposited, try again in a few seconds; otherwise, deposit more first.`
           : NOTHING_YET;
       }
-      return `You can send at most ${format(error.maxSpend)}.${fee ? ` Each transaction pays a ${format(fee)} pool fee.` : ''}`;
+      return [
+        `You can send at most ${format(error.maxSpend)}.`,
+        noteLimitWarning(noteCount) ?? (fee ? `Each transaction pays a ${format(fee)} pool fee.` : ''),
+      ].filter(Boolean).join(' ');
     default:
       return null;
   }

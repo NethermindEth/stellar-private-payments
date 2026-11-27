@@ -165,10 +165,13 @@
                                     <span class="text-slate-400">Balance</span>
                                     <span id="move-funds-balance" class="font-mono font-medium text-white">—</span>
                                 </p>
-                                <p data-max-spend class="mt-2 flex items-baseline justify-between gap-2 text-sm" hidden>
-                                    <span class="text-slate-400">Max to send after pool fees</span>
-                                    <span id="move-funds-max-spend" class="font-mono font-medium text-white">—</span>
-                                </p>
+                                <div data-max-spend class="mt-2" hidden>
+                                    <p class="flex items-baseline justify-between gap-2 text-sm">
+                                        <span class="text-slate-400">Max to send after pool fees</span>
+                                        <span id="move-funds-max-spend" class="font-mono font-medium text-white">—</span>
+                                    </p>
+                                    <p id="move-funds-note-limit" class="mt-2 w-0 min-w-full text-pretty text-xs text-amber-200" hidden></p>
+                                </div>
                                 <!-- Rendered by pool-controls.js. w-0 min-w-full: fill the card without widening it to fit an explanation. -->
                                 <section data-pool-controls="move" aria-labelledby="move-pool-controls-heading" class="mt-4 w-0 min-w-full border-t border-white/8 pt-4" hidden>
                                     <div class="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1">
