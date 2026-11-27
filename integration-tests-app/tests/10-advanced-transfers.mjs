@@ -28,7 +28,7 @@ export async function run(helpers) {
   const initialSync = await waitForSyncedLedger(page);
   const noteReady = waitForNotesAfterIndexer(page, {
     afterLedger: initialSync.ledger,
-    notes: { minCount: 1 },
+    notes: { minCount: 1, predicate: (note) => note.state === 'available' },
   });
   const depositResult = await deposit(helpers, { logTag, amount: '0.01', rpcUrl });
 

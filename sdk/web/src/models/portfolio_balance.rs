@@ -34,6 +34,18 @@ impl PortfolioBalance {
     pub fn note_count(&self) -> u32 {
         self.inner.note_count
     }
+
+    /// Unspent amount of the pending notes, left out of `amount` until a sync
+    /// checks them (`bigint` in JS).
+    #[wasm_bindgen(getter, js_name = pendingAmount)]
+    pub fn pending_amount(&self) -> u128 {
+        u128::from(self.inner.pending_amount)
+    }
+
+    #[wasm_bindgen(getter, js_name = pendingNoteCount)]
+    pub fn pending_note_count(&self) -> u32 {
+        self.inner.pending_note_count
+    }
 }
 
 impl From<NativePortfolioBalance> for PortfolioBalance {

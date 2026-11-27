@@ -55,6 +55,12 @@ CREATE TABLE raw_contract_events (
     -- could not extend.
     chain_count INTEGER,
     chain_hash BLOB CHECK (chain_hash IS NULL OR length(chain_hash) = 32),
+    -- Whether the event is covered by its contract's event chain as the contract
+    -- published it, so the wallet can count what was derived from it. Set when a
+    -- published chain's hash matches the saved chain at its count, cleared when
+    -- the event is un-folded. Events of contracts with no event chain are never
+    -- checked.
+    checked INTEGER NOT NULL DEFAULT 0 CHECK (checked IN (0, 1)),
     FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_raw_contract_events_ledger_id ON raw_contract_events(ledger, id);

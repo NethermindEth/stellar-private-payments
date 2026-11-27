@@ -2113,4 +2113,137 @@ mod tests {
         // Only the probe that found the gap.
         assert_eq!(get_events_calls(&rpc).await, 1);
     }
+
+    /// Background sync must not serve a bootnode's history as synced before
+    /// checking it against the contracts' event chains. Here the bootnode adds
+    /// a note the pool never emitted and withholds the handoff, so the check
+    /// can never pass: the balance must not include the forged note, which
+    /// stays pending.
+    ///
+    /// The forged note needs nothing secret: its ciphertext is sealed to the
+    /// victim's encryption public key and its commitment is
+    /// `Poseidon2(amount, note_public_key, blinding)`.
+    #[tokio::test]
+    async fn background_sync_does_not_serve_unchecked_bootnode_history() {
+        use crate::{
+            Client, LocalSigner, SignerHandle,
+            chain::field_to_scval_u256,
+            types::{Field, NoteAmount, NoteOwnerAddress, SignerAddress},
+            zk::{crypto::compute_commitment, encryption},
+        };
+        use stellar_xdr::{self as xdr, WriteXdr};
+
+        /// The address of `SECRET`, `SigningKey::from_bytes(&[7u8; 32])`.
+        const OWNER: &str = "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57";
+        const SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
+        const PASSPHRASE: &str = "Test SDF Network ; September 2015";
+        const POOL: &str = "CPOOL";
+
+        let rpc = main_rpc_with_a_gap().await;
+        let bootnode = MockServer::start().await;
+        let storage = temp_storage("bootnode-forged-note");
+        let mut client = Client::init_readonly(
+            rpc.uri(),
+            storage.clone(),
+            distinct_config(),
+            Some(bootnode.uri()),
+        )
+        .expect("client");
+        let signer =
+            LocalSigner::new(SECRET, PASSPHRASE, SignerAddress::new(OWNER)).expect("signer");
+        let account = client
+            .account(NoteOwnerAddress::new(OWNER), SignerHandle::from(signer))
+            .expect("account");
+        let (note_public_key, encryption_public_key) =
+            account.derive_privacy_keys().await.expect("privacy keys");
+
+        // The forged note, built from the victim's public keys only.
+        let forged_amount = NoteAmount::from(1_000_000_000u128);
+        let blinding = encryption::generate_random_blinding().expect("blinding");
+        let commitment: [u8; 32] = compute_commitment(
+            &Field::from(forged_amount).to_le_bytes(),
+            note_public_key.as_ref(),
+            &blinding.to_le_bytes(),
+        )
+        .expect("commitment")
+        .try_into()
+        .expect("32 bytes");
+        let commitment = Field::try_from_le_bytes(commitment).expect("canonical commitment");
+        let ciphertext =
+            encryption::encrypt_output_note(&encryption_public_key, forged_amount, &blinding)
+                .expect("ciphertext");
+
+        let b64 = |val: &xdr::ScVal| val.to_xdr_base64(xdr::Limits::none()).expect("xdr");
+        let symbol = |s: &str| xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")));
+        let value = xdr::ScVal::Map(Some(xdr::ScMap(
+            vec![
+                xdr::ScMapEntry {
+                    key: symbol("encrypted_output"),
+                    val: xdr::ScVal::Bytes(xdr::ScBytes(ciphertext.try_into().expect("bytes"))),
+                },
+                xdr::ScMapEntry {
+                    key: symbol("index"),
+                    val: xdr::ScVal::U32(0),
+                },
+            ]
+            .try_into()
+            .expect("map"),
+        )));
+        let forged_event = json!({
+            "type": "contract",
+            "ledger": 10,
+            "ledgerClosedAt": "2024-01-01T00:00:00Z",
+            "contractId": POOL,
+            "id": "0000000000000000010-0000000001",
+            "inSuccessfulContractCall": true,
+            "topic": [
+                b64(&symbol("new_commitment_event")),
+                b64(&field_to_scval_u256(commitment)),
+            ],
+            "value": b64(&value),
+        });
+        // Every page carries the forged event under the same cursor, so the
+        // bootnode sits at its tip and never sends the handoff.
+        mount_get_events(
+            &bootnode,
+            vec![get_events_page(
+                "bootnode-cursor",
+                json!([forged_event]),
+                3_000_000,
+            )],
+        )
+        .await;
+
+        let sync = client.background_sync().expect("background sync");
+        let stop = sync.stop_handle();
+        let pool = account.pool(POOL).expect("pool");
+        let run = sync.run();
+        futures::pin_mut!(run);
+
+        // At least one 5 s wait at the bootnode tip follows the first round,
+        // so the forged event has been saved and processed by then.
+        let rounds = async {
+            while get_events_calls(&bootnode).await < 5 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(25), async {
+            tokio::select! {
+                _ = &mut run => {}
+                () = rounds => {}
+            }
+        })
+        .await
+        .expect("the bootnode rounds did not run");
+        let balance = pool.balance().await;
+        let pending = pool.pending_balance().await;
+        stop.request();
+
+        assert!(
+            !matches!(balance, Ok(amount) if amount == forged_amount),
+            "the balance includes a note only the bootnode reported: {balance:?}"
+        );
+        // It waits as pending for a check that can never pass.
+        assert_eq!(pending.expect("pending balance"), forged_amount);
+    }
 }

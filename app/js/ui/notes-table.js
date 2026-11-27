@@ -79,6 +79,7 @@ export const NotesTable = {
                 amount: note.amount,
                 createdAtLedger: note.createdAtLedger,
                 spent: !!note.spent,
+                pending: !!note.pending,
             }));
             this.render();
             this._refreshSequence += 1;

@@ -760,6 +760,10 @@
 
             </div>
             <p class="balance-amount mt-8 text-3xl font-semibold tracking-tight text-white"></p>
+            <p class="balance-pending mt-1 flex items-center gap-1.5 text-xs text-amber-200" hidden title="Notes waiting for the pool history check. Not in the balance yet.">
+                <span aria-hidden="true" class="h-3 w-3 shrink-0 rounded-full border-2 border-amber-200 border-t-transparent animate-spin"></span>
+                <span class="balance-pending-text"></span>
+            </p>
             <div class="mt-6 flex flex-wrap gap-2">
                 <button type="button" data-quick-flow="deposit" class="btn-secondary px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50">Deposit</button>
                 <button type="button" data-quick-flow="transfer" class="btn-secondary px-3 py-2">Transfer</button>
