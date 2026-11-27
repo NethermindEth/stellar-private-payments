@@ -421,6 +421,7 @@ mod tests {
             deposits_paused: false,
             fee: NoteAmount::from(1_000u128),
             minimum_deposit_amount: NoteAmount::from(10_000u128),
+            notes_total: None,
             merkle_root: None,
             merkle_capacity: 0,
             total_commitments: "0".into(),

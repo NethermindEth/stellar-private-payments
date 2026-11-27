@@ -153,9 +153,14 @@ function build({ trigger, panel, poolId }, controls) {
         panel.append(row);
     }
     // Text and tone are filled in by update(), which also refreshes them on status changes.
-    const depositStatus = el('p', 'mt-3 border-t border-white/10 pt-3 text-sm leading-relaxed');
+    const live = el('div', 'mt-3 space-y-2 border-t border-white/10 pt-3');
+    live.dataset.overviewPoolLive = '';
+    const figures = el('p', 'text-xs leading-relaxed text-slate-400');
+    figures.dataset.overviewPoolFigures = '';
+    const depositStatus = el('p', 'text-sm leading-relaxed');
     depositStatus.dataset.overviewDepositStatus = '';
     depositStatus.setAttribute('role', 'status');
+    live.append(figures, depositStatus);
     const details = el('a', 'mt-4 inline-flex min-h-11 items-center text-sm font-semibold text-cyan-100 underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60', 'Details in Move funds');
     details.href = '#move-funds';
     details.addEventListener('click', (event) => {
@@ -163,7 +168,7 @@ function build({ trigger, panel, poolId }, controls) {
         close();
         App.events.dispatchEvent(new CustomEvent('dashboard:view-pool-controls', { detail: { poolId } }));
     });
-    panel.append(depositStatus, details);
+    panel.append(live, details);
 }
 
 export const OverviewPoolControls = {
@@ -218,8 +223,13 @@ export const OverviewPoolControls = {
             if (restoreFocus) group.items[0]?.trigger.focus({ preventScroll: true });
         }
         for (const entry of group.items) {
-            const status = entry.panel.querySelector('[data-overview-deposit-status]');
-            if (status) PoolDepositStatus.renderDetail(status, poolId, 'text-slate-300');
+            const live = entry.panel.querySelector('[data-overview-pool-live]');
+            if (!live) continue;
+            const status = live.querySelector('[data-overview-deposit-status]');
+            const figures = live.querySelector('[data-overview-pool-figures]');
+            PoolDepositStatus.renderDetail(status, poolId, 'text-slate-300');
+            PoolDepositStatus.renderFigures(figures, poolId);
+            live.hidden = status.hidden && figures.hidden;
         }
         if (group.items.includes(open)) position();
     },

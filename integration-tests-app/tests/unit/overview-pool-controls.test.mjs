@@ -503,3 +503,53 @@ test('dashboard refresh reads live statuses even when portfolio refresh fails', 
   assert.equal(a.querySelector('[data-quick-flow="deposit"]').disabled, true);
   assert.deepEqual(warnings, ['[Dashboard] balances refresh failed:']);
 });
+
+const NEAR_FULL = 'This pool is nearly full, with room for about 25 more transactions. Once it is full, no deposit, transfer or withdrawal can go through, so withdraw any funds you want out before then.';
+const FULL = 'This pool is full. No deposit, transfer or withdrawal can go through, so funds still in it cannot be withdrawn.';
+// A 1024-leaf tree: 5% is about 51 leaves, so 50 left is nearly full.
+const treeData = (contractId, { depositsPaused = false, nextIndex, notesTotal }) => ({ pools: [{ contractId, depositsPaused, merkleCapacity: 1024n, merkleNextIndex: String(nextIndex), notesTotal }] });
+const figuresLine = card => panel(card).querySelector('[data-overview-pool-figures]');
+const capacityPill = card => card.querySelector('[data-pool-capacity-status]');
+
+test('tree room and notes total show quietly, and a nearly full pool warns without blocking deposits', async () => {
+  const [a, b] = render();
+  emit('dashboard:view-pool-controls', { poolId: 'A' });
+  await PoolDepositStatus.refresh({ poolContractsData: async id => id === 'A'
+    ? treeData(id, { nextIndex: 974, notesTotal: 1234500000n })
+    : treeData(id, { nextIndex: 24 }) });
+  assert.match(figuresLine(a).textContent, /^Room for about 25 more transactions · 123\.45 \S+ held in notes$/);
+  assert.equal(figuresLine(a).hidden, false);
+  assert.equal(figuresLine(b).textContent, 'Room for about 500 more transactions', 'a pool without a notes total shows only its room');
+  assert.equal(capacityPill(a).textContent, 'Pool nearly full');
+  assert.equal(capacityPill(a).hidden, false);
+  assert.equal(capacityPill(b).hidden, true);
+  assert.equal(a.querySelector('[data-pool-paused-indicator]').hidden, false);
+  assert.equal(b.querySelector('[data-pool-paused-indicator]').hidden, true);
+  assert.equal(panel(a).querySelector('[data-overview-deposit-status]').textContent, NEAR_FULL);
+  assert.equal(panel(a).querySelector('[data-overview-deposit-status]').hidden, false);
+  assert.equal(panel(b).querySelector('[data-overview-deposit-status]').hidden, true);
+  assert.equal(a.querySelector('[data-quick-flow="deposit"]').disabled, false);
+  assert.equal(moveDepositStatus.textContent, NEAR_FULL);
+  assert.equal(moveDepositStatus.hidden, false);
+  assert.equal(depositButton.disabled, false);
+});
+
+test('a full pool replaces the pause sentence, and unknown tree figures hide the quiet line', async () => {
+  const [a] = render();
+  emit('dashboard:view-pool-controls', { poolId: 'A' });
+  await PoolDepositStatus.refresh({ poolContractsData: async id => treeData(id, { nextIndex: 1024 }) });
+  assert.equal(capacityPill(a).textContent, 'Pool full');
+  assert.equal(figuresLine(a).textContent, 'Room for about 0 more transactions');
+  assert.equal(moveDepositStatus.textContent, FULL);
+  await PoolDepositStatus.refresh({ poolContractsData: async id => treeData(id, { depositsPaused: true, nextIndex: 1024 }) });
+  assert.equal(moveDepositStatus.textContent, FULL, 'a full pool takes no withdrawals, so the pause sentence is dropped');
+  await PoolDepositStatus.refresh({ poolContractsData: async id => treeData(id, { depositsPaused: true, nextIndex: 974 }) });
+  assert.equal(moveDepositStatus.textContent, `Deposits are paused. Transfers and withdrawals still work. ${NEAR_FULL}`);
+  for (const nextIndex of [2048, -2, 'x']) {
+    await PoolDepositStatus.refresh({ poolContractsData: async id => treeData(id, { nextIndex }) });
+    assert.equal(figuresLine(a).hidden, true, `next index ${nextIndex} is not a usable tree figure`);
+    assert.equal(capacityPill(a).hidden, true);
+  }
+  await PoolDepositStatus.refresh(globalThis.dashboardSdk);
+  assert.equal(panel(a).querySelector('[data-overview-pool-live]').hidden, true);
+});

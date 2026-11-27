@@ -12,9 +12,12 @@
 //! them back verbatim. Nothing here describes the storage layout, so the layout
 //! can only be described in one place: the contracts.
 
-use super::deployment::{
-    FEE, LEVELS, MAXIMUM_DEPOSIT, MINIMUM_DEPOSIT, config_for, deploy,
-    ledger_entries_as_rpc_results, strkey,
+use super::{
+    deployment::{
+        FEE, LEVELS, MAXIMUM_DEPOSIT, MINIMUM_DEPOSIT, config_for, deploy,
+        ledger_entries_as_rpc_results, strkey,
+    },
+    utils::fast_forward_pool_tree,
 };
 use anyhow::Result;
 use stellar_private_payments::{
@@ -82,6 +85,7 @@ async fn the_reader_parses_a_deployed_pools_own_entries() -> Result<()> {
         info.minimum_deposit_amount,
         NoteAmount::from(u128::from(MINIMUM_DEPOSIT))
     );
+    assert_eq!(info.notes_total, Some(NoteAmount::ZERO));
     Ok(())
 }
 
@@ -136,5 +140,35 @@ async fn the_reader_sees_a_paused_pool() -> Result<()> {
         .unwrap_or_else(|| panic!("expected the pool to be reported"));
 
     assert!(info.deposits_paused);
+    Ok(())
+}
+
+/// The tree room and the notes total the app shows are read from the pool's
+/// own entries: a pool near the end of its tree reports how far it got, and
+/// the notes total reads back as the pool recorded it.
+#[tokio::test]
+async fn the_reader_sees_a_nearly_full_pool_and_its_notes_total() -> Result<()> {
+    let deployment = deploy();
+    let capacity = 1u64 << LEVELS;
+    fast_forward_pool_tree(&deployment.env, &deployment.pool, &[], capacity - 2);
+    deployment.env.as_contract(&deployment.pool, || {
+        pool_core::totals::record(&deployment.env, 1_234, 0).expect("the total takes the credit");
+    });
+
+    let server = rpc_serving(ledger_entries_as_rpc_results(&deployment.env)).await;
+    let (config, pool) = config_for(&deployment, &server.uri());
+    let fetcher = StateFetcher::new(Client::new(&server.uri())?, config)?;
+
+    let data = fetcher
+        .contracts_data_for_pool(&pool.pool_contract_id)
+        .await?;
+    let info = data
+        .pools
+        .first()
+        .unwrap_or_else(|| panic!("expected the pool to be reported"));
+
+    assert_eq!(info.merkle_capacity, capacity);
+    assert_eq!(info.merkle_next_index, (capacity - 2).to_string());
+    assert_eq!(info.notes_total, Some(NoteAmount::from(1_234u128)));
     Ok(())
 }
