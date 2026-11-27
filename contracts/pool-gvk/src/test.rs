@@ -1298,7 +1298,7 @@ fn mk_output_ciphertexts(env: &Env) -> Vec<GvkCiphertext> {
 /// scenario `mk_transact_proof` builds), so a fixed lookup table sidesteps
 /// `clippy::arithmetic_side_effects` without an unused overflow guard.
 fn mk_input_ciphertexts(env: &Env, n: u32) -> Vec<GvkCiphertext> {
-    const VALUES: [(u32, u32, u32, u32, u32); 1] = [(10, 11, 12, 13, 14)];
+    const VALUES: [(u32, u32, u32, u32, u32); 2] = [(10, 11, 12, 13, 14), (15, 16, 17, 18, 19)];
     let mut v = Vec::new(env);
     for &(x, y, c1, c2, c3) in VALUES.iter().take(n as usize) {
         v.push_back(mk_ciphertext(env, x, y, c1, c2, c3));
@@ -1311,6 +1311,17 @@ fn asp_roots(setup: &TestSetup) -> (U256, U256) {
         setup.asp_membership_client.get_root(),
         setup.asp_non_membership_client.get_root(),
     )
+}
+
+/// Builds the two nullifiers a transaction proof carries from one seed. The
+/// second is the seed with its top bit set. No test seed has that bit, so it
+/// never equals another seed's first nullifier.
+fn mk_nullifiers(env: &Env, seed: u32) -> Vec<U256> {
+    soroban_sdk::vec![
+        env,
+        U256::from_u32(env, seed),
+        U256::from_u32(env, seed | 0x8000_0000),
+    ]
 }
 
 /// Baseline transact proof with valid pool root, ext hash, public amount,
@@ -1329,18 +1340,14 @@ fn mk_transact_proof(
     let ext = mk_ext_data(env, Address::generate(env), 0);
     let ext_hash = compute_ext_hash(env, &pool.address, token, &ext);
     let input_gvk_ciphertexts = if gvk::requires_input_encryption(gvk_mode) {
-        mk_input_ciphertexts(env, 1)
+        mk_input_ciphertexts(env, 2)
     } else {
         Vec::new(env)
     };
     let proof = Proof {
         proof: mk_mock_groth16_proof(env),
         root,
-        input_nullifiers: {
-            let mut v: Vec<U256> = Vec::new(env);
-            v.push_back(U256::from_u32(env, nullifier));
-            v
-        },
+        input_nullifiers: mk_nullifiers(env, nullifier),
         output_commitment0: U256::from_u32(env, 0x01),
         output_commitment1: U256::from_u32(env, 0x02),
         public_amount: U256::from_u32(env, 0),
@@ -1481,11 +1488,7 @@ fn transact_rejects_unknown_root() {
     let proof = Proof {
         proof: mk_mock_groth16_proof(&env),
         root: U256::from_u32(&env, 0xFF), // not a known root
-        input_nullifiers: {
-            let mut v: Vec<U256> = Vec::new(&env);
-            v.push_back(U256::from_u32(&env, 0xAB));
-            v
-        },
+        input_nullifiers: mk_nullifiers(&env, 0xAB),
         output_commitment0: U256::from_u32(&env, 0x01),
         output_commitment1: U256::from_u32(&env, 0x02),
         public_amount: U256::from_u32(&env, 0),
@@ -1528,11 +1531,7 @@ fn transact_rejects_bad_ext_hash() {
     let proof = Proof {
         proof: mk_mock_groth16_proof(&env),
         root,
-        input_nullifiers: {
-            let mut v: Vec<U256> = Vec::new(&env);
-            v.push_back(U256::from_u32(&env, 0xCC));
-            v
-        },
+        input_nullifiers: mk_nullifiers(&env, 0xCC),
         output_commitment0: U256::from_u32(&env, 0x03),
         output_commitment1: U256::from_u32(&env, 0x04),
         public_amount: U256::from_u32(&env, 0),
@@ -1576,11 +1575,7 @@ fn transact_rejects_bad_public_amount() {
     let proof = Proof {
         proof: mk_mock_groth16_proof(&env),
         root,
-        input_nullifiers: {
-            let mut v: Vec<U256> = Vec::new(&env);
-            v.push_back(U256::from_u32(&env, 0xDD));
-            v
-        },
+        input_nullifiers: mk_nullifiers(&env, 0xDD),
         output_commitment0: U256::from_u32(&env, 0x05),
         output_commitment1: U256::from_u32(&env, 0x06),
         public_amount: U256::from_u32(&env, 1), // should be 0 for ext_amount=0
@@ -1720,6 +1715,7 @@ fn transact_rejects_non_canonical_nullifier() {
         input_nullifiers: {
             let mut v: Vec<U256> = Vec::new(&env);
             v.push_back(bn256_modulus(&env));
+            v.push_back(U256::from_u32(&env, 0x07));
             v
         },
         output_commitment0: U256::from_u32(&env, 0x07),
@@ -1763,11 +1759,7 @@ fn transact_rejects_non_canonical_output_commitment() {
     let proof = Proof {
         proof: mk_mock_groth16_proof(&env),
         root,
-        input_nullifiers: {
-            let mut v: Vec<U256> = Vec::new(&env);
-            v.push_back(U256::from_u32(&env, 0xEE));
-            v
-        },
+        input_nullifiers: mk_nullifiers(&env, 0xEE),
         output_commitment0: bn256_modulus(&env),
         output_commitment1: U256::from_u32(&env, 0x08),
         public_amount: U256::from_u32(&env, 0),
@@ -1815,6 +1807,7 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
         root,
         input_nullifiers: {
             let mut v: Vec<U256> = Vec::new(&env);
+            v.push_back(bn256_modulus(&env).sub(&one).sub(&one));
             v.push_back(bn256_modulus(&env).sub(&one));
             v
         },
@@ -2102,7 +2095,7 @@ fn transact_rejects_wrong_input_gvk_ciphertext_count_when_traceable() {
         0xC2,
         TRACEABLE,
     );
-    // Traceable mode requires one input ciphertext per nullifier (one here);
+    // Traceable mode requires one input ciphertext per nullifier (two here);
     // leave it empty instead.
     proof.input_gvk_ciphertexts = Vec::new(&env);
 
@@ -2666,13 +2659,12 @@ fn build_gvk_transact(
     let ext = mk_ext_data(&env, Address::generate(&env), ext_amount);
     let ext_hash = compute_ext_hash(&env, &pool_id, &setup.token, &ext);
     let input_gvk_ciphertexts = if gvk::requires_input_encryption(gvk_mode) {
-        mk_input_ciphertexts(&env, 1)
+        mk_input_ciphertexts(&env, 2)
     } else {
         Vec::new(&env)
     };
 
-    let mut input_nullifiers: Vec<U256> = Vec::new(&env);
-    input_nullifiers.push_back(U256::from_u32(&env, nullifier));
+    let input_nullifiers = mk_nullifiers(&env, nullifier);
 
     let public_amount = pool_core::amounts::calculate_public_amount(&env, ext.ext_amount.clone())
         .expect("ext_amount within the 2^248 bound used by these tests");
@@ -2794,7 +2786,7 @@ fn transact_accepts_correct_traceable_ciphertexts_and_emits_all_events() {
     let events = events.events();
 
     let output_ciphertexts = mk_output_ciphertexts(&env);
-    let input_ciphertexts = mk_input_ciphertexts(&env, 1);
+    let input_ciphertexts = mk_input_ciphertexts(&env, 2);
 
     let expected_output0 = NewCommitmentEvent {
         commitment: U256::from_u32(&env, 0x01),
@@ -2906,11 +2898,7 @@ fn transact_rejects_deposit_over_maximum() {
     let proof = Proof {
         proof: mk_mock_groth16_proof(&env),
         root: pool.get_root(),
-        input_nullifiers: {
-            let mut v: Vec<U256> = Vec::new(&env);
-            v.push_back(U256::from_u32(&env, 0xD1));
-            v
-        },
+        input_nullifiers: mk_nullifiers(&env, 0xD1),
         output_commitment0: U256::from_u32(&env, 0x01),
         output_commitment1: U256::from_u32(&env, 0x02),
         public_amount: U256::from_u32(&env, 0),
@@ -3102,7 +3090,7 @@ fn transact_rejects_a_batch_with_one_spent_nullifier() {
         0xC3,
         VIEW_ONLY,
     );
-    proof.input_nullifiers.push_back(spent);
+    proof.input_nullifiers.set(1, spent);
 
     let err = pool
         .try_transact(&proof, &ext, &Address::generate(&env))
@@ -3142,12 +3130,74 @@ fn transact_leaves_duplicate_nullifier_detection_to_the_circuit() {
     );
     proof
         .input_nullifiers
-        .push_back(U256::from_u32(&env, nullifier));
+        .set(1, U256::from_u32(&env, nullifier));
 
     let err = pool
         .try_transact(&proof, &ext, &Address::generate(&env))
         .expect_err("the mock proof fails verification");
     assert_eq!(err, Ok(Error::InvalidProof));
+}
+
+/// Proofs with zero, one or three nullifiers are refused with
+/// `WrongNullifierCount`. `AcceptingVerifier` accepts any proof, so without
+/// the count check each of these calls would settle. In traceable mode each
+/// proof also carries one input ciphertext per nullifier, so the nullifier
+/// count is the only thing wrong with it.
+#[test]
+fn transact_refuses_a_wrong_nullifier_count() {
+    let env = test_env();
+    let mut setup = setup_test_contracts(&env);
+    setup.verifier = env.register(AcceptingVerifier, ());
+    let (member_root, non_member_root) = asp_roots(&setup);
+    env.mock_all_auths();
+
+    for gvk_mode in [VIEW_ONLY, TRACEABLE] {
+        let pool_id = register_pool_gvk(
+            &env,
+            &setup,
+            U256::from_u32(&env, 1000),
+            3,
+            0,
+            base8_key(&env),
+            gvk_mode,
+        );
+        let pool = PoolGvkContractClient::new(&env, &pool_id);
+        for count in [0u32, 1, 3] {
+            let (mut proof, ext) = mk_transact_proof(
+                &env,
+                &pool,
+                &setup.token,
+                member_root.clone(),
+                non_member_root.clone(),
+                0xE8,
+                gvk_mode,
+            );
+            proof.input_nullifiers = Vec::new(&env);
+            proof.input_gvk_ciphertexts = Vec::new(&env);
+            for i in 0..count {
+                proof
+                    .input_nullifiers
+                    .push_back(U256::from_u32(&env, 0xE8 + i));
+                if gvk::requires_input_encryption(gvk_mode) {
+                    proof.input_gvk_ciphertexts.push_back(mk_ciphertext(
+                        &env,
+                        20 + i,
+                        21,
+                        22,
+                        23,
+                        24,
+                    ));
+                }
+            }
+
+            assert_eq!(
+                pool.try_transact(&proof, &ext, &Address::generate(&env)),
+                Err(Ok(Error::WrongNullifierCount)),
+                "{count} nullifiers, gvk mode {gvk_mode}"
+            );
+        }
+        assert!(!pool.is_spent(&U256::from_u32(&env, 0xE8)));
+    }
 }
 
 #[test]
@@ -4641,8 +4691,8 @@ fn the_event_chain_covers_every_event_the_pool_publishes() {
 
     let (proof, deposit) = mk_paying_proof(&env, &pool, &setup.token, 50, 45, 0xFB);
     pool.transact(&proof, &deposit, &sender);
-    // One nullifier, then two commitments.
-    chain = follow_chain(&env, &pool, &chain, 3);
+    // Two nullifiers, then two commitments.
+    chain = follow_chain(&env, &pool, &chain, 4);
     pool.pause_deposits();
     chain = follow_chain(&env, &pool, &chain, 1);
     pool.pause_deposits();
@@ -4675,7 +4725,7 @@ fn the_event_chain_covers_every_event_the_pool_publishes() {
     pool.accept_admin();
     chain = follow_chain(&env, &pool, &chain, 1);
 
-    assert_eq!(chain.count, 13);
+    assert_eq!(chain.count, 14);
 }
 
 /// A refused call publishes nothing and leaves the chain as it was.
@@ -4689,7 +4739,7 @@ fn a_refused_call_leaves_the_event_chain_unchanged() {
     assert!(pool.try_claim_fees(&Address::generate(&env), &6).is_err());
 
     assert_eq!(pool.event_chain(), before);
-    assert_eq!(before.count, 3);
+    assert_eq!(before.count, 4);
 }
 
 /// A GVK transact extends the chain in either mode. A view-only nullifier
@@ -4701,6 +4751,6 @@ fn a_gvk_transact_extends_the_event_chain_in_either_mode() {
     for (gvk_mode, nullifier) in [(VIEW_ONLY, 0xE5), (TRACEABLE, 0xE6)] {
         let (env, pool_id) = run_successful_gvk_transact(gvk_mode, nullifier);
         let pool = PoolGvkContractClient::new(&env, &pool_id);
-        follow_chain(&env, &pool, &soroban_utils::EventChain::empty(&env), 3);
+        follow_chain(&env, &pool, &soroban_utils::EventChain::empty(&env), 4);
     }
 }
