@@ -9,11 +9,21 @@ import { Keypair, TransactionBuilder } from '@stellar/stellar-sdk';
 import { chromium } from 'playwright';
 import { CHROMIUM_PATH, requireAppUrl } from './env.mjs';
 
-// App modules are bundled into ui.js, not served as standalone files. Load
-// the production wallet storage helper into the isolated page without a server route.
-const storageKeyModuleUrl = `data:text/javascript;base64,${readFileSync(
-  new URL('../../app/js/storage-key.js', import.meta.url),
-).toString('base64')}`;
+// App modules are bundled into ui.js, not served as standalone files. Serve
+// the production wallet storage helper from the app's origin, which the CSP
+// allows, by fulfilling the request in the page.
+const storageKeyModuleUrl = '/__e2e__/storage-key.js';
+const storageKeyModuleSource = readFileSync(new URL('../../app/js/storage-key.js', import.meta.url), 'utf8');
+const pagesServingStorageKey = new WeakSet();
+
+async function serveStorageKeyModule(page) {
+  if (pagesServingStorageKey.has(page)) return;
+  pagesServingStorageKey.add(page);
+  await page.route(`**${storageKeyModuleUrl}`, (route) => route.fulfill({
+    contentType: 'text/javascript',
+    body: storageKeyModuleSource,
+  }));
+}
 
 export const FRIENDBOT_URL = 'http://localhost:8000/friendbot';
 export const RPC_URL = 'http://localhost:8000/rpc';
@@ -180,6 +190,7 @@ export async function register(keypair) {
   const address = keypair.publicKey();
   const page = await getIsolatedPage();
   const { signTxName, signMsgName, signAuthName, verifyMsgName } = await exposeSigner(page, keypair);
+  await serveStorageKeyModule(page);
   await page.evaluate(registerAccount, {
     address,
     signTxName,
@@ -211,6 +222,7 @@ export async function createRegisteredAccount() {
 export async function seedDriverOnboarding(page, keypair) {
   const address = keypair.publicKey();
   const { signTxName, signMsgName, signAuthName, verifyMsgName } = await exposeSigner(page, keypair);
+  await serveStorageKeyModule(page);
   await page.evaluate(registerAccount, {
     address,
     signTxName,

@@ -284,6 +284,9 @@ export declare function dump_recent_logs(): Promise<string>;
 /** DOM event name emitted during in-flight pool transactions. */
 export declare const TX_PROGRESS_EVENT: 'stellar-private-payments:tx-progress';
 
+/** DOM event fired on `globalThis` when Rust panics, just before the WASM instance traps. */
+export declare const PANIC_EVENT: 'stellar-private-payments:panic';
+
 /** Payload on {@link TX_PROGRESS_EVENT} `CustomEvent.detail`. */
 export interface TxProgressDetail {
   flow: string;

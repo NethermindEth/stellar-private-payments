@@ -12,3 +12,15 @@ export function closeAndReload(storage, { timeoutMs = 3_000, reload = () => wind
         Promise.resolve().then(() => storage?.close()).then(finish, finish);
     });
 }
+
+/**
+ * Lock and reload on the SDK's panic event without calling back into the SDK.
+ * The reloaded page starts locked, so a panic on load cannot loop.
+ */
+export function reloadOnPanic(target, event, { holdsSecrets, lock, reload = () => window.location.reload() }) {
+    target.addEventListener(event, () => {
+        if (!holdsSecrets()) return;
+        lock();
+        reload();
+    });
+}

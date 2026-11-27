@@ -1,5 +1,5 @@
 import { describeAccess } from '../access-state.js';
-import { STORAGE_MODE, STORAGE_STATE_EVENT, idleLockMinutes, isStorageUnlocked, loadDeploymentConfig, localStoreExists } from '../wasm-facade.js';
+import { STORAGE_MODE, STORAGE_STATE_EVENT, idleLockMinutes, isStorageUnlocked, loadDeploymentConfig, localStoreExists, panicLocked } from '../wasm-facade.js';
 import { networkPresentation } from '../network-config.js';
 import { isWalletInstalled } from '../wallet.js';
 import { App } from './core.js';
@@ -23,6 +23,7 @@ function currentAccess() {
         storageState: document.body.dataset.storageState,
         view: App.state.views.active,
         idleLockMinutes: idleLockMinutes(),
+        panicLocked: panicLocked(),
     });
 }
 

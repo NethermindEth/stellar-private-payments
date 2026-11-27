@@ -15,6 +15,7 @@ export const ACCESS_STATES = ['welcome', 'returning', 'connecting', 'locked', 'r
 
 const SIGNATURE_NOTE = 'You’ll sign a message, not a transaction. It’s free and keeps your data encrypted on this device.';
 const IDLE_LOCK_NOTE = 'After unlocking, you can change the timeout in Settings.';
+const PANIC_LOCK_NOTE = 'If it happens again after unlocking, report it with the steps that led to it.';
 const PLAINTEXT_NOTE ='Your private keys and history are stored unencrypted in this browser. Anyone with access to this device can read them.';
 
 const COPY = {
@@ -91,9 +92,11 @@ function stateOf({ mode, storeExists, walletState, unlocked }) {
  *   storageState?: string,
  *   view?: string,
  *   idleLockMinutes?: number | null,
- * }} input - `idleLockMinutes` is set when inactivity caused the last lock.
+ *   panicLocked?: boolean,
+ * }} input - `idleLockMinutes` or `panicLocked` is set when inactivity or an
+ *   SDK panic caused the last lock.
  */
-export function describeAccess({ mode, storeExists, walletState, walletConnected, unlocked, storageState, view, idleLockMinutes = null }) {
+export function describeAccess({ mode, storeExists, walletState, walletConnected, unlocked, storageState, view, idleLockMinutes = null, panicLocked = false }) {
     const copy = COPY[mode];
     if (!copy) throw new Error(`Unknown storage mode: ${mode}`);
     const state = stateOf({ mode, storeExists, walletState, unlocked });
@@ -119,6 +122,8 @@ export function describeAccess({ mode, storeExists, walletState, walletConnected
             title: `Locked after ${idleLockMinutes} ${idleLockMinutes === 1 ? 'minute' : 'minutes'} of inactivity`,
             note: IDLE_LOCK_NOTE,
         };
+    } else if (state === 'locked' && panicLocked) {
+        card = { ...card, title: 'Locked after an internal error', note: PANIC_LOCK_NOTE };
     }
     // Verifying a disclosure needs no account, so the card leaves the
     // Disclosure tab alone until the user starts connecting.
