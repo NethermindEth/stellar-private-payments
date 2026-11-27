@@ -249,7 +249,7 @@ mod rpc_tests {
     async fn admin_with_tree(tree_code: xdr::ContractExecutable) -> (MockServer, PoolAdmin) {
         let pinned = xdr::ScVal::Bytes(vec![7; 32].try_into().expect("hash"));
         let pool_code = xdr::ContractExecutable::Wasm(xdr::Hash([0; 32]));
-        let entries = vec![
+        let entries = [
             instance_entry(
                 1,
                 pool_code,
