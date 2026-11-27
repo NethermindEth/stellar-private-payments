@@ -2,8 +2,8 @@
 
 use super::*;
 use soroban_sdk::{
-    Address, Bytes, Env, IntoVal, InvokeError, U256,
-    testutils::{Address as _, Deployer as _, MockAuth, MockAuthInvoke},
+    Address, Bytes, Env, IntoVal, InvokeError, TryFromVal, U256,
+    testutils::{Address as _, Deployer as _, MockAuth, MockAuthInvoke, storage::Persistent as _},
 };
 use soroban_utils::{MAX_EXTENSION_LEDGERS, constants::bn256_modulus};
 
@@ -531,6 +531,128 @@ fn test_delete_from_multiple_keys() {
             assert_eq!(result.found_value, value, "Value for key {k} should match");
         }
     }
+}
+
+/// Asserts that every stored node is reachable from the current root. The
+/// storage listing spans all contracts in `env`, so `contract_id` must be the
+/// only tree registered there.
+fn assert_no_stale_nodes(env: &Env, contract_id: &Address) {
+    env.as_contract(contract_id, || {
+        let store = env.storage().persistent();
+        let zero = U256::from_u32(env, 0u32);
+
+        let stored = store
+            .all()
+            .keys()
+            .iter()
+            .filter(|k| matches!(DataKey::try_from_val(env, k), Ok(DataKey::Node(_))))
+            .count();
+
+        let root: U256 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Root)
+            .expect("root is set");
+        let mut reachable = 0usize;
+        let mut pending = vec![env, root];
+        while let Some(hash) = pending.pop_back() {
+            if hash == zero {
+                continue;
+            }
+            let node: Vec<U256> = store
+                .get(&DataKey::Node(hash))
+                .expect("reachable node is stored");
+            reachable = reachable.saturating_add(1);
+            if node.len() == 2 {
+                pending.push_back(node.get(0).expect("left child"));
+                pending.push_back(node.get(1).expect("right child"));
+            }
+        }
+
+        assert_eq!(stored, reachable, "stored nodes not reachable from root");
+    });
+}
+
+#[test]
+fn test_delete_with_leaf_sibling_removes_old_path() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    let key1 = U256::from_u32(&env, 1u32);
+    let key3 = U256::from_u32(&env, 3u32);
+    let value = U256::from_u32(&env, 7u32);
+    client.insert_leaf(&key1, &value);
+    client.insert_leaf(&key3, &value);
+    let old_root = client.get_root();
+
+    client.delete_leaf(&key3);
+
+    env.as_contract(&contract_id, || {
+        let leaf1 = ASPNonMembership::hash_leaf(&env, key1.clone(), value.clone());
+        let leaf3 = ASPNonMembership::hash_leaf(&env, key3.clone(), value.clone());
+        let parent = ASPNonMembership::hash_internal(&env, leaf1.clone(), leaf3.clone());
+        let store = env.storage().persistent();
+
+        assert_eq!(env.storage().instance().get(&DataKey::Root), Some(leaf1));
+        assert!(!store.has(&DataKey::Node(leaf3)));
+        assert!(!store.has(&DataKey::Node(parent)));
+        assert!(!store.has(&DataKey::Node(old_root)));
+    });
+    assert_no_stale_nodes(&env, &contract_id);
+}
+
+#[test]
+fn test_delete_all_keys_leaves_no_nodes() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    env.mock_all_auths();
+
+    // Keys sharing low-bit prefixes so deletions hit both leaf and internal
+    // siblings at several depths.
+    let keys: [u32; 9] = [1, 3, 5, 7, 2, 6, 12, 15, 31];
+    let delete_order: [u32; 9] = [3, 12, 1, 31, 6, 15, 2, 7, 5];
+
+    for k in keys {
+        client.insert_leaf(&U256::from_u32(&env, k), &U256::from_u32(&env, k * 10));
+    }
+
+    let mut deleted = [false; 9];
+    for k in delete_order {
+        client.delete_leaf(&U256::from_u32(&env, k));
+        if let Some(i) = keys.iter().position(|r| *r == k) {
+            deleted[i] = true;
+        }
+        assert_no_stale_nodes(&env, &contract_id);
+
+        // The root must match a tree built from the remaining keys alone.
+        let fresh_env = test_env();
+        fresh_env.mock_all_auths();
+        let fresh_id = fresh_env.register(ASPNonMembership, (Address::generate(&fresh_env),));
+        let fresh = ASPNonMembershipClient::new(&fresh_env, &fresh_id);
+        for (r, gone) in keys.iter().zip(deleted) {
+            if !gone {
+                fresh.insert_leaf(
+                    &U256::from_u32(&fresh_env, *r),
+                    &U256::from_u32(&fresh_env, r * 10),
+                );
+            }
+        }
+        let mut expected = [0u8; 32];
+        let mut actual = [0u8; 32];
+        fresh
+            .get_root()
+            .to_be_bytes()
+            .copy_into_slice(&mut expected);
+        client.get_root().to_be_bytes().copy_into_slice(&mut actual);
+        assert_eq!(actual, expected, "root after deleting {k}");
+    }
+
+    assert_eq!(client.get_root(), U256::from_u32(&env, 0u32));
 }
 
 /// This test is skipped under Miri because the panic formatting path triggers

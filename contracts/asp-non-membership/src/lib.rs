@@ -651,7 +651,7 @@ impl ASPNonMembership {
         store.remove(&DataKey::Node(rt_old.clone()));
 
         let mut rt_new: U256;
-        let mut siblings_to_use = find_result.siblings.clone();
+        let mut promoted = false;
 
         // Check if the last sibling is a leaf that should be promoted
         if let Some(last_sibling) = find_result.siblings.last() {
@@ -661,9 +661,7 @@ impl ASPNonMembership {
                 if node_data.len() == 3 && node_data.get(0).ok_or(Error::KeyNotFound)? == one {
                     // Last sibling is a leaf - promote it
                     rt_new = last_sibling.clone();
-                    // Remove the last sibling from the list since we're
-                    // promoting it
-                    siblings_to_use.pop_back();
+                    promoted = true;
                 } else if node_data.len() == 2 {
                     // Last sibling is an internal node - replace with zero
                     rt_new = zero.clone();
@@ -680,14 +678,19 @@ impl ASPNonMembership {
 
         // Rebuild the tree from the deletion point upwards
         let mut mixed = false;
-        let siblings_len = siblings_to_use.len();
+        let siblings_len = find_result.siblings.len();
+        let last_level = siblings_len.saturating_sub(1);
 
         for level_idx in 0..siblings_len {
-            let level = siblings_len.saturating_sub(1).saturating_sub(level_idx); // Process from leaf to root
-            let sibling = siblings_to_use.get(level).ok_or(Error::KeyNotFound)?;
+            let level = last_level.saturating_sub(level_idx); // Process from leaf to root
+            let sibling = find_result.siblings.get(level).ok_or(Error::KeyNotFound)?;
 
-            // Use actual sibling value
-            let new_sibling = sibling.clone();
+            // The promoted leaf moves up, so its old slot becomes empty
+            let new_sibling = if promoted && level == last_level {
+                zero.clone()
+            } else {
+                sibling.clone()
+            };
 
             // Delete old internal node along the old path
             let bit = key_bits.get(level).ok_or(Error::KeyNotFound)?;
