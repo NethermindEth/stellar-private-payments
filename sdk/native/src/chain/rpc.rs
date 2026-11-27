@@ -108,7 +108,7 @@ pub(crate) const INVALID_PARAMS_CODE: i64 = -32_602;
 /// [`Client::get_contract_data_bulk`] both labels the entry with this name and
 /// recognizes it by the same name when it flattens the settings out of the
 /// entry's storage map, so the two sides cannot drift apart.
-const CONTRACT_INSTANCE_KEY: &str = "__contract_instance";
+pub(crate) const CONTRACT_INSTANCE_KEY: &str = "__contract_instance";
 
 fn retention_handoff_from_data(data: Option<serde_json::Value>) -> Option<u32> {
     let value = data?;

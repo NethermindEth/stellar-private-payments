@@ -101,8 +101,9 @@ A pool accepts only allowlists and blocklists of its tree code, the Wasm hashes 
 deployed with. Each [contracts release](../deploy.md#deploy-from-a-release) gives every contract a
 new Wasm hash, because each Wasm records the hash of the source it was built from, so deploy your
 tree from the code already on chain with `--wasm-hash`, never from a fresh build. Don't deploy it
-as an executable reference either: its owner could point it at other code later, so the admin app
-and `verify-deployment.sh` reject it. To run a tree for another operator's pool:
+as an executable reference either: its owner could point it at other code later, so the admin app,
+`spp pool-admin repoint` and `verify-deployment.sh` reject it, and clients refuse to prove
+against it. To run a tree for another operator's pool:
 
 1. For an allowlist, record the output of `stellar ledger latest --network testnet` as the tree's
    deployment ledger. Read the tree code the pool accepts and deploy your tree from it:

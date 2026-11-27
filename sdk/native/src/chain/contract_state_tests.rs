@@ -93,6 +93,16 @@ fn ledger_entries(byte: u8, fields: Vec<(&str, xdr::ScVal)>) -> Vec<Value> {
 
 /// Serve complete, valid pool and ASP state through the real RPC decoder.
 async fn rpc_state(policies: &[(PolicyFlags, Option<xdr::ScVal>)]) -> (MockServer, StateFetcher) {
+    rpc_state_pinning(policies, [0; 32]).await
+}
+
+/// Like [`rpc_state`], with pools that store `pinned` as both trees' code.
+/// Every tree runs Wasm with hash `[0; 32]`.
+async fn rpc_state_pinning(
+    policies: &[(PolicyFlags, Option<xdr::ScVal>)],
+    pinned: [u8; 32],
+) -> (MockServer, StateFetcher) {
+    let pinned = || xdr::ScVal::Bytes(pinned.to_vec().try_into().expect("hash"));
     let zero = || field_to_scval_u256(Field::ZERO);
     let mut entries = ledger_entries(
         101,
@@ -126,6 +136,8 @@ async fn rpc_state(policies: &[(PolicyFlags, Option<xdr::ScVal>)]) -> (MockServe
             ("Verifier", address(104)),
             ("ASPMembership", address(101)),
             ("ASPNonMembership", address(102)),
+            ("ASPMembershipWasmHash", pinned()),
+            ("ASPNonMembershipWasmHash", pinned()),
             ("Levels", xdr::ScVal::U32(32)),
             ("MaximumDepositAmount", zero()),
             (
@@ -314,4 +326,91 @@ async fn pool_info_preserves_the_mismatch_in_the_existing_error_type() {
             contract_id(1),
         )
     );
+}
+
+fn tree_state(executable: xdr::ContractExecutable) -> HashMap<String, xdr::ScVal> {
+    HashMap::from([(
+        CONTRACT_INSTANCE_KEY.to_string(),
+        xdr::ScVal::ContractInstance(xdr::ScContractInstance {
+            executable,
+            storage: None,
+        }),
+    )])
+}
+
+fn pinning(hash: [u8; 32]) -> HashMap<String, xdr::ScVal> {
+    HashMap::from([(
+        "ASPNonMembershipWasmHash".to_string(),
+        xdr::ScVal::Bytes(hash.to_vec().try_into().expect("hash")),
+    )])
+}
+
+fn tree_code_check(
+    pool_state: &HashMap<String, xdr::ScVal>,
+    executable: xdr::ContractExecutable,
+) -> Result<()> {
+    let tree = tree_state(executable);
+    check_tree_code(
+        "POOL",
+        pool_state,
+        "TREE",
+        Some(&tree),
+        "ASPNonMembershipWasmHash",
+    )
+}
+
+#[test]
+fn a_tree_running_the_pinned_wasm_passes() {
+    let wasm = xdr::ContractExecutable::Wasm(xdr::Hash([7; 32]));
+    tree_code_check(&pinning([7; 32]), wasm.clone()).expect("pinned code");
+    // A pool deployed before pools stored tree code pins none.
+    tree_code_check(&HashMap::new(), wasm).expect("nothing pinned");
+}
+
+#[test]
+fn a_tree_running_other_wasm_fails() {
+    let err = tree_code_check(
+        &pinning([7; 32]),
+        xdr::ContractExecutable::Wasm(xdr::Hash([8; 32])),
+    )
+    .expect_err("other code");
+    assert!(err.to_string().contains("runs other code"), "{err}");
+}
+
+#[test]
+fn a_tree_running_an_executable_reference_fails() {
+    let reference = xdr::ContractExecutable::ExternalRef(xdr::ContractExecutableExternalRef {
+        executable_owner: xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash([9; 32]))),
+        tag: b"tree".to_vec().try_into().expect("tag"),
+    });
+    // Even with nothing pinned to compare with.
+    for pool_state in [pinning([7; 32]), HashMap::new()] {
+        let err = tree_code_check(&pool_state, reference.clone()).expect_err("reference");
+        assert!(err.to_string().contains("executable reference"), "{err}");
+    }
+}
+
+#[test]
+fn an_asset_contract_or_a_missing_instance_fails() {
+    tree_code_check(&HashMap::new(), xdr::ContractExecutable::StellarAsset)
+        .expect_err("asset contract");
+    check_tree_code(
+        "POOL",
+        &HashMap::new(),
+        "TREE",
+        None,
+        "ASPNonMembershipWasmHash",
+    )
+    .expect_err("no instance");
+}
+
+#[tokio::test]
+async fn reading_a_pool_refuses_a_tree_without_its_pinned_code() {
+    let (_server, fetcher) =
+        rpc_state_pinning(&[(PolicyFlags::EMPTY, Some(xdr::ScVal::U32(0)))], [1; 32]).await;
+    let err = fetcher
+        .contracts_data_for_pool(&contract_id(1))
+        .await
+        .expect_err("trees run other code");
+    assert!(err.to_string().contains("runs other code"), "{err}");
 }

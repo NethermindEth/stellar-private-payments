@@ -4,7 +4,7 @@ use super::{
         scval_to_i128, scval_to_policy_flags, scval_to_string, scval_to_tree_state, scval_to_u32,
         scval_to_u64, scval_to_u256,
     },
-    rpc::{Client, ContractDataBulkRequest},
+    rpc::{CONTRACT_INSTANCE_KEY, Client, ContractDataBulkRequest},
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,50 @@ fn root_slot(next_index: u64, ring_len: usize) -> Result<u32> {
         .checked_rem(u64::try_from(ring_len)?)
         .ok_or_else(|| anyhow!("pool root history is empty"))?;
     Ok(u32::try_from(slot)?)
+}
+
+/// Refuses tree `tree_id` unless it runs Wasm with the hash pool `pool_id`
+/// stores under `hash_key`.
+///
+/// The pool's own check resolves an executable reference to its target's
+/// current code, so a tree running one passes it, and the reference's owner
+/// can later point the tree at code that reports any root.
+///
+/// # Errors
+///
+/// Returns an error if the tree has no instance entry, runs anything but
+/// Wasm, or runs Wasm with another hash than the pool stores.
+pub(crate) fn check_tree_code(
+    pool_id: &str,
+    pool_state: &HashMap<String, xdr::ScVal>,
+    tree_id: &str,
+    tree_state: Option<&HashMap<String, xdr::ScVal>>,
+    hash_key: &str,
+) -> Result<()> {
+    let Some(xdr::ScVal::ContractInstance(instance)) =
+        tree_state.and_then(|state| state.get(CONTRACT_INSTANCE_KEY))
+    else {
+        return Err(anyhow!("tree {tree_id} has no contract instance"));
+    };
+    let hash = match &instance.executable {
+        xdr::ContractExecutable::Wasm(hash) => hash,
+        xdr::ContractExecutable::ExternalRef(_) => {
+            return Err(anyhow!(
+                "tree {tree_id}, which pool {pool_id} reads, runs an executable reference, so its owner could change its code"
+            ));
+        }
+        xdr::ContractExecutable::StellarAsset => {
+            return Err(anyhow!("{tree_id} is an asset contract, not a tree"));
+        }
+    };
+    match pool_state.get(hash_key) {
+        // Pools deployed before they stored tree code pin none.
+        None => Ok(()),
+        Some(xdr::ScVal::Bytes(pinned)) if pinned.as_slice() == hash.0.as_slice() => Ok(()),
+        Some(_) => Err(anyhow!(
+            "tree {tree_id} runs other code than the {hash_key} pool {pool_id} stores"
+        )),
+    }
 }
 
 pub struct StateFetcher {
@@ -234,12 +278,14 @@ impl StateFetcher {
     pub async fn all_contracts_data(&self) -> Result<ContractsStateData> {
         let enabled_pools: Vec<&crate::types::PoolConfigEntry> =
             self.config.pools.iter().filter(|p| p.enabled).collect();
-        self.contracts_data(
-            &enabled_pools,
-            &self.config.asp_membership,
-            &self.config.asp_non_membership,
-        )
-        .await
+        let (data, _) = self
+            .contracts_data(
+                &enabled_pools,
+                &self.config.asp_membership,
+                &self.config.asp_non_membership,
+            )
+            .await?;
+        Ok(data)
     }
 
     /// Returns the state of an enabled pool and of the two trees it reads.
@@ -250,8 +296,9 @@ impl StateFetcher {
     /// # Errors
     ///
     /// Returns an error if the pool is not an enabled deployment, an RPC read
-    /// fails, a stored value does not decode, or configured policy/GVK settings
-    /// disagree with the chain.
+    /// fails, a stored value does not decode, configured policy/GVK settings
+    /// disagree with the chain, or a tree doesn't run the Wasm the pool stores
+    /// for it (see [`check_tree_code`]).
     pub async fn contracts_data_for_pool(
         &self,
         pool_contract_id: &str,
@@ -265,19 +312,35 @@ impl StateFetcher {
             .get(pool_contract_id)
             .ok_or_else(|| anyhow!("missing pool state for {pool_contract_id}"))?;
         let pool = Self::pool_info(enabled_pool, pool_state, ledger)?;
-        let mut data = self
+        let (mut data, tree_state) = self
             .contracts_data(&[], &pool.asp_membership, &pool.asp_non_membership)
             .await?;
+        for (tree, hash_key) in [
+            (&pool.asp_membership, "ASPMembershipWasmHash"),
+            (&pool.asp_non_membership, "ASPNonMembershipWasmHash"),
+        ] {
+            check_tree_code(
+                pool_contract_id,
+                pool_state,
+                tree,
+                tree_state.get(tree),
+                hash_key,
+            )?;
+        }
         data.pools.push(pool);
         Ok(data)
     }
 
+    /// Also returns the entries read, which hold each tree's instance.
     async fn contracts_data(
         &self,
         enabled_pools: &[&crate::types::PoolConfigEntry],
         asp_membership_id: &str,
         asp_non_membership_id: &str,
-    ) -> Result<ContractsStateData> {
+    ) -> Result<(
+        ContractsStateData,
+        HashMap<String, HashMap<String, xdr::ScVal>>,
+    )> {
         let mut requests = Vec::with_capacity(enabled_pools.len().wrapping_add(2));
         for pool in enabled_pools.iter() {
             requests.push(Self::pool_request(pool));
@@ -302,11 +365,12 @@ impl StateFetcher {
         let asp_non_membership =
             Self::asp_non_membership_info(&bulk_state, asp_non_membership_id, base_latest_ledger)?;
 
-        Ok(ContractsStateData {
+        let data = ContractsStateData {
             pools: out,
             asp_membership,
             asp_non_membership,
-        })
+        };
+        Ok((data, bulk_state))
     }
 
     /// Reads the state of one membership tree.
