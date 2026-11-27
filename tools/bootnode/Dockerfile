@@ -13,6 +13,9 @@ ARG OS_UPDATE_REV=1
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /workspace/tools/bootnode/target/release/bootnode /usr/local/bin/bootnode
+COPY deployments/testnet/deployments.json /deployment/deployments.json
+
+ENV BOOTNODE_DEPLOYMENT=/deployment/deployments.json
 
 USER 65532:65532
 EXPOSE 443
