@@ -1,20 +1,14 @@
 // Vendored from arkworks-rs/circom-compat (MIT OR Apache-2.0), commit 09e92d4:
 //   https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/zkey.rs
-//   https://github.com/arkworks-rs/circom-compat/blob/09e92d4c5887cec9ea558dc7e775a8ab3b02aafc/src/index.rs (`NPIndex`)
 //
-// Local changes: `NPIndex` is inlined below, and the test module (which needs
-// the upstream test vectors and the wasmer witness calculator) is dropped.
-#![allow(
-    clippy::arithmetic_side_effects,
-    clippy::indexing_slicing,
-    clippy::as_conversions,
-    clippy::cast_possible_truncation,
-    clippy::cast_possible_wrap,
-    clippy::cast_lossless,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::missing_errors_doc
-)]
+// Local changes: only the proving key is read (the constraint matrices are
+// dropped), every section must be consumed exactly, unsupported versions,
+// duplicated sections, malformed headers, missing sections, non-canonical
+// field elements, invalid curve points, identity verifying key points and a
+// delta equal to gamma return errors instead of panicking or being accepted,
+// and the upstream test module (which needs the upstream test vectors and the
+// wasmer witness calculator) is replaced.
+#![allow(clippy::arithmetic_side_effects)]
 
 //! ZKey Parsing
 //!
@@ -46,39 +40,36 @@
 use ark_bn254::{Bn254, Fq, Fq2, Fr, G1Affine, G2Affine};
 use ark_ff::{BigInteger256, PrimeField};
 use ark_groth16::{ProvingKey, VerifyingKey};
-use ark_serialize::{CanonicalDeserialize, SerializationError};
-use ark_std::log2;
+use ark_serialize::{CanonicalDeserialize, SerializationError, Valid};
 use byteorder::{LittleEndian, ReadBytesExt};
 use num_traits::Zero;
 use std::{
     collections::HashMap,
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom, Take},
 };
 
 type IoResult<T> = Result<T, SerializationError>;
 
+const ZKEY_MAGIC: &[u8; 4] = b"zkey";
+const ZKEY_VERSION: u32 = 1;
+const PROTOCOL_GROTH16: u32 = 1;
+
 #[derive(Clone, Debug)]
 struct Section {
     position: u64,
-    #[allow(dead_code)]
-    size: usize,
+    size: u64,
 }
 
 /// Reads a SnarkJS ZKey file into an Arkworks ProvingKey.
-pub fn read_zkey<R: Read + Seek>(reader: &mut R) -> IoResult<(ProvingKey<Bn254>, NPIndex<Fr>)> {
+pub fn read_zkey<R: Read + Seek>(reader: &mut R) -> IoResult<ProvingKey<Bn254>> {
     let mut binfile = BinFile::new(reader)?;
-    let proving_key = binfile.proving_key()?;
-    let matrices = binfile.matrices()?;
-    Ok((proving_key, matrices))
+    binfile.check_protocol()?;
+    binfile.proving_key()
 }
 
 #[derive(Debug)]
 struct BinFile<'a, R> {
-    #[allow(dead_code)]
-    ftype: String,
-    #[allow(dead_code)]
-    version: u32,
-    sections: HashMap<u32, Vec<Section>>,
+    sections: HashMap<u32, Section>,
     reader: &'a mut R,
 }
 
@@ -86,8 +77,13 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
     fn new(reader: &'a mut R) -> IoResult<Self> {
         let mut magic = [0u8; 4];
         reader.read_exact(&mut magic)?;
+        if &magic != ZKEY_MAGIC {
+            return Err(SerializationError::InvalidData);
+        }
 
-        let version = reader.read_u32::<LittleEndian>()?;
+        if reader.read_u32::<LittleEndian>()? != ZKEY_VERSION {
+            return Err(SerializationError::InvalidData);
+        }
 
         let num_sections = reader.read_u32::<LittleEndian>()?;
 
@@ -96,31 +92,48 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
             let section_id = reader.read_u32::<LittleEndian>()?;
             let section_length = reader.read_u64::<LittleEndian>()?;
 
-            let section = sections.entry(section_id).or_insert_with(Vec::new);
-            section.push(Section {
+            let section = Section {
                 position: reader.stream_position()?,
-                size: section_length as usize,
-            });
+                size: section_length,
+            };
+            if sections.insert(section_id, section).is_some() {
+                return Err(SerializationError::InvalidData);
+            }
 
-            reader.seek(SeekFrom::Current(section_length as i64))?;
+            let skip =
+                i64::try_from(section_length).map_err(|_| SerializationError::InvalidData)?;
+            reader.seek(SeekFrom::Current(skip))?;
         }
 
-        Ok(Self {
-            ftype: std::str::from_utf8(&magic[..]).unwrap().to_string(),
-            version,
-            sections,
-            reader,
-        })
+        Ok(Self { sections, reader })
+    }
+
+    fn check_protocol(&mut self) -> IoResult<()> {
+        let protocol = self.read_section(1, |r| Ok(r.read_u32::<LittleEndian>()?))?;
+        if protocol != PROTOCOL_GROTH16 {
+            return Err(SerializationError::InvalidData);
+        }
+        Ok(())
     }
 
     fn proving_key(&mut self) -> IoResult<ProvingKey<Bn254>> {
         let header = self.groth_header()?;
         let ic = self.ic(header.n_public)?;
+        // An identity IC point drops its public input from the verification
+        // equation, so the verifier would accept any value for it.
+        if ic.iter().any(|p| *p == G1Affine::identity()) {
+            return Err(SerializationError::InvalidData);
+        }
+
+        let n_private = header
+            .n_vars
+            .checked_sub(header.n_public + 1)
+            .ok_or(SerializationError::InvalidData)?;
 
         let a_query = self.a_query(header.n_vars)?;
         let b_g1_query = self.b_g1_query(header.n_vars)?;
         let b_g2_query = self.b_g2_query(header.n_vars)?;
-        let l_query = self.l_query(header.n_vars - header.n_public - 1)?;
+        let l_query = self.l_query(n_private)?;
         let h_query = self.h_query(header.domain_size as usize)?;
 
         let vk = VerifyingKey::<Bn254> {
@@ -145,67 +158,37 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
         Ok(pk)
     }
 
-    fn get_section(&self, id: u32) -> Section {
-        self.sections.get(&id).unwrap()[0].clone()
+    fn get_section(&self, id: u32) -> IoResult<Section> {
+        self.sections
+            .get(&id)
+            .cloned()
+            .ok_or(SerializationError::InvalidData)
+    }
+
+    /// Runs `read` over section `id`, bounded to the section's length, and
+    /// fails unless it consumes the section exactly.
+    fn read_section<T>(
+        &mut self,
+        id: u32,
+        read: impl FnOnce(&mut Take<&mut R>) -> IoResult<T>,
+    ) -> IoResult<T> {
+        let section = self.get_section(id)?;
+        self.reader.seek(SeekFrom::Start(section.position))?;
+        let mut reader = (&mut *self.reader).take(section.size);
+        let value = read(&mut reader)?;
+        if reader.limit() != 0 {
+            return Err(SerializationError::InvalidData);
+        }
+        Ok(value)
     }
 
     fn groth_header(&mut self) -> IoResult<HeaderGroth> {
-        let section = self.get_section(2);
-        let header = HeaderGroth::new(&mut self.reader, &section)?;
-        Ok(header)
+        self.read_section(2, |r| HeaderGroth::read(r))
     }
 
     fn ic(&mut self, n_public: usize) -> IoResult<Vec<G1Affine>> {
         // the range is non-inclusive so we do +1 to get all inputs
         self.g1_section(n_public + 1, 3)
-    }
-
-    /// Returns the [`NPIndex`] corresponding to the zkey
-    pub fn matrices(&mut self) -> IoResult<NPIndex<Fr>> {
-        let header = self.groth_header()?;
-
-        let section = self.get_section(4);
-        self.reader.seek(SeekFrom::Start(section.position))?;
-        let num_coeffs: u32 = self.reader.read_u32::<LittleEndian>()?;
-
-        // instantiate AB
-        let mut matrices = vec![vec![vec![]; header.domain_size as usize]; 2];
-        let mut max_constraint_index = 0;
-        for _ in 0..num_coeffs {
-            let matrix: u32 = self.reader.read_u32::<LittleEndian>()?;
-            let constraint: u32 = self.reader.read_u32::<LittleEndian>()?;
-            let signal: u32 = self.reader.read_u32::<LittleEndian>()?;
-
-            let value: Fr = deserialize_field_fr(&mut self.reader)?;
-            max_constraint_index = std::cmp::max(max_constraint_index, constraint);
-            matrices[matrix as usize][constraint as usize].push((value, signal as usize));
-        }
-
-        let num_constraints = max_constraint_index as usize - header.n_public;
-        // Remove the public input constraints, Arkworks adds them later
-        matrices.iter_mut().for_each(|m| {
-            m.truncate(num_constraints);
-        });
-        // This is taken from Arkworks' to_matrices() function
-        let a = matrices[0].clone();
-        let b = matrices[1].clone();
-        let a_num_non_zero: usize = a.iter().map(|lc| lc.len()).sum();
-        let b_num_non_zero: usize = b.iter().map(|lc| lc.len()).sum();
-        let matrices = NPIndex {
-            num_instance_variables: header.n_public + 1,
-            num_witness_variables: header.n_vars - header.n_public,
-            num_constraints,
-
-            a_num_non_zero,
-            b_num_non_zero,
-            c_num_non_zero: 0,
-
-            a,
-            b,
-            c: vec![],
-        };
-
-        Ok(matrices)
     }
 
     fn a_query(&mut self, n_vars: usize) -> IoResult<Vec<G1Affine>> {
@@ -228,21 +211,17 @@ impl<'a, R: Read + Seek> BinFile<'a, R> {
         self.g1_section(n_vars, 9)
     }
 
-    fn g1_section(&mut self, num: usize, section_id: usize) -> IoResult<Vec<G1Affine>> {
-        let section = self.get_section(section_id as u32);
-        self.reader.seek(SeekFrom::Start(section.position))?;
-        deserialize_g1_vec(self.reader, num as u32)
+    fn g1_section(&mut self, num: usize, section_id: u32) -> IoResult<Vec<G1Affine>> {
+        self.read_section(section_id, |r| deserialize_g1_vec(r, num))
     }
 
-    fn g2_section(&mut self, num: usize, section_id: usize) -> IoResult<Vec<G2Affine>> {
-        let section = self.get_section(section_id as u32);
-        self.reader.seek(SeekFrom::Start(section.position))?;
-        deserialize_g2_vec(self.reader, num as u32)
+    fn g2_section(&mut self, num: usize, section_id: u32) -> IoResult<Vec<G2Affine>> {
+        self.read_section(section_id, |r| deserialize_g2_vec(r, num))
     }
 }
 
-#[derive(Default, Clone, Debug, CanonicalDeserialize)]
-pub struct ZVerifyingKey {
+#[derive(Clone, Debug)]
+struct ZVerifyingKey {
     alpha_g1: G1Affine,
     beta_g1: G1Affine,
     beta_g2: G2Affine,
@@ -260,6 +239,16 @@ impl ZVerifyingKey {
         let delta_g1 = deserialize_g1(reader)?;
         let delta_g2 = deserialize_g2(reader)?;
 
+        // No valid setup has identity points here. `zkey new` emits
+        // delta == gamma before any contribution, which lets anyone forge a
+        // proof for any public input by cancelling C against the IC term.
+        if [alpha_g1, beta_g1, delta_g1].contains(&G1Affine::identity())
+            || [beta_g2, gamma_g2, delta_g2].contains(&G2Affine::identity())
+            || delta_g2 == gamma_g2
+        {
+            return Err(SerializationError::InvalidData);
+        }
+
         Ok(Self {
             alpha_g1,
             beta_g1,
@@ -273,31 +262,13 @@ impl ZVerifyingKey {
 
 #[derive(Clone, Debug)]
 struct HeaderGroth {
-    #[allow(dead_code)]
-    n8q: u32,
-    #[allow(dead_code)]
-    q: BigInteger256,
-    #[allow(dead_code)]
-    n8r: u32,
-    #[allow(dead_code)]
-    r: BigInteger256,
-
     n_vars: usize,
     n_public: usize,
-
     domain_size: u32,
-    #[allow(dead_code)]
-    power: u32,
-
     verifying_key: ZVerifyingKey,
 }
 
 impl HeaderGroth {
-    fn new<R: Read + Seek>(reader: &mut R, section: &Section) -> IoResult<Self> {
-        reader.seek(SeekFrom::Start(section.position))?;
-        Self::read(reader)
-    }
-
     fn read<R: Read>(mut reader: &mut R) -> IoResult<Self> {
         // TODO: Impl From<u32> in Arkworks
         let n8q: u32 = u32::deserialize_uncompressed(&mut reader)?;
@@ -307,45 +278,38 @@ impl HeaderGroth {
         let n8r: u32 = u32::deserialize_uncompressed(&mut reader)?;
         // Prime field modulus
         let r = BigInteger256::deserialize_uncompressed(&mut reader)?;
+        if n8q != 32 || n8r != 32 || q != Fq::MODULUS || r != Fr::MODULUS {
+            return Err(SerializationError::InvalidData);
+        }
 
         let n_vars = u32::deserialize_uncompressed(&mut reader)? as usize;
         let n_public = u32::deserialize_uncompressed(&mut reader)? as usize;
 
         let domain_size: u32 = u32::deserialize_uncompressed(&mut reader)?;
-        let power = log2(domain_size as usize);
 
         let verifying_key = ZVerifyingKey::new(&mut reader)?;
 
         Ok(Self {
-            n8q,
-            q,
-            n8r,
-            r,
             n_vars,
             n_public,
             domain_size,
-            power,
             verifying_key,
         })
     }
-}
-
-// need to divide by R, since snarkjs outputs the zkey with coefficients
-// multiplieid by R^2
-fn deserialize_field_fr<R: Read>(reader: &mut R) -> IoResult<Fr> {
-    let bigint = BigInteger256::deserialize_uncompressed(reader)?;
-    Ok(Fr::new_unchecked(Fr::new_unchecked(bigint).into_bigint()))
 }
 
 // skips the multiplication by R because Circom points are already in Montgomery
 // form
 fn deserialize_field<R: Read>(reader: &mut R) -> IoResult<Fq> {
     let bigint = BigInteger256::deserialize_uncompressed(reader)?;
+    if bigint >= Fq::MODULUS {
+        return Err(SerializationError::InvalidData);
+    }
     // if you use Fq::new it multiplies by R
     Ok(Fq::new_unchecked(bigint))
 }
 
-pub fn deserialize_field2<R: Read>(reader: &mut R) -> IoResult<Fq2> {
+fn deserialize_field2<R: Read>(reader: &mut R) -> IoResult<Fq2> {
     let c0 = deserialize_field(reader)?;
     let c1 = deserialize_field(reader)?;
     Ok(Fq2::new(c0, c1))
@@ -356,10 +320,11 @@ fn deserialize_g1<R: Read>(reader: &mut R) -> IoResult<G1Affine> {
     let y = deserialize_field(reader)?;
     let infinity = x.is_zero() && y.is_zero();
     if infinity {
-        Ok(G1Affine::identity())
-    } else {
-        Ok(G1Affine::new(x, y))
+        return Ok(G1Affine::identity());
     }
+    let point = G1Affine::new_unchecked(x, y);
+    point.check()?;
+    Ok(point)
 }
 
 fn deserialize_g2<R: Read>(reader: &mut R) -> IoResult<G2Affine> {
@@ -367,50 +332,234 @@ fn deserialize_g2<R: Read>(reader: &mut R) -> IoResult<G2Affine> {
     let f2 = deserialize_field2(reader)?;
     let infinity = f1.is_zero() && f2.is_zero();
     if infinity {
-        Ok(G2Affine::identity())
-    } else {
-        Ok(G2Affine::new(f1, f2))
+        return Ok(G2Affine::identity());
     }
+    let point = G2Affine::new_unchecked(f1, f2);
+    point.check()?;
+    Ok(point)
 }
 
-fn deserialize_g1_vec<R: Read>(reader: &mut R, n_vars: u32) -> IoResult<Vec<G1Affine>> {
+fn deserialize_g1_vec<R: Read>(reader: &mut R, n_vars: usize) -> IoResult<Vec<G1Affine>> {
     (0..n_vars).map(|_| deserialize_g1(reader)).collect()
 }
 
-fn deserialize_g2_vec<R: Read>(reader: &mut R, n_vars: u32) -> IoResult<Vec<G2Affine>> {
+fn deserialize_g2_vec<R: Read>(reader: &mut R, n_vars: usize) -> IoResult<Vec<G2Affine>> {
     (0..n_vars).map(|_| deserialize_g2(reader)).collect()
 }
 
-use ark_ff::Field;
-use ark_relations::utils::matrix::Matrix;
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+pub(crate) mod tests {
+    use super::*;
+    use ark_bn254::{g1, g2};
+    use ark_ff::{AdditiveGroup, Field};
+    use ark_serialize::CanonicalSerialize;
 
-/// The A, B and C matrices of a Rank-One `ConstraintSystem`.
-/// Also contains metadata on the structure of the constraint system
-/// and the matrices.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NPIndex<F: Field> {
-    /// The number of variables that are "public instances" to the constraint
-    /// system.
-    pub num_instance_variables: usize,
-    /// The number of variables that are "private witnesses" to the constraint
-    /// system.
-    pub num_witness_variables: usize,
-    /// The number of constraints in the constraint system.
-    pub num_constraints: usize,
-    /// The number of non_zero entries in the A matrix.
-    pub a_num_non_zero: usize,
-    /// The number of non_zero entries in the B matrix.
-    pub b_num_non_zero: usize,
-    /// The number of non_zero entries in the C matrix.
-    pub c_num_non_zero: usize,
+    fn write_fq(out: &mut Vec<u8>, value: BigInteger256) {
+        value.serialize_uncompressed(out).unwrap();
+    }
 
-    /// The A constraint matrix. This is empty when
-    /// `self.mode == SynthesisMode::Prove { construct_matrices = false }`.
-    pub a: Matrix<F>,
-    /// The B constraint matrix. This is empty when
-    /// `self.mode == SynthesisMode::Prove { construct_matrices = false }`.
-    pub b: Matrix<F>,
-    /// The C constraint matrix. This is empty when
-    /// `self.mode == SynthesisMode::Prove { construct_matrices = false }`.
-    pub c: Matrix<F>,
+    fn g1_bytes(point: &G1Affine) -> Vec<u8> {
+        let mut out = Vec::new();
+        write_fq(&mut out, point.x.0);
+        write_fq(&mut out, point.y.0);
+        out
+    }
+
+    fn g2_bytes(point: &G2Affine) -> Vec<u8> {
+        let mut out = Vec::new();
+        for c in [point.x.c0, point.x.c1, point.y.c0, point.y.c1] {
+            write_fq(&mut out, c.0);
+        }
+        out
+    }
+
+    #[test]
+    fn g1_roundtrip() {
+        let g = G1Affine::new_unchecked(g1::G1_GENERATOR_X, g1::G1_GENERATOR_Y);
+        assert_eq!(deserialize_g1(&mut &g1_bytes(&g)[..]).unwrap(), g);
+        let zero = [0u8; 64];
+        assert_eq!(
+            deserialize_g1(&mut &zero[..]).unwrap(),
+            G1Affine::identity()
+        );
+    }
+
+    #[test]
+    fn g1_rejects_off_curve_point() {
+        let point = G1Affine::new_unchecked(Fq::ONE, Fq::ONE);
+        assert!(deserialize_g1(&mut &g1_bytes(&point)[..]).is_err());
+    }
+
+    #[test]
+    fn g1_rejects_non_canonical_coordinate() {
+        let mut bytes = Vec::new();
+        write_fq(&mut bytes, Fq::MODULUS);
+        write_fq(&mut bytes, Fq::ONE.0);
+        assert!(deserialize_g1(&mut &bytes[..]).is_err());
+    }
+
+    #[test]
+    fn g2_roundtrip() {
+        let g = G2Affine::new_unchecked(g2::G2_GENERATOR_X, g2::G2_GENERATOR_Y);
+        assert_eq!(deserialize_g2(&mut &g2_bytes(&g)[..]).unwrap(), g);
+    }
+
+    #[test]
+    fn g2_rejects_point_outside_subgroup() {
+        let mut x = Fq2::ZERO;
+        let point = loop {
+            x += Fq2::ONE;
+            if let Some(p) = G2Affine::get_point_from_x_unchecked(x, false) {
+                break p;
+            }
+        };
+        assert!(point.is_on_curve());
+        assert!(!point.is_in_correct_subgroup_assuming_on_curve());
+        assert!(deserialize_g2(&mut &g2_bytes(&point)[..]).is_err());
+    }
+
+    fn zkey_file(sections: &[(u32, Vec<u8>)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(ZKEY_MAGIC);
+        out.extend_from_slice(&ZKEY_VERSION.to_le_bytes());
+        out.extend_from_slice(&u32::try_from(sections.len()).unwrap().to_le_bytes());
+        for (id, body) in sections {
+            out.extend_from_slice(&id.to_le_bytes());
+            out.extend_from_slice(&u64::try_from(body.len()).unwrap().to_le_bytes());
+            out.extend_from_slice(body);
+        }
+        out
+    }
+
+    fn g1_generator() -> G1Affine {
+        G1Affine::new_unchecked(g1::G1_GENERATOR_X, g1::G1_GENERATOR_Y)
+    }
+
+    fn g2_generator() -> G2Affine {
+        G2Affine::new_unchecked(g2::G2_GENERATOR_X, g2::G2_GENERATOR_Y)
+    }
+
+    /// Generator points everywhere, except delta, which is doubled so it
+    /// differs from gamma.
+    fn valid_header() -> ZVerifyingKey {
+        let (g1, g2) = (g1_generator(), g2_generator());
+        ZVerifyingKey {
+            alpha_g1: g1,
+            beta_g1: g1,
+            beta_g2: g2,
+            gamma_g2: g2,
+            delta_g1: (g1 + g1).into(),
+            delta_g2: (g2 + g2).into(),
+        }
+    }
+
+    pub(crate) fn valid_zkey() -> Vec<u8> {
+        minimal_zkey(&valid_header(), &g1_generator())
+    }
+
+    /// A one-variable, zero-public-input zkey with the given header points and
+    /// IC[0]. The proving key queries are all identity.
+    fn minimal_zkey(vk: &ZVerifyingKey, ic0: &G1Affine) -> Vec<u8> {
+        let g1 = vec![0u8; 64];
+        let g2 = vec![0u8; 128];
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&32u32.to_le_bytes());
+        write_fq(&mut header, Fq::MODULUS);
+        header.extend_from_slice(&32u32.to_le_bytes());
+        write_fq(&mut header, Fr::MODULUS);
+        header.extend_from_slice(&1u32.to_le_bytes()); // n_vars
+        header.extend_from_slice(&0u32.to_le_bytes()); // n_public
+        header.extend_from_slice(&1u32.to_le_bytes()); // domain_size
+        header.extend(g1_bytes(&vk.alpha_g1));
+        header.extend(g1_bytes(&vk.beta_g1));
+        header.extend(g2_bytes(&vk.beta_g2));
+        header.extend(g2_bytes(&vk.gamma_g2));
+        header.extend(g1_bytes(&vk.delta_g1));
+        header.extend(g2_bytes(&vk.delta_g2));
+
+        zkey_file(&[
+            (1, PROTOCOL_GROTH16.to_le_bytes().to_vec()),
+            (2, header),
+            (3, g1_bytes(ic0)),
+            (5, g1.clone()),
+            (6, g1.clone()),
+            (7, g2),
+            (8, Vec::new()),
+            (9, g1),
+        ])
+    }
+
+    fn parses(vk: &ZVerifyingKey, ic0: &G1Affine) -> bool {
+        read_zkey(&mut std::io::Cursor::new(minimal_zkey(vk, ic0))).is_ok()
+    }
+
+    #[test]
+    fn read_zkey_accepts_valid_key() {
+        let pk = read_zkey(&mut std::io::Cursor::new(valid_zkey())).unwrap();
+        assert_eq!(pk.vk.gamma_abc_g1, vec![g1_generator()]);
+        assert_eq!(pk.delta_g1, valid_header().delta_g1);
+    }
+
+    #[test]
+    fn read_zkey_rejects_identity_ic() {
+        assert!(!parses(&valid_header(), &G1Affine::identity()));
+    }
+
+    #[test]
+    fn read_zkey_rejects_identity_header_points() {
+        let edits: [fn(&mut ZVerifyingKey); 6] = [
+            |vk| vk.alpha_g1 = G1Affine::identity(),
+            |vk| vk.beta_g1 = G1Affine::identity(),
+            |vk| vk.beta_g2 = G2Affine::identity(),
+            |vk| vk.gamma_g2 = G2Affine::identity(),
+            |vk| vk.delta_g1 = G1Affine::identity(),
+            |vk| vk.delta_g2 = G2Affine::identity(),
+        ];
+        for edit in edits {
+            let mut vk = valid_header();
+            edit(&mut vk);
+            assert!(!parses(&vk, &g1_generator()));
+        }
+    }
+
+    #[test]
+    fn read_zkey_rejects_uncontributed_key() {
+        let vk = ZVerifyingKey {
+            delta_g1: g1_generator(),
+            delta_g2: g2_generator(),
+            ..valid_header()
+        };
+        assert!(!parses(&vk, &g1_generator()));
+    }
+
+    #[test]
+    fn section_must_be_consumed_exactly() {
+        let bytes = zkey_file(&[(5, vec![0u8; 2 * 64])]);
+        let mut reader = std::io::Cursor::new(bytes);
+        let mut binfile = BinFile::new(&mut reader).unwrap();
+
+        assert_eq!(binfile.g1_section(2, 5).unwrap().len(), 2);
+        assert!(binfile.g1_section(1, 5).is_err());
+        assert!(binfile.g1_section(3, 5).is_err());
+        assert!(binfile.g2_section(1, 5).is_ok());
+        assert!(binfile.g2_section(2, 5).is_err());
+    }
+
+    #[test]
+    fn binfile_rejects_unsupported_version() {
+        let mut bytes = zkey_file(&[]);
+        assert!(BinFile::new(&mut std::io::Cursor::new(bytes.clone())).is_ok());
+        bytes[4..8].copy_from_slice(&2u32.to_le_bytes());
+        assert!(BinFile::new(&mut std::io::Cursor::new(bytes)).is_err());
+    }
+
+    #[test]
+    fn binfile_rejects_duplicated_section() {
+        let unique = zkey_file(&[(3, Vec::new()), (4, Vec::new())]);
+        assert!(BinFile::new(&mut std::io::Cursor::new(unique)).is_ok());
+        let duplicated = zkey_file(&[(3, Vec::new()), (3, Vec::new())]);
+        assert!(BinFile::new(&mut std::io::Cursor::new(duplicated)).is_err());
+    }
 }

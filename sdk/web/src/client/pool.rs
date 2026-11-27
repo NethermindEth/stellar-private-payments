@@ -44,9 +44,18 @@ impl PrivatePool {
         self.inner().token_decimals().await.map_err(pool_err)
     }
 
-    /// Balance in token base units (`bigint` in JS).
+    /// Balance in token base units (`bigint` in JS), from checked notes only;
+    /// see `pendingBalance`.
     pub async fn balance(&self) -> Result<u128, JsError> {
         let amount = self.inner().balance().await.map_err(pool_err)?;
+        Ok(u128::from(amount))
+    }
+
+    /// Unspent amount of the pending notes, which `balance` leaves out until a
+    /// sync checks them against the pool's event chain (`bigint` in JS).
+    #[wasm_bindgen(js_name = pendingBalance)]
+    pub async fn pending_balance(&self) -> Result<u128, JsError> {
+        let amount = self.inner().pending_balance().await.map_err(pool_err)?;
         Ok(u128::from(amount))
     }
 

@@ -50,6 +50,13 @@ impl UserNoteSummary {
         self.inner.spent
     }
 
+    /// Whether the note waits for a sync to check it against its pool's event
+    /// chain. Pending notes count toward no balance and cannot be spent.
+    #[wasm_bindgen(getter)]
+    pub fn pending(&self) -> bool {
+        self.inner.pending
+    }
+
     #[wasm_bindgen(getter, js_name = gvkCiphertext)]
     pub fn gvk_ciphertext(&self) -> Option<GlobalViewKeyCiphertext> {
         self.inner

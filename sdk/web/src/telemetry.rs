@@ -508,18 +508,38 @@ pub async fn dump_all_logs() -> String {
     out
 }
 
-/// Install a panic hook that records the active correlation ID.
+/// Install a panic hook that, on wasm, fires `PANIC_EVENT`, then records the
+/// active correlation ID.
 pub fn install_panic_hook() {
     PANIC_HOOK_INIT.call_once(|| {
         console_error_panic_hook::set_once();
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
+            #[cfg(target_arch = "wasm32")]
+            notify_panic();
             let correlation_id = crate::correlation::current_correlation_id();
             let message = format!("panic: {info}");
             tracing::error!(correlation_id = ?correlation_id, "{}", message);
             previous(info);
         }));
     });
+}
+
+/// Dispatched on `globalThis` by the panic hook. Exported to JS as
+/// `PANIC_EVENT` in `js/index.js`.
+#[cfg(target_arch = "wasm32")]
+const PANIC_EVENT: &str = "stellar-private-payments:panic";
+
+#[cfg(target_arch = "wasm32")]
+fn notify_panic() {
+    use wasm_bindgen::JsCast;
+    // Node's global object is not an `EventTarget`.
+    if let (Ok(target), Ok(event)) = (
+        js_sys::global().dyn_into::<web_sys::EventTarget>(),
+        web_sys::Event::new(PANIC_EVENT),
+    ) {
+        let _ = target.dispatch_event(&event);
+    }
 }
 
 /// Check whether the telemetry subscriber has been initialized.
@@ -580,5 +600,26 @@ mod tests {
                 "only the post-change event should be emitted, got:\n{dump}"
             );
         });
+    }
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod panic_event_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use wasm_bindgen::JsValue;
+    use wasm_bindgen_test::*;
+
+    #[wasm_bindgen_test]
+    fn notify_panic_fires_the_event_on_global_this() {
+        js_sys::Function::new_no_args(&format!(
+            "globalThis.panics = 0; globalThis.addEventListener('{PANIC_EVENT}', () => globalThis.panics++);"
+        ))
+        .call0(&JsValue::NULL)
+        .unwrap();
+        notify_panic();
+        let panics = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("panics")).unwrap();
+        assert_eq!(panics.as_f64(), Some(1.0));
     }
 }

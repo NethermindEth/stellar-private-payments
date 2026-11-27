@@ -129,6 +129,9 @@ in `api-types.d.ts`). Amounts are `bigint` base units.
 | `NO_SPENDABLE_NOTES` | none |
 | `NOT_BALANCED` | `gap`, negative when more goes out than comes in |
 | `WITHDRAWAL_TO_CONTRACT` | none |
+| `TRUSTLINE_MISSING` | none; the paying account has no trustline for the pool's classic asset |
+| `INSUFFICIENT_BALANCE` | `needed`, `available` |
+| `RECIPIENT_TRUSTLINE_MISSING` | none; the withdrawal recipient has no trustline for the pool's classic asset |
 
 A refusal after a payment's first transaction has confirmed resolves as a failed
 result instead, so the confirmed transaction's hash is not lost.
@@ -159,6 +162,11 @@ configureTelemetry({
 const logs = await dump_recent_logs(); // main thread + storage/prover workers
 set_log_level('info');
 ```
+
+A Rust panic on the main thread fires `PANIC_EVENT` on `globalThis`, then the
+WASM instance traps without running destructors, so secrets that were live
+stay in its memory. Apps holding open storage should reload the page.
+Listeners must not call back into the SDK.
 
 ## TypeScript
 

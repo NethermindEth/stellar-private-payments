@@ -206,6 +206,18 @@ test('Escape returns focus from inside, leaves outside focus alone and prevents 
   assert.equal(trigger(b).dispatch('keydown', { key: 'Escape' }).defaultPrevented, undefined);
 });
 
+test('a card counts pending notes and shows their amount apart from the verified balance', () => {
+  const [a] = render([A], [{ ...balance('A', '10000000', 1), pendingAmount: 25_000_000n, pendingNoteCount: 2 }]);
+  assert.equal(a.querySelector('.balance-amount').textContent, '1 XLM');
+  assert.equal(a.querySelector('.balance-notes').textContent, '3 notes · 2 pending');
+  assert.equal(a.querySelector('.balance-pending').hidden, false);
+  assert.equal(a.querySelector('.balance-pending-text').textContent, '2.5 XLM being verified…');
+
+  render([A], [balance('A', '10000000', 1)]);
+  assert.equal(a.querySelector('.balance-notes').textContent, '1 note');
+  assert.equal(a.querySelector('.balance-pending').hidden, true);
+});
+
 test('refresh retains the card, panel, details focus and single action handlers, including reordering', () => {
   const [a, b] = render();
   trigger(a).click();

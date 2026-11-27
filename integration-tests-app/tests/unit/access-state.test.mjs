@@ -103,6 +103,15 @@ test('a lock caused by inactivity says why and where to change it', () => {
     assert.equal(describe({ storeExists: true, idleLockMinutes: 5 }).card.title, 'Welcome back');
 });
 
+test('a lock caused by an SDK panic says so', () => {
+    const locked = { storeExists: true, walletState: 'locked', walletConnected: true };
+    const panicked = describe({ ...locked, panicLocked: true });
+    assert.equal(panicked.action, 'unlock');
+    assert.equal(panicked.card.title, 'Locked after an internal error');
+    assert.match(panicked.card.note, /report it/);
+    assert.equal(describe({ storeExists: true, panicLocked: true }).card.title, 'Welcome back');
+});
+
 test('the card names the tab it stands in for', () => {
     const labels = { dashboard: 'Overview', 'move-funds': 'Move Funds', advanced: 'Advanced', disclosure: 'Disclosure' };
     for (const [view, label] of Object.entries(labels)) {

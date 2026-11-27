@@ -26,3 +26,8 @@ pub use clients::{
     CircomGroth16VerifierClient, CircomGroth16VerifierInterface,
 };
 pub use ext_data::{ExtData, hash_ext_data};
+
+/// How many nullifiers a transaction proof carries: one per input note, and
+/// every `policy_tx_2_2*` circuit takes two (`nIns`). The verifying key fixes
+/// the number of public inputs, so a proof with any other count cannot verify.
+pub const N_INPUT_NULLIFIERS: u32 = 2;

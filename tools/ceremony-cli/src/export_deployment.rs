@@ -5,7 +5,7 @@
 
 use crate::{
     CommandRunner, ExportDeploymentArgs, assert_dir_exists, assert_output_allowed,
-    assert_readable_file, zkey::read_zkey,
+    assert_readable_file, verify_zkey, zkey::read_zkey,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::Bn254;
@@ -15,10 +15,11 @@ use std::{fs, io::BufReader, path::Path};
 
 pub(crate) fn export_deployment(
     args: ExportDeploymentArgs,
-    _runner: &dyn CommandRunner,
+    runner: &dyn CommandRunner,
 ) -> Result<()> {
     assert_readable_file(&args.zkey, "zkey")?;
     assert_dir_exists(&args.out_dir)?;
+    let circuit = args.setup.resolve()?;
 
     let pk_path = args
         .out_dir
@@ -33,38 +34,24 @@ pub(crate) fn export_deployment(
         assert_output_allowed(path, args.force)?;
     }
 
-    // Prefer parsing the snarkjs `.zkey` directly, without a JSON roundtrip.
-    // This avoids subtle format/ordering issues (e.g. sparse query vectors).
+    // Parsing is cheap and writes nothing, so malformed keys fail before the
+    // much slower `zkey verify`.
     let pk = proving_key_from_zkey(&args.zkey)?;
-
-    // Sanity check: proving key bytes must round-trip before writing to disk.
-    // This ensures our reconstructed structure matches arkworks' canonical
-    // encoding expectations.
-    {
-        use ark_serialize::CanonicalSerialize as _;
-        let mut pk_bytes = Vec::new();
-        pk.serialize_compressed(&mut pk_bytes)
-            .map_err(|e| anyhow!("failed to serialize proving key: {e}"))?;
-        ProvingKey::<Bn254>::deserialize_compressed_unchecked(&pk_bytes[..])
-            .map_err(|e| anyhow!("failed to round-trip proving key bytes: {e}"))?;
-    }
+    verify_zkey(runner, &circuit, &args.setup.ptau, &args.zkey)?;
 
     circuit_keys::write_proving_key_bin(&pk, &pk_path)?;
     circuit_keys::write_vk_snarkjs_json(&pk.vk, &vk_json_path)?;
     circuit_keys::write_vk_soroban_bin(&pk.vk, &vk_soroban_path)?;
     circuit_keys::write_vk_rust_const(&pk.vk, &vk_const_path)?;
 
-    // Validate emitted proving key by checking the on-disk verifying key
-    // matches. We deserialize unchecked here because the proving key is
-    // derived from a trusted ceremony.
-    let written_pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(
-        &fs::read(&pk_path).with_context(|| format!("failed to read {}", pk_path.display()))?[..],
-    )
-    .map_err(|e| anyhow!("failed to read back {}: {e}", pk_path.display()))?;
-
-    if circuit_keys::vk_to_snarkjs_json(&written_pk.vk) != circuit_keys::vk_to_snarkjs_json(&pk.vk)
-    {
-        bail!("validation failed: proving key contains a different verification key");
+    // Unchecked deserialization is enough here: the points were already
+    // validated when parsing the zkey.
+    let written = fs::File::open(&pk_path)
+        .with_context(|| format!("failed to open {}", pk_path.display()))?;
+    let written_pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(BufReader::new(written))
+        .map_err(|e| anyhow!("failed to read back {}: {e}", pk_path.display()))?;
+    if written_pk != pk {
+        bail!("validation failed: written proving key differs from the zkey");
     }
 
     println!("Generated:");
@@ -80,7 +67,6 @@ fn proving_key_from_zkey(zkey_path: &Path) -> Result<ProvingKey<Bn254>> {
     let file = fs::File::open(zkey_path)
         .with_context(|| format!("failed to open {}", zkey_path.display()))?;
     let mut reader = BufReader::new(file);
-    let (pk, _matrices) = read_zkey(&mut reader)
-        .map_err(|e| anyhow!("failed to parse snarkjs zkey {}: {e}", zkey_path.display()))?;
-    Ok(pk)
+    read_zkey(&mut reader)
+        .map_err(|e| anyhow!("failed to parse snarkjs zkey {}: {e}", zkey_path.display()))
 }

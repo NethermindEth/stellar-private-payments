@@ -23,7 +23,7 @@ use stellar_private_payments::{
 
 use crate::{
     keypair::TestKeypair,
-    network::{self, DeploymentIdentity, LocalNetwork, NETWORK_PASSPHRASE},
+    network::{self, ClassicAsset, DeploymentIdentity, LocalNetwork, NETWORK_PASSPHRASE},
     pool::PoolOptions,
 };
 
@@ -158,6 +158,19 @@ pub async fn deploy_scoped(
             Some(scope),
         )
         .await
+}
+
+/// Deploy one pool with no ASP policy on the suite's classic asset, and
+/// return that asset with the deployment.
+pub async fn deploy_classic() -> Result<((ContractConfig, DeploymentIdentity), ClassicAsset)> {
+    let network = LocalNetwork::start().await?;
+    let asset = network.classic_asset().await?;
+    let deployment = deploy(&[PoolOptions {
+        asset: asset.pool_asset(),
+        ..PoolOptions::NONE
+    }])
+    .await?;
+    Ok((deployment, asset))
 }
 
 /// Asserts that `err` carries the contract error `code`, which a refused

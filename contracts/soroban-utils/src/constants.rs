@@ -474,6 +474,7 @@ pub fn get_round_constants_t2(env: &Env) -> Vec<Vec<U256>> {
                     ],
                 ),
             ),
+            U256::from_be_bytes(env, &Bytes::from_array(env, &[0; 32])),
         ],
         vec![
             env,

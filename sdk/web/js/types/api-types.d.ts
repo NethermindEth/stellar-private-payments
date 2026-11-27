@@ -191,7 +191,14 @@ export interface PoolRefusal extends Error {
     | 'NO_COMBINATION'
     | 'NO_SPENDABLE_NOTES'
     | 'NOT_BALANCED'
-    | 'WITHDRAWAL_TO_CONTRACT';
+    | 'WITHDRAWAL_TO_CONTRACT'
+    | 'TRUSTLINE_MISSING'
+    | 'INSUFFICIENT_BALANCE'
+    | 'RECIPIENT_TRUSTLINE_MISSING';
+  /** With `INSUFFICIENT_BALANCE`: what the deposit sends, pool fee included. */
+  needed?: bigint;
+  /** With `INSUFFICIENT_BALANCE`: what the paying account holds of the pool's token. */
+  available?: bigint;
   /** With `DEPOSIT_BELOW_MINIMUM`: the least a deposit leaves in notes after the pool fee. */
   minimum?: bigint;
   /** With `DEPOSIT_ABOVE_MAXIMUM`: the most a deposit sends, pool fee included. */
@@ -276,6 +283,9 @@ export declare function dump_recent_logs(): Promise<string>;
 
 /** DOM event name emitted during in-flight pool transactions. */
 export declare const TX_PROGRESS_EVENT: 'stellar-private-payments:tx-progress';
+
+/** DOM event fired on `globalThis` when Rust panics, just before the WASM instance traps. */
+export declare const PANIC_EVENT: 'stellar-private-payments:panic';
 
 /** Payload on {@link TX_PROGRESS_EVENT} `CustomEvent.detail`. */
 export interface TxProgressDetail {

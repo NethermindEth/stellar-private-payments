@@ -282,7 +282,7 @@ impl Storage {
             return Ok(());
         };
         tx.execute(
-            "UPDATE raw_contract_events SET chain_count = NULL, chain_hash = NULL
+            "UPDATE raw_contract_events SET chain_count = NULL, chain_hash = NULL, checked = 0
              WHERE contract_id = ?1 AND (ledger, id) > (?2, ?3)",
             params![contract_id, ledger, id],
         )?;
@@ -369,7 +369,8 @@ impl Storage {
     }
 
     /// Compares the event chain over the events saved for `contract_address`
-    /// with the chain the contract `published`.
+    /// with the chain the contract `published`, and marks the saved events
+    /// that chain covers as checked.
     ///
     /// Events after one that does not fold are saved and processed but not
     /// in the chain, so any such event makes the saved events differ from the
@@ -379,6 +380,7 @@ impl Storage {
         contract_address: &str,
         published: &EventChain,
     ) -> Result<EventChainCheck> {
+        self.mark_events_checked(contract_address, published)?;
         let chain = self.event_chain(contract_address)?;
         let unfolded: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM raw_contract_events r
@@ -398,6 +400,29 @@ impl Storage {
                 .context("the event count overflows")?,
             published: published.count,
         })
+    }
+
+    /// Marks `contract_address`'s saved events as checked up to the
+    /// `published` count, when the saved chain reaches that count with the
+    /// published hash. The hash covers every event up to it, so they are the
+    /// contract's own. Saved events past it stay unchecked until a later chain
+    /// covers them.
+    fn mark_events_checked(&self, contract_address: &str, published: &EventChain) -> Result<()> {
+        let count = i64::try_from(published.count).context("the event count overflows")?;
+        self.conn.execute(
+            "UPDATE raw_contract_events SET checked = 1
+             WHERE contract_id = (SELECT contract_id FROM contracts WHERE address = ?1)
+               AND checked = 0
+               AND chain_count <= ?2
+               AND EXISTS (
+                   SELECT 1 FROM raw_contract_events h
+                   WHERE h.contract_id = raw_contract_events.contract_id
+                     AND h.chain_count = ?2
+                     AND h.chain_hash = ?3
+               )",
+            params![contract_address, count, published.hash.as_slice()],
+        )?;
+        Ok(())
     }
 
     /// Forgets everything synced from `contract_address`: its events, what was
@@ -826,7 +851,8 @@ impl Storage {
                 c.leaf_index,
                 r.ledger,
                 CASE WHEN {SAVED_NULLIFIER} THEN 1 ELSE 0 END AS spent,
-                c.gvk_ciphertext
+                c.gvk_ciphertext,
+                r.checked
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
@@ -848,6 +874,7 @@ impl Storage {
             let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
             let spent_i64: i64 = row.get(5)?;
             let gvk_ciphertext = optional_gvk_ciphertext_col(row, 6)?;
+            let checked_i64: i64 = row.get(7)?;
 
             Ok(UserNoteSummary {
                 id,
@@ -856,6 +883,7 @@ impl Storage {
                 leaf_index,
                 created_at_ledger,
                 spent: spent_i64 != 0,
+                pending: checked_i64 == 0,
                 gvk_ciphertext,
             })
         })?;
@@ -882,7 +910,8 @@ impl Storage {
                 c.leaf_index,
                 r.ledger,
                 CASE WHEN {SAVED_NULLIFIER} THEN 1 ELSE 0 END AS spent,
-                c.gvk_ciphertext
+                c.gvk_ciphertext,
+                r.checked
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
@@ -902,6 +931,7 @@ impl Storage {
             let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
             let spent_i64: i64 = row.get(4)?;
             let gvk_ciphertext = optional_gvk_ciphertext_col(row, 5)?;
+            let checked_i64: i64 = row.get(6)?;
 
             Ok(UserNoteSummary {
                 id,
@@ -910,6 +940,7 @@ impl Storage {
                 leaf_index,
                 created_at_ledger,
                 spent: spent_i64 != 0,
+                pending: checked_i64 == 0,
                 gvk_ciphertext,
             })
         })?;
@@ -921,7 +952,8 @@ impl Storage {
         Ok(out)
     }
 
-    /// All unspent notes for `address` in `pool_contract_id` (newest first).
+    /// All unspent notes for `address` in `pool_contract_id` (newest first),
+    /// from checked events only.
     pub fn list_unspent_user_notes(
         &self,
         pool_contract_id: &str,
@@ -944,6 +976,7 @@ impl Storage {
              WHERE a.address = ?1
                AND pool.address = ?2
                AND a.kdf_domain = ?3
+               AND r.checked = 1
                AND NOT {SAVED_NULLIFIER}
              ORDER BY r.ledger DESC"
         );
@@ -966,6 +999,7 @@ impl Storage {
                 leaf_index,
                 created_at_ledger,
                 spent: false,
+                pending: false,
                 gvk_ciphertext,
             })
         })?;
@@ -984,7 +1018,7 @@ impl Storage {
         enabled_pools: &[PortfolioPoolEntry],
     ) -> Result<Vec<PortfolioBalance>> {
         let sql = format!(
-            "SELECT pool.address, n.amount
+            "SELECT pool.address, n.amount, r.checked
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
@@ -998,17 +1032,21 @@ impl Storage {
         let rows = stmt.query_map(params![address, kdf_domain], |row| {
             let pool_contract_id: String = row.get(0)?;
             let amount: NoteAmount = row.get(1)?;
-            Ok((pool_contract_id, amount))
+            let checked_i64: i64 = row.get(2)?;
+            Ok((pool_contract_id, amount, checked_i64 != 0))
         })?;
 
+        // Per pool: (note count, amount) of checked notes, then of pending
+        // ones.
         let mut aggregated = std::collections::HashMap::new();
         for row in rows {
-            let (pool_contract_id, amount) = row?;
+            let (pool_contract_id, amount, checked) = row?;
             let entry = aggregated
                 .entry(pool_contract_id)
-                .or_insert((0u32, NoteAmount::ZERO));
-            entry.0 = entry.0.saturating_add(1);
-            entry.1 = entry
+                .or_insert([(0u32, NoteAmount::ZERO); 2]);
+            let total = &mut entry[usize::from(!checked)];
+            total.0 = total.0.saturating_add(1);
+            total.1 = total
                 .1
                 .checked_add(amount)
                 .ok_or_else(|| anyhow!("overflow computing total balance"))?;
@@ -1016,15 +1054,17 @@ impl Storage {
 
         let mut balances = Vec::new();
         for pool in enabled_pools {
-            let (note_count, amount) = aggregated
+            let [(note_count, amount), (pending_note_count, pending_amount)] = aggregated
                 .remove(&pool.pool_contract_id)
-                .unwrap_or((0, NoteAmount::ZERO));
+                .unwrap_or([(0, NoteAmount::ZERO); 2]);
             balances.push(PortfolioBalance {
                 pool_contract_id: pool.pool_contract_id.clone(),
                 token_contract_id: pool.token_contract_id.clone(),
                 token_label: pool.token_label.clone(),
                 amount,
                 note_count,
+                pending_amount,
+                pending_note_count,
             });
         }
 
@@ -1260,7 +1300,8 @@ impl Storage {
     /// Returns `(amount, blinding, leaf_index)` per commitment. A commitment
     /// listed k times gets its k lowest unspent copies by leaf index, and
     /// `None` past the last. A saved nullifier counts as spent before
-    /// reconciliation links it to the note.
+    /// reconciliation links it to the note. Only notes from checked events
+    /// count; a pending one is `None` until a sync checks it.
     ///
     /// # Errors
     ///
@@ -1284,6 +1325,7 @@ impl Storage {
                AND c.address = ?1
                AND pc.commitment = ?3
                AND a.kdf_domain = ?4
+               AND r.checked = 1
                AND n.nullifier_id IS NULL
                AND NOT {SAVED_NULLIFIER}
              ORDER BY pc.leaf_index
@@ -3589,6 +3631,7 @@ mod tests {
                 latest_ledger: 1,
             },
         )?;
+        check_pool_history(storage, pool)?;
         storage.save_commitment_events_batch(
             &ids.iter()
                 .zip(leaf_indices)
@@ -3631,6 +3674,19 @@ mod tests {
         Ok(leaves)
     }
 
+    /// Marks every saved event of `pool` checked, as a chain check covering
+    /// its history would. The fixtures' raw rows are never folded, so saving a
+    /// later event of the pool refolds and unchecks them; mark them again
+    /// after each save.
+    fn check_pool_history(storage: &Storage, pool: &str) -> Result<()> {
+        storage.conn.execute(
+            "UPDATE raw_contract_events SET checked = 1
+             WHERE contract_id = (SELECT contract_id FROM contracts WHERE address = ?1)",
+            params![pool],
+        )?;
+        Ok(())
+    }
+
     fn save_spend(storage: &mut Storage, leaf_index: u32) -> Result<()> {
         let nullifier: Field = storage.conn.query_row(
             "SELECT n.expected_nullifier
@@ -3648,6 +3704,7 @@ mod tests {
             cursor: "cur".to_string(),
             latest_ledger: 1,
         })?;
+        check_pool_history(storage, "CPOOL")?;
         storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
             id,
             nullifier,
@@ -4235,6 +4292,73 @@ mod tests {
                 published: 2
             }
         );
+        Ok(())
+    }
+
+    /// Ids of `contract_address`'s saved events marked checked, in chain
+    /// order.
+    fn checked_ids(storage: &Storage, contract_address: &str) -> Result<Vec<String>> {
+        let mut stmt = storage.conn.prepare(
+            "SELECT r.id FROM raw_contract_events r
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE c.address = ?1 AND r.checked = 1
+             ORDER BY r.chain_count",
+        )?;
+        let ids = stmt
+            .query_map(params![contract_address], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        Ok(ids)
+    }
+
+    /// Events synced past the published chain wait for a later one.
+    #[test]
+    fn checking_marks_the_events_the_published_chain_covers() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let first = chain_event("p1", 1, "CPOOL", 1)?;
+        let second = chain_event("p2", 2, "CPOOL", 2)?;
+        let third = chain_event("p3", 3, "CPOOL", 3)?;
+        storage.save_events_batch(&batch(vec![first.clone(), second.clone(), third.clone()]))?;
+        assert!(checked_ids(&storage, "CPOOL")?.is_empty());
+
+        storage.check_event_chain("CPOOL", &folded(&[&first, &second])?)?;
+        assert_eq!(checked_ids(&storage, "CPOOL")?, ["p1", "p2"]);
+
+        storage.check_event_chain("CPOOL", &folded(&[&first, &second, &third])?)?;
+        assert_eq!(checked_ids(&storage, "CPOOL")?, ["p1", "p2", "p3"]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_published_chain_with_another_hash_checks_nothing() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let first = chain_event("p1", 1, "CPOOL", 1)?;
+        let synced = chain_event("p2", 2, "CPOOL", 2)?;
+        let published = chain_event("p2", 2, "CPOOL", 5)?;
+        storage.save_events_batch(&batch(vec![first.clone(), synced]))?;
+
+        storage.check_event_chain("CPOOL", &folded(&[&first, &published])?)?;
+
+        assert!(checked_ids(&storage, "CPOOL")?.is_empty());
+        Ok(())
+    }
+
+    /// An event saved late lands before checked ones; they are checked again
+    /// in their new places.
+    #[test]
+    fn an_event_saved_late_unchecks_the_events_after_it() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+        let first = chain_event("p1", 1, "CPOOL", 1)?;
+        let second = chain_event("p2", 2, "CPOOL", 2)?;
+        let third = chain_event("p3", 3, "CPOOL", 3)?;
+        storage.save_events_batch(&batch(vec![first.clone(), third.clone()]))?;
+        storage.check_event_chain("CPOOL", &folded(&[&first, &third])?)?;
+        assert_eq!(checked_ids(&storage, "CPOOL")?, ["p1", "p3"]);
+
+        storage.save_events_batch(&batch(vec![second.clone()]))?;
+        assert_eq!(checked_ids(&storage, "CPOOL")?, ["p1"]);
+
+        storage.check_event_chain("CPOOL", &folded(&[&first, &second, &third])?)?;
+        assert_eq!(checked_ids(&storage, "CPOOL")?, ["p1", "p2", "p3"]);
         Ok(())
     }
 

@@ -1,3 +1,4 @@
+import './frame-guard.js';
 import { deploymentDefaults } from './network-config.js';
 import { StrKey, contract, scValToNative, xdr } from '@stellar/stellar-sdk';
 import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf, loadDeploymentConfig, openOperator, readTokenDecimals, isStorageUnlocked, lockStorage, storageWasLocked, STORAGE_STATE_EVENT } from './wasm-facade.js';

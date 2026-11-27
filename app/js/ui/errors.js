@@ -26,6 +26,7 @@ export const CONTRACT_ERRORS = {
         // Only a fee claim, sent from admin.html, can fail with this.
         23: 'The claim asks for more than the fees collected, most likely because another claim went through first. The Pools tab\'s Fees column now shows what is left to claim.',
         24: 'The pool does not pay itself or its token contract. Choose another recipient.',
+        25: 'Every pool transaction spends exactly two notes, and this proof does not.',
     },
     // Groth16 verifier errors
     verifier: {
@@ -84,6 +85,7 @@ const CONTRACT_MESSAGES = {
     21: CONTRACT_ERRORS.pool[21],
     22: CONTRACT_ERRORS.pool[22],
     24: CONTRACT_ERRORS.pool[24],
+    25: CONTRACT_ERRORS.pool[25],
 };
 
 /**

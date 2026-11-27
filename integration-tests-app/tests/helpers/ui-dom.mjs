@@ -103,6 +103,9 @@ export function installDom() {
 export function balanceCard() {
   const card = new Element('article');
   for (const name of ['token', 'pool', 'amount']) card.append(new Element('a', { className: `balance-${name}` }));
+  const pending = new Element('p', { className: 'balance-pending', hidden: true });
+  pending.append(new Element('span', { className: 'balance-pending-text' }));
+  card.append(pending);
   card.append(new Element('button', { className: 'balance-notes', dataset: { viewNotes: '' } }));
   card.append(new Element('span', { dataset: { poolDepositStatus: '' }, textContent: 'Deposits paused' }));
   card.append(new Element('span', { dataset: { poolCapacityStatus: '' } }));

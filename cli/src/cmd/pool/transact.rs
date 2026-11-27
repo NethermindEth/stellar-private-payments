@@ -305,6 +305,7 @@ mod tests {
                 leaf_index,
                 created_at_ledger: 1,
                 spent,
+                pending: false,
                 gvk_ciphertext: None,
             });
         let s = c.to_string();

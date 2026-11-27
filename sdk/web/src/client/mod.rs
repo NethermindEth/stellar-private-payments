@@ -84,6 +84,15 @@ fn refusal(cause: &Error) -> Option<(&'static str, Vec<(&'static str, BigInt)>)>
         ),
         Error::NotBalanced { gap } => ("NOT_BALANCED", vec![("gap", i128::from(*gap).into())]),
         Error::WithdrawalToContract => ("WITHDRAWAL_TO_CONTRACT", Vec::new()),
+        Error::TrustlineMissing { .. } => ("TRUSTLINE_MISSING", Vec::new()),
+        Error::RecipientTrustlineMissing { .. } => ("RECIPIENT_TRUSTLINE_MISSING", Vec::new()),
+        Error::InsufficientBalance { needed, available } => (
+            "INSUFFICIENT_BALANCE",
+            vec![
+                ("needed", u128::from(*needed).into()),
+                ("available", u128::from(*available).into()),
+            ],
+        ),
         _ => match cause.plan_error()? {
             PlanError::NoSpendableNotes => ("NO_SPENDABLE_NOTES", Vec::new()),
             PlanError::NoCombination { max_spend } => (
@@ -527,6 +536,43 @@ mod tests {
             property(&error, "code").as_deref(),
             Some("WITHDRAWAL_TO_CONTRACT")
         );
+    }
+
+    #[wasm_bindgen_test]
+    fn a_missing_trustline_carries_its_code_for_each_side() {
+        let error = pool_err(Error::TrustlineMissing {
+            account: "GPAYER".into(),
+            code: "EURC".into(),
+            issuer: "GISSUER".into(),
+        });
+        assert_eq!(
+            property(&error, "code").as_deref(),
+            Some("TRUSTLINE_MISSING")
+        );
+
+        let error = pool_err(Error::RecipientTrustlineMissing {
+            recipient: "GRECIPIENT".into(),
+            code: "EURC".into(),
+            issuer: "GISSUER".into(),
+        });
+        assert_eq!(
+            property(&error, "code").as_deref(),
+            Some("RECIPIENT_TRUSTLINE_MISSING")
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn a_deposit_the_account_cannot_pay_names_both_amounts() {
+        let error = pool_err(Error::InsufficientBalance {
+            needed: NoteAmount::from(11_000_000u128),
+            available: NoteAmount::from(4_000_000u128),
+        });
+        assert_eq!(
+            property(&error, "code").as_deref(),
+            Some("INSUFFICIENT_BALANCE")
+        );
+        assert_eq!(amount(&error, "needed"), Some(11_000_000));
+        assert_eq!(amount(&error, "available"), Some(4_000_000));
     }
 
     /// An estimate fails bare, a spend through its session, and a later step

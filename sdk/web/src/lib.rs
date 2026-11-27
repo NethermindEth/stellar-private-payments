@@ -14,7 +14,13 @@ mod deployment;
 mod models;
 mod signer;
 mod telemetry;
+#[cfg(target_arch = "wasm32")]
+mod wiping_alloc;
 pub mod workers;
+
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static ALLOCATOR: wiping_alloc::WipingAllocator = wiping_alloc::WipingAllocator;
 
 pub use bootnode::bootnode_required_js as bootnode_required;
 pub use client::{

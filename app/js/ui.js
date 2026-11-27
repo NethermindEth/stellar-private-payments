@@ -1,3 +1,4 @@
+import './frame-guard.js';
 import { LocalData } from './ui/local-data.js';
 import { Access } from './ui/access.js';
 import { Templates } from './ui/templates.js';

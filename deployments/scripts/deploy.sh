@@ -38,9 +38,12 @@ Options:
   --deployer NAME       Stellar identity or secret key used to deploy (required)
   --admin ADDRESS       Admin address (G... or C...). Defaults to deployer address
   --pool SPEC           Pool spec (repeatable). Optional prefixes per pool:
-                        [policy:][gvk-mode:]<ASSET-SPEC>
+                        [policy:][gvk-mode:][fee=N:][min=N:][max=N:]<ASSET-SPEC>
                         policy: none | allowlist | blocklist | allowlist-blocklist
                         gvk-mode: gvk-off | gvk-viewonly | gvk-traceable
+                        fee=N, min=N, max=N: this pool's fee, smallest deposit and
+                        maximum deposit, in its token's smallest unit, in any order.
+                        One left out takes --fee, --min-deposit or --max-deposit.
                         <ASSET-SPEC>:
                         native:<TOKEN_CONTRACT_ID>
                         classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>
@@ -54,11 +57,13 @@ Options:
                         File containing the same JSON object
   --asp-levels N        Merkle tree levels for asp-membership (required)
   --pool-levels N       Merkle tree levels for pool (required)
-  --fee N               Fee every transaction pays, in the token's smallest unit (required)
+  --fee N               Fee every transaction pays, in the token's smallest unit, in a
+                        pool whose spec sets no fee= (required)
   --min-deposit N       Smallest amount a deposit may leave in notes after the fee,
-                        in the token's smallest unit (required)
-  --max-deposit U256    Most a single deposit sends, fee included, in the token's smallest unit
+                        in the token's smallest unit, in a pool whose spec sets no min=
                         (required)
+  --max-deposit U256    Most a single deposit sends, fee included, in the token's smallest
+                        unit, in a pool whose spec sets no max= (required)
   --kdf-domain STRING   Privacy key derivation domain (required)
   --policy-flags SPEC   Default pool ASP policy when a --pool spec omits the prefix:
                         none, allowlist, blocklist, or allowlist-blocklist (required when
@@ -116,6 +121,18 @@ Examples:
     --gvk-authority-pubkey-file ./admin-pub.json \
     --pool blocklist:gvk-off:native:CB... \
     --pool blocklist:gvk-traceable:native:CB... \
+    --asp-levels 10 \
+    --pool-levels 20 \
+    --fee 1000000 \
+    --min-deposit 10000000 \
+    --max-deposit 1000000000 \
+    --kdf-domain Nethermind
+
+  # A classic-asset pool with its own fee and deposit limits beside a native pool
+  deployments/scripts/deploy.sh futurenet \
+    --deployer alice \
+    --pool blocklist:native:CB... \
+    --pool blocklist:fee=100000:min=10000000:max=1000000000:classic:ABC:GA...:CC... \
     --asp-levels 10 \
     --pool-levels 20 \
     --fee 1000000 \
@@ -311,15 +328,20 @@ is_asset_spec_prefix() {
 }
 
 # Sets POOL_SPEC_POLICY_SUFFIX, POOL_SPEC_GVK_MODE, POOL_SPEC_BODY, POOL_SPEC_HAS_POLICY_PREFIX,
-# POOL_SPEC_HAS_GVK_PREFIX for a --pool spec.
+# POOL_SPEC_HAS_GVK_PREFIX for a --pool spec, and POOL_SPEC_FEE, POOL_SPEC_MIN_DEPOSIT,
+# POOL_SPEC_MAX_DEPOSIT to what its fee=, min=, max= prefixes set, each empty when left out.
 resolve_pool_spec() {
   local spec="$1"
   local first="${spec%%:*}"
+  local key seen=""
   POOL_SPEC_POLICY_SUFFIX=""
   POOL_SPEC_GVK_MODE="off"
   POOL_SPEC_BODY=""
   POOL_SPEC_HAS_POLICY_PREFIX=false
   POOL_SPEC_HAS_GVK_PREFIX=false
+  POOL_SPEC_FEE=""
+  POOL_SPEC_MIN_DEPOSIT=""
+  POOL_SPEC_MAX_DEPOSIT=""
 
   local rest="$spec"
   if [[ "$rest" == *:* ]] && is_policy_flags_prefix "$first"; then
@@ -337,7 +359,40 @@ resolve_pool_spec() {
     fi
   fi
 
+  while [[ "$rest" == *:* ]]; do
+    first="${rest%%:*}"
+    case "$first" in
+      fee=*|min=*|max=*) ;;
+      *) break ;;
+    esac
+    key="${first%%=*}"
+    [[ " $seen " != *" $key "* ]] || die "invalid pool spec '$spec': $key= is set twice"
+    [[ -n "${first#*=}" ]] || die "invalid pool spec '$spec': $key= needs a value"
+    seen+=" $key"
+    case "$key" in
+      fee) POOL_SPEC_FEE="${first#*=}" ;;
+      min) POOL_SPEC_MIN_DEPOSIT="${first#*=}" ;;
+      max) POOL_SPEC_MAX_DEPOSIT="${first#*=}" ;;
+    esac
+    rest="${rest#*:}"
+  done
+
   POOL_SPEC_BODY="$rest"
+}
+
+# Dies unless FEE, MIN and MAX are whole numbers within the pool constructor's bounds, which this
+# mirrors before anything deploys. WHAT names the pool in the message.
+check_pool_amounts() {
+  local what="$1" fee="$2" min="$3" max="$4"
+  [[ "$fee" =~ ^[0-9]+$ && "$min" =~ ^[0-9]+$ && "$max" =~ ^[0-9]+$ ]] \
+    || die "$what: the fee, smallest deposit and maximum deposit must be whole numbers in the token's smallest unit"
+  # bc prints a negative difference.
+  [[ "$(bc <<<"2^256 - 1 - $max")" != -* ]] \
+    || die "$what: the maximum deposit $max must be at most 2^256 - 1"
+  [[ "$(bc <<<"2^127 - 1 - $fee - $min")" != -* ]] \
+    || die "$what: the fee $fee plus the smallest deposit $min must be at most 2^127 - 1"
+  [[ "$(bc <<<"$max - $fee - $min")" != -* ]] \
+    || die "$what: the fee $fee plus the smallest deposit $min must not exceed the maximum deposit $max"
 }
 
 # Stellar CLI sometimes prints contract ids wrapped in one or more layers of quotes.
@@ -516,12 +571,6 @@ need bc
 [[ "$FEE" =~ ^[0-9]+$ ]] || die "--fee must be a whole number in the token's smallest unit"
 [[ "$MIN_DEPOSIT" =~ ^[0-9]+$ ]] || die "--min-deposit must be a whole number in the token's smallest unit"
 [[ "$MAX_DEPOSIT" =~ ^[0-9]+$ ]] || die "--max-deposit must be a whole number in the token's smallest unit"
-# Mirror the pool constructor's bounds before anything deploys; bc prints a negative difference.
-[[ "$(bc <<<"2^256 - 1 - $MAX_DEPOSIT")" != -* ]] || die "--max-deposit must be at most 2^256 - 1"
-[[ "$(bc <<<"2^127 - 1 - $FEE - $MIN_DEPOSIT")" != -* ]] \
-  || die "--fee plus --min-deposit must be at most 2^127 - 1"
-[[ "$(bc <<<"$MAX_DEPOSIT - $FEE - $MIN_DEPOSIT")" != -* ]] \
-  || die "--fee plus --min-deposit must not exceed --max-deposit"
 [[ -n "$KDF_DOMAIN" ]] || die "--kdf-domain is required"
 
 if [[ -n "$VK_JSON" && -n "$VK_FILE" ]]; then
@@ -555,6 +604,9 @@ POOL_GVK_MODES=()
 POOL_VERIFIER_KEYS=()
 POOL_TOKEN_IDS=()
 POOL_ASSET_JSONS=()
+POOL_FEES=()
+POOL_MIN_DEPOSITS=()
+POOL_MAX_DEPOSITS=()
 NEEDS_GVK_POOL=false
 
 _ps_i=0
@@ -565,6 +617,10 @@ while [[ "$_ps_i" -lt "$_ps_len" ]]; do
   policy_suffix="$POOL_SPEC_POLICY_SUFFIX"
   gvk_mode="$POOL_SPEC_GVK_MODE"
   body="$(strip_surrounding_quotes "$POOL_SPEC_BODY")"
+  pool_fee="${POOL_SPEC_FEE:-$FEE}"
+  pool_min_deposit="${POOL_SPEC_MIN_DEPOSIT:-$MIN_DEPOSIT}"
+  pool_max_deposit="${POOL_SPEC_MAX_DEPOSIT:-$MAX_DEPOSIT}"
+  check_pool_amounts "pool spec '$spec'" "$pool_fee" "$pool_min_deposit" "$pool_max_deposit"
 
   if [[ "$POOL_SPEC_HAS_POLICY_PREFIX" == "false" ]]; then
     policy_suffix="$POLICY_FLAGS_SUFFIX"
@@ -575,7 +631,7 @@ while [[ "$_ps_i" -lt "$_ps_len" ]]; do
 
   asset_kind="${body%%:*}"
   if ! is_asset_spec_prefix "$asset_kind"; then
-    die "invalid pool spec '$spec': expected asset spec native:|classic: after optional policy:/gvk-mode: prefixes"
+    die "invalid pool spec '$spec': expected asset spec native:|classic: after optional policy:/gvk-mode:/fee=:/min=:/max=: prefixes"
   fi
   # Checks every token before deploying anything; `set -e` stops the script on a refusal.
   token_and_asset="$(parse_pool_spec "$body")"
@@ -591,6 +647,9 @@ while [[ "$_ps_i" -lt "$_ps_len" ]]; do
   POOL_VERIFIER_KEYS+=("$verifier_key")
   POOL_TOKEN_IDS+=("${token_and_asset%%$'\n'*}")
   POOL_ASSET_JSONS+=("${token_and_asset#*$'\n'}")
+  POOL_FEES+=("$pool_fee")
+  POOL_MIN_DEPOSITS+=("$pool_min_deposit")
+  POOL_MAX_DEPOSITS+=("$pool_max_deposit")
   _ps_i=$((_ps_i + 1))
 done
 
@@ -950,9 +1009,13 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
   gvk_mode="${POOL_GVK_MODES[$_pool_i]}"
   verifier_key="${POOL_VERIFIER_KEYS[$_pool_i]}"
   token_id="${POOL_TOKEN_IDS[$_pool_i]}"
+  pool_fee="${POOL_FEES[$_pool_i]}"
+  pool_min_deposit="${POOL_MIN_DEPOSITS[$_pool_i]}"
+  pool_max_deposit="${POOL_MAX_DEPOSITS[$_pool_i]}"
 
   pool_deployment_ledger="$(get_latest_ledger_seq)"
-  step "deploy pool ($(policy_suffix_label "$verifier_key"), gvk=$gvk_mode) for spec '$body'"
+  step "deploy pool ($(policy_suffix_label "$verifier_key"), gvk=$gvk_mode, fee=$pool_fee," \
+    "min=$pool_min_deposit, max=$pool_max_deposit) for spec '$body'"
   if [[ "$SKIP_INIT" != "true" ]]; then
     verifier_id="$(get_verifier_id "$verifier_key")"
     [[ -n "$verifier_id" ]] || die "internal error: missing verifier id for key '$verifier_key'"
@@ -962,8 +1025,8 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
         --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
         --asp-membership-wasm-hash "$ASP_MEMBERSHIP_WASM_HASH" \
         --asp-non-membership-wasm-hash "$ASP_NON_MEMBERSHIP_WASM_HASH" \
-        --fee "$FEE" --minimum-deposit-amount "$MIN_DEPOSIT" \
-        --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" \
+        --fee "$pool_fee" --minimum-deposit-amount "$pool_min_deposit" \
+        --maximum-deposit-amount "$pool_max_deposit" --levels "$POOL_LEVELS" \
         --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")" \
         --kdf-domain "$KDF_DOMAIN")"
     else
@@ -972,8 +1035,8 @@ while [[ "$_pool_i" -lt "$_pool_len" ]]; do
         --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
         --asp-membership-wasm-hash "$ASP_MEMBERSHIP_WASM_HASH" \
         --asp-non-membership-wasm-hash "$ASP_NON_MEMBERSHIP_WASM_HASH" \
-        --fee "$FEE" --minimum-deposit-amount "$MIN_DEPOSIT" \
-        --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" \
+        --fee "$pool_fee" --minimum-deposit-amount "$pool_min_deposit" \
+        --maximum-deposit-amount "$pool_max_deposit" --levels "$POOL_LEVELS" \
         --policy-flags "$(policy_flags_constructor_arg "$policy_suffix")" \
         --kdf-domain "$KDF_DOMAIN" \
         --admin-view-key "$GVK_AUTHORITY_PUB_KEY_COMPACT" \

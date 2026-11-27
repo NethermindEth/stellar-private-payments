@@ -15,6 +15,27 @@ use crate::{
     types::{PrivatePoolConfig, TransactionResult},
 };
 
+/// The native XLM balance of the account `address`, in stroops.
+///
+/// # Errors
+///
+/// Returns [`Error::AccountNotFound`] for an account that is not on the
+/// ledger.
+pub(crate) async fn native_balance(rpc: &RpcClient, address: &str) -> Result<u128, Error> {
+    match rpc.get_account(address).await {
+        Ok(entry) => u128::try_from(entry.balance).map_err(|_| {
+            Error::Other(anyhow::anyhow!(
+                "negative account balance: {}",
+                entry.balance
+            ))
+        }),
+        Err(RpcError::NotFound("Account", _)) => Err(Error::AccountNotFound {
+            address: address.to_string(),
+        }),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Stellar account session
 ///
 /// Construct via [`crate::Client::account`].
@@ -105,20 +126,7 @@ impl Account {
     /// for that.
     pub async fn balance(&self, asset: &AssetDescriptor) -> Result<u128, Error> {
         match asset {
-            AssetDescriptor::Native => {
-                match self.rpc.get_account(self.user_address.as_str()).await {
-                    Ok(entry) => u128::try_from(entry.balance).map_err(|_| {
-                        Error::Other(anyhow::anyhow!(
-                            "negative account balance: {}",
-                            entry.balance
-                        ))
-                    }),
-                    Err(RpcError::NotFound("Account", _)) => Err(Error::AccountNotFound {
-                        address: self.user_address.as_str().to_string(),
-                    }),
-                    Err(e) => Err(e.into()),
-                }
-            }
+            AssetDescriptor::Native => native_balance(&self.rpc, self.user_address.as_str()).await,
             AssetDescriptor::Classic { code, issuer } => Ok(self
                 .rpc
                 .get_trustline_balance(self.user_address.as_str(), code, issuer)

@@ -70,6 +70,9 @@ const NETWORK_PASSPHRASE: &str = "Test SDF Network ; September 2015";
 const LEDGER: u32 = 100;
 /// The owner's account sequence number on the scripted chain.
 const OWNER_SEQUENCE: i64 = 41;
+/// The owner's XLM on the scripted chain, in stroops: more than any deposit a
+/// test sends.
+const OWNER_BALANCE: i64 = 1_000_000_000;
 
 /// A [`PrivatePool`] and the handles that script and observe each stage.
 pub struct OfflinePool {
@@ -981,7 +984,7 @@ fn account_entry(address: &str, sequence: i64) -> Result<(String, Value)> {
     .to_xdr_base64(Limits::none())?;
     let entry = xdr::LedgerEntryData::Account(xdr::AccountEntry {
         account_id,
-        balance: 0,
+        balance: OWNER_BALANCE,
         seq_num: xdr::SequenceNumber(sequence),
         num_sub_entries: 0,
         inflation_dest: None,
