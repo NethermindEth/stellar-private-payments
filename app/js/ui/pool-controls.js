@@ -8,6 +8,7 @@
  * panel ids. A section keeps at most one explanation open; Escape closes it.
  * Selecting another pool rebuilds the tags, which closes it too, while a
  * refresh that leaves the pool and its controls as they were keeps it open.
+ * Under the tags, a quiet line gives the pool's tree room and notes total.
  *
  * @module ui/pool-controls
  */
@@ -15,6 +16,7 @@
 import { POOL_CONTROLS, poolControls } from '../pool-policy.js';
 import { App, Utils } from './core.js';
 import { el, svgEl } from './dom.js';
+import { PoolDepositStatus } from './pool-deposit-status.js';
 
 const TAG = 'chip min-h-11 gap-2 px-3.5 text-[13px] font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300/60 aria-expanded:ring-2';
 const PANEL = 'rounded-xl border border-white/10 bg-ink-850 p-3 text-sm leading-relaxed';
@@ -38,6 +40,7 @@ function sections() {
         scope: root.dataset.poolControls,
         tags: root.querySelector('[data-pool-controls-tags]'),
         panels: root.querySelector('[data-pool-controls-panels]'),
+        figures: root.querySelector('[data-pool-figures]'),
     }));
 }
 
@@ -101,6 +104,10 @@ function render(section) {
     const pool = Utils.selectedPool();
     const controls = pool ? poolControls(pool) : [];
     root.hidden = !pool;
+    if (section.figures) {
+        if (pool) PoolDepositStatus.renderFigures(section.figures, pool.poolContractId);
+        else section.figures.hidden = true;
+    }
     const shown = pool ? `${pool.poolContractId}|${controls.join(',')}` : '';
     if (root.dataset.shownPool === shown) return;
     section.pinned = null;
@@ -138,6 +145,7 @@ export const PoolControls = {
         const renderAll = () => all.forEach(render);
         App.events.addEventListener('pool:config', renderAll);
         App.events.addEventListener('pool:selected', renderAll);
+        App.events.addEventListener('pool:deposit-status', renderAll);
         renderAll();
     },
 };

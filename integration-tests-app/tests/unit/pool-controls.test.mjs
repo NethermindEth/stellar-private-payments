@@ -59,7 +59,9 @@ function section(scope) {
   tags.dataset.poolControlsTags = '';
   const panels = new Element('div');
   panels.dataset.poolControlsPanels = '';
-  root.append(new Element('h3'), tags, panels);
+  const figures = new Element('p');
+  figures.dataset.poolFigures = '';
+  root.append(new Element('h3'), tags, panels, figures);
   return root;
 }
 
@@ -74,6 +76,7 @@ globalThis.document = {
 const { App } = await import('../../../app/js/ui/core.js');
 const { POOL_CONTROLS } = await import('../../../app/js/pool-policy.js');
 const { PoolControls } = await import('../../../app/js/ui/pool-controls.js');
+const { PoolDepositStatus } = await import('../../../app/js/ui/pool-deposit-status.js');
 
 const XLM = { kind: 'native' };
 const pool = (poolContractId, policyFlags, gvkMode) => ({ poolContractId, asset: XLM, policyFlags, gvkMode });
@@ -260,5 +263,29 @@ test('index.html puts a Pool controls section under both token selectors', async
     const body = html.slice(start, html.indexOf('</section>', start));
     assert.match(body, /data-pool-controls-tags/);
     assert.match(body, /data-pool-controls-panels/);
+    assert.match(body, /data-pool-figures/);
   }
+});
+
+test('Move funds and Advanced show the selected pool\'s tree room and follow status changes', async () => {
+  const figuresOf = (root) => root.querySelector('[data-pool-figures]');
+  const pools = [BLOCKLIST, TRACEABLE];
+  // A 1024-leaf tree: 1000 leaves left is room for 500 transactions.
+  const nextIndex = { CA73: 24, CCIV: 1024 };
+  const sdk = { poolContractsData: async (contractId) => ({ pools: [{ contractId, depositsPaused: false, merkleCapacity: 1024n, merkleNextIndex: String(nextIndex[contractId]), notesTotal: contractId === 'CA73' ? 50n : undefined }] }) };
+  select(BLOCKLIST, pools);
+  for (const root of Object.values(roots)) assert.equal(figuresOf(root).hidden, true, 'hidden until the status is read');
+  await PoolDepositStatus.refresh(sdk);
+  for (const root of Object.values(roots)) {
+    assert.equal(figuresOf(root).textContent, 'Room for about 500 more transactions · 50 base units held in notes');
+    assert.equal(figuresOf(root).hidden, false);
+  }
+  select(TRACEABLE, pools);
+  for (const root of Object.values(roots)) assert.equal(figuresOf(root).textContent, 'Room for about 0 more transactions');
+  nextIndex.CCIV = 1022;
+  await PoolDepositStatus.refresh(sdk);
+  for (const root of Object.values(roots)) assert.equal(figuresOf(root).textContent, 'Room for about 1 more transaction');
+  select(null, []);
+  for (const root of Object.values(roots)) assert.equal(figuresOf(root).hidden, true);
+  PoolDepositStatus.clear();
 });
