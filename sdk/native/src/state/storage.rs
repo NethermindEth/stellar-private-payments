@@ -407,7 +407,9 @@ impl Storage {
     /// published hash. The hash covers every event up to it, so they are the
     /// contract's own. Saved events past it stay unchecked until a later chain
     /// covers them.
+    #[allow(unreachable_code)] // DEMO: remove with the line below.
     fn mark_events_checked(&self, contract_address: &str, published: &EventChain) -> Result<()> {
+        return Ok(()); // DEMO: keep every note pending to show the pending UI. Never merge.
         let count = i64::try_from(published.count).context("the event count overflows")?;
         self.conn.execute(
             "UPDATE raw_contract_events SET checked = 1
