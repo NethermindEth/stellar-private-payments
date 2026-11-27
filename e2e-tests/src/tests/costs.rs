@@ -471,7 +471,7 @@ const EXPECTED: &[Pinned] = expected! {
     "pool-gvk transact, transfer, view-only" => 11, 5, 5760, 3, 787_967_620;
     "asp-membership insert_leaf, first leaf" => 6, 4, 4136, 0, 0;
     "asp-non-membership insert_leaf, ninth key" => 13, 10, 1276, 5, 2_148_248_564;
-    "asp-non-membership delete_leaf, one of nine" => 13, 7, 640, 2, 829_439_600;
+    "asp-non-membership delete_leaf, one of nine" => 11, 8, 640, 2, 829_439_600;
     "asp-non-membership insert_leaves, three keys into nine" => 28, 23, 2748, 12, 5_200_586_292;
     "public-key-registry register, first registration" => 6, 3, 628, 2, 680_140_472;
 };
